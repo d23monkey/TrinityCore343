@@ -1066,7 +1066,7 @@ public:
                     }
                     break;
                 case EVENT_HORSEMEN_INTRO:
-                    switch(_currentHorsemenLine)
+                    switch (_currentHorsemenLine)
                     {
                         case 0: // To arms, ye roustabouts! We've got company!
                             if (Creature* korthazz = instance->GetCreature(_korthazzGUID))
