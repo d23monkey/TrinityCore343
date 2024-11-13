@@ -251,16 +251,16 @@ public:
                     return;
                 case NPC_LADY_BLAUMEUX:
                     _blaumeuxGUID = creature->GetGUID();
-                    return;
+                    break;
                 case NPC_SIR_ZELIEK:
                     _zeliekGUID = creature->GetGUID();
-                    return;
+                    break;
                 case NPC_BARON_RIVENDARE:
                     _rivendareGUID = creature->GetGUID();
-                    return;
+                    break;
                 case NPC_THANE_KORTHAZZ:
                     _korthazzGUID = creature->GetGUID();
-                    return;
+                    break;
                 case NPC_SAPPHIRON:
                     _sapphironGUID = creature->GetGUID();
                     return;
@@ -1296,6 +1296,7 @@ public:
     {
         if (InstanceScript* instance = player->GetInstanceScript())
         {
+            player->GetMap()->LoadGrid(2528.79f, -2948.58f); // Zeliek grid
             if (instance->GetBossState(BOSS_HORSEMAN) == DONE)
                 return false;
 
