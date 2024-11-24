@@ -1,5 +1,4 @@
-#
-# This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+# This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
 #
 # This file is free software; as a special exception the author gives
 # unlimited permission to copy and/or distribute it, with or without
@@ -8,21 +7,30 @@
 # This program is distributed in the hope that it will be useful, but
 # WITHOUT ANY WARRANTY, to the extent permitted by law; without even the
 # implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-#
 
 CollectSourceFiles(
   ${CMAKE_CURRENT_SOURCE_DIR}
-  PRIVATE_SOURCES)
+  PRIVATE_SOURCES
+  # Exclude
+  ${CMAKE_CURRENT_SOURCE_DIR}/PrecompiledHeaders)
 
-# Group sources
+if(USE_COREPCH)
+  set(PRIVATE_PCH_HEADER PrecompiledHeaders/sharedPCH.h)
+endif()
+
 GroupSources(${CMAKE_CURRENT_SOURCE_DIR})
 
+add_definitions(-DTRINITY_API_EXPORT_SHARED)
+
 add_library(shared
-  ${PRIVATE_SOURCES})
+  ${PRIVATE_SOURCES}
+)
 
 CollectIncludeDirectories(
   ${CMAKE_CURRENT_SOURCE_DIR}
-  PUBLIC_INCLUDES)
+  PUBLIC_INCLUDES
+  # Exclude
+  ${CMAKE_CURRENT_SOURCE_DIR}/PrecompiledHeaders)
 
 target_include_directories(shared
   PUBLIC
@@ -32,11 +40,31 @@ target_include_directories(shared
 
 target_link_libraries(shared
   PRIVATE
-    acore-core-interface
+    trinity-core-interface
   PUBLIC
-    database)
+    database
+    rapidjson
+    proto
+    zlib)
 
 set_target_properties(shared
-  PROPERTIES
-    FOLDER
-      "server")
+    PROPERTIES
+      FOLDER
+        "server")
+
+if(BUILD_SHARED_LIBS)
+  if(UNIX)
+    install(TARGETS shared
+      LIBRARY
+        DESTINATION lib)
+  elseif(WIN32)
+    install(TARGETS shared
+      RUNTIME
+        DESTINATION "${CMAKE_INSTALL_PREFIX}")
+  endif()
+endif()
+
+# Generate precompiled header
+if(USE_COREPCH)
+  add_cxx_pch(shared ${PRIVATE_PCH_HEADER})
+endif()

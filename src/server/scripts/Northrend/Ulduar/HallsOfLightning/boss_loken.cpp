@@ -1,263 +1,204 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "Player.h"
+/* ScriptData
+SDName: Boss Loken
+SD%Complete: 60%
+SDComment: Missing intro.
+SDCategory: Halls of Lightning
+EndScriptData */
+
+#include "ScriptMgr.h"
+#include "halls_of_lightning.h"
+#include "InstanceScript.h"
 #include "ScriptedCreature.h"
 #include "SpellScript.h"
-#include "SpellScriptLoader.h"
-#include "halls_of_lightning.h"
 
-enum LokenSpells
+enum Texts
 {
-    SPELL_ARC_LIGHTNING             = 52921,
-    SPELL_LIGHTNING_NOVA_N          = 52960,
-    SPELL_LIGHTNING_NOVA_H          = 59835,
-    SPELL_LIGHTNING_NOVA_VISUAL     = 56502,
-    SPELL_LIGHTNING_NOVA_THUNDERS   = 52663,
-
-    SPELL_PULSING_SHOCKWAVE_N       = 52961,
-    SPELL_PULSING_SHOCKWAVE_H       = 59836,
-
-    // Achievement
-    ACHIEVEMENT_TIMELY_DEATH        = 20384
+    SAY_INTRO_1                                   = 0,
+    SAY_INTRO_2                                   = 1,
+    SAY_AGGRO                                     = 2,
+    SAY_NOVA                                      = 3,
+    SAY_SLAY                                      = 4,
+    SAY_75HEALTH                                  = 5,
+    SAY_50HEALTH                                  = 6,
+    SAY_25HEALTH                                  = 7,
+    SAY_DEATH                                     = 8,
+    EMOTE_NOVA                                    = 9
 };
 
-enum Yells
+enum Spells
 {
-    SAY_INTRO_1                     = 0,
-    SAY_INTRO_2                     = 1,
-    SAY_AGGRO                       = 2,
-    SAY_NOVA                        = 3,
-    SAY_SLAY                        = 4,
-    SAY_75HEALTH                    = 5,
-    SAY_50HEALTH                    = 6,
-    SAY_25HEALTH                    = 7,
-    SAY_DEATH                       = 8,
-    EMOTE_NOVA                      = 9
+    SPELL_ARC_LIGHTNING                           = 52921,
+    SPELL_LIGHTNING_NOVA                          = 52960,
+
+    SPELL_PULSING_SHOCKWAVE_AURA                  = 59414
 };
 
-enum LokenEvents
+#define SPELL_PULSING_SHOCKWAVE DUNGEON_MODE<uint32>(52961,59836)
+
+enum Events
 {
-    EVENT_LIGHTNING_NOVA            = 1,
-    EVENT_SHOCKWAVE                 = 2,
-    EVENT_ARC_LIGHTNING             = 3,
-    EVENT_CHECK_HEALTH              = 4,
-    EVENT_AURA_REMOVE               = 5
+    EVENT_ARC_LIGHTNING = 1,
+    EVENT_LIGHTNING_NOVA,
+    EVENT_RESUME_PULSING_SHOCKWAVE,
+    EVENT_INTRO_DIALOGUE
 };
 
-class boss_loken : public CreatureScript
+enum Phases
 {
-public:
-    boss_loken() : CreatureScript("boss_loken") { }
+    // Phases are used to allow executing the intro event while UpdateVictim() returns false and convenience.
+    PHASE_INTRO = 1,
+    PHASE_NORMAL
+};
 
-    CreatureAI* GetAI(Creature* creature) const override
+enum Misc
+{
+    ACHIEV_TIMELY_DEATH_START_EVENT               = 20384
+};
+
+/*######
+## Boss Loken
+######*/
+
+struct boss_loken : public BossAI
+{
+    boss_loken(Creature* creature) : BossAI(creature, DATA_LOKEN)
     {
-        return GetHallsOfLightningAI<boss_lokenAI>(creature);
+        Initialize();
+        _isIntroDone = false;
     }
 
-    struct boss_lokenAI : public ScriptedAI
+    void Initialize()
     {
-        boss_lokenAI(Creature* creature) : ScriptedAI(creature)
-        {
-            m_pInstance = creature->GetInstanceScript();
-            if (m_pInstance)
-                isActive = m_pInstance->GetData(TYPE_LOKEN_INTRO);
-        }
+        _healthAmountModifier = 1;
+    }
 
-        InstanceScript* m_pInstance;
-        EventMap events;
+    void Reset() override
+    {
+        Initialize();
+        _Reset();
+    }
 
-        bool isActive;
-        uint32 IntroTimer;
-        uint8 HealthCheck;
+    void JustEngagedWith(Unit* who) override
+    {
+        BossAI::JustEngagedWith(who);
+        Talk(SAY_AGGRO);
+        events.SetPhase(PHASE_NORMAL);
+        events.ScheduleEvent(EVENT_ARC_LIGHTNING, 15s);
+        events.ScheduleEvent(EVENT_LIGHTNING_NOVA, 20s);
+        events.ScheduleEvent(EVENT_RESUME_PULSING_SHOCKWAVE, 1s);
+        instance->TriggerGameEvent(ACHIEV_TIMELY_DEATH_START_EVENT);
+    }
 
-        void MoveInLineOfSight(Unit*) override { }
+    void JustDied(Unit* /*killer*/) override
+    {
+        Talk(SAY_DEATH);
+        _JustDied();
+        instance->DoRemoveAurasDueToSpellOnPlayers(SPELL_PULSING_SHOCKWAVE_AURA, true, true);
+    }
 
-        void Reset() override
-        {
-            events.Reset();
-            if (m_pInstance)
-            {
-                m_pInstance->DoStopTimedAchievement(ACHIEVEMENT_TIMED_TYPE_EVENT, ACHIEVEMENT_TIMELY_DEATH);
-                m_pInstance->SetData(TYPE_LOKEN, NOT_STARTED);
-            }
-
-            HealthCheck = 75;
-            IntroTimer = 0;
-            me->RemoveAllAuras();
-
-            if (!isActive)
-            {
-                me->SetControlled(true, UNIT_STATE_STUNNED);
-                me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-            }
-            else
-            {
-                me->SetControlled(false, UNIT_STATE_STUNNED);
-                me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-            }
-        }
-
-        void JustEngagedWith(Unit*) override
-        {
-            me->SetInCombatWithZone();
-            Talk(SAY_AGGRO);
-
-            events.ScheduleEvent(EVENT_ARC_LIGHTNING, 10s);
-            events.ScheduleEvent(EVENT_SHOCKWAVE, 3s);
-            events.ScheduleEvent(EVENT_LIGHTNING_NOVA, 15s);
-
-            if (m_pInstance)
-            {
-                m_pInstance->SetData(TYPE_LOKEN, IN_PROGRESS);
-
-                if (me->GetMap()->IsHeroic())
-                    m_pInstance->DoStartTimedAchievement(ACHIEVEMENT_TIMED_TYPE_EVENT, ACHIEVEMENT_TIMELY_DEATH);
-            }
-        }
-
-        void JustDied(Unit*) override
-        {
-            Talk(SAY_DEATH);
-
-            if (m_pInstance)
-                m_pInstance->SetData(TYPE_LOKEN, DONE);
-        }
-
-        void LokenSpeach(bool hp)
-        {
-            if (hp)
-            {
-                switch (HealthCheck)
-                {
-                    case 75:
-                        Talk(SAY_75HEALTH);
-                        break;
-                    case 50:
-                        Talk(SAY_50HEALTH);
-                        break;
-                    case 25:
-                        Talk(SAY_25HEALTH);
-                        break;
-                }
-            }
-            else
-                Talk(SAY_NOVA);
-        }
-
-        void KilledUnit(Unit* victim) override
-        {
-            if (!victim->IsPlayer())
-                return;
-
+    void KilledUnit(Unit* who) override
+    {
+        if (who->GetTypeId() == TYPEID_PLAYER)
             Talk(SAY_SLAY);
-        }
+    }
 
-        void UpdateAI(uint32 diff) override
+    void MoveInLineOfSight(Unit* who) override
+    {
+        if (!_isIntroDone && me->IsValidAttackTarget(who) && me->IsWithinDistInMap(who, 40.0f))
         {
-            if (!isActive)
+            _isIntroDone = true;
+            Talk(SAY_INTRO_1);
+            events.ScheduleEvent(EVENT_INTRO_DIALOGUE, 20s, 0, PHASE_INTRO);
+        }
+        BossAI::MoveInLineOfSight(who);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (events.IsInPhase(PHASE_NORMAL) && !UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
             {
-                IntroTimer += diff;
-                if (IntroTimer > 5000 && IntroTimer < 10000)
-                {
-                    if (SelectTargetFromPlayerList(60))
-                    {
-                        Talk(SAY_INTRO_1);
-                        IntroTimer = 10000;
-                    }
-                    else
-                        IntroTimer = 0;
-                }
-
-                if (IntroTimer >= 30000 && IntroTimer < 40000)
-                {
-                    Talk(SAY_INTRO_2);
-                    IntroTimer = 40000;
-                }
-                if (IntroTimer >= 60000)
-                {
-                    isActive = true;
-                    if (m_pInstance)
-                        m_pInstance->SetData(TYPE_LOKEN_INTRO, 1);
-
-                    me->SetControlled(false, UNIT_STATE_STUNNED);
-                    me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-
-                    if (Player* target = SelectTargetFromPlayerList(80))
-                        AttackStart(target);
-                }
-
-                return;
-            }
-
-            //Return since we have no target
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
-            {
-                case EVENT_CHECK_HEALTH:
-                    if (HealthBelowPct(HealthCheck))
-                    {
-                        LokenSpeach(true);
-                        HealthCheck -= 25;
-                    }
-
-                    events.Repeat(1s);
+                case EVENT_ARC_LIGHTNING:
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
+                        DoCast(target, SPELL_ARC_LIGHTNING);
+                    events.ScheduleEvent(EVENT_ARC_LIGHTNING, 15s, 16s);
                     break;
                 case EVENT_LIGHTNING_NOVA:
-                    events.Repeat(15s);
-                    me->CastSpell(me, SPELL_LIGHTNING_NOVA_VISUAL, true);
-                    me->CastSpell(me, SPELL_LIGHTNING_NOVA_THUNDERS, true);
-
-                    events.DelayEvents(5s);
-                    events.ScheduleEvent(EVENT_AURA_REMOVE, me->GetMap()->IsHeroic() ? 4s : 5s);
-
-                    me->CastSpell(me, me->GetMap()->IsHeroic() ? SPELL_LIGHTNING_NOVA_H : SPELL_LIGHTNING_NOVA_N, false);
+                    Talk(SAY_NOVA);
+                    Talk(EMOTE_NOVA);
+                    DoCastAOE(SPELL_LIGHTNING_NOVA);
+                    me->RemoveAurasDueToSpell(SPELL_PULSING_SHOCKWAVE);
+                    events.ScheduleEvent(EVENT_RESUME_PULSING_SHOCKWAVE, DUNGEON_MODE(5s, 4s)); // Pause Pulsing Shockwave aura
+                    events.ScheduleEvent(EVENT_LIGHTNING_NOVA, 20s, 21s);
                     break;
-                case EVENT_SHOCKWAVE:
-                    me->CastSpell(me, me->GetMap()->IsHeroic() ? SPELL_PULSING_SHOCKWAVE_H : SPELL_PULSING_SHOCKWAVE_N, false);
+                case EVENT_RESUME_PULSING_SHOCKWAVE:
+                    DoCast(me, SPELL_PULSING_SHOCKWAVE_AURA, true);
+                    me->ClearUnitState(UNIT_STATE_CASTING); // Workaround to allow DoMeleeAttackIfReady work
+                    DoCast(me, SPELL_PULSING_SHOCKWAVE, true);
                     break;
-                case EVENT_ARC_LIGHTNING:
-                    if (Unit* target = SelectTargetFromPlayerList(100, SPELL_ARC_LIGHTNING))
-                        me->CastSpell(target, SPELL_ARC_LIGHTNING, false);
-
-                    events.Repeat(12s);
+                case EVENT_INTRO_DIALOGUE:
+                    Talk(SAY_INTRO_2);
+                    events.SetPhase(PHASE_NORMAL);
                     break;
-                case EVENT_AURA_REMOVE:
-                    me->RemoveAura(SPELL_LIGHTNING_NOVA_THUNDERS);
+                default:
                     break;
             }
-
-            DoMeleeAttackIfReady();
         }
-    };
+    }
+
+    void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
+    {
+        if (me->HealthBelowPctDamaged(100 - 25 * _healthAmountModifier, damage))
+        {
+            switch (_healthAmountModifier)
+            {
+                case 1:
+                    Talk(SAY_75HEALTH);
+                    break;
+                case 2:
+                    Talk(SAY_50HEALTH);
+                    break;
+                case 3:
+                    Talk(SAY_25HEALTH);
+                    break;
+                default:
+                    break;
+            }
+            ++_healthAmountModifier;
+        }
+    }
+
+    private:
+        uint32 _healthAmountModifier;
+        bool _isIntroDone;
 };
 
+// 52942, 59837 - Pulsing Shockwave
 class spell_loken_pulsing_shockwave : public SpellScript
 {
-    PrepareSpellScript(spell_loken_pulsing_shockwave);
-
     void CalculateDamage(SpellEffIndex /*effIndex*/)
     {
         if (!GetHitUnit())
@@ -276,6 +217,6 @@ class spell_loken_pulsing_shockwave : public SpellScript
 
 void AddSC_boss_loken()
 {
-    new boss_loken();
+    RegisterHallsOfLightningCreatureAI(boss_loken);
     RegisterSpellScript(spell_loken_pulsing_shockwave);
 }

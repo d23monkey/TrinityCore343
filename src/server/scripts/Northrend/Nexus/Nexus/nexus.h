@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,40 +20,49 @@
 
 #include "CreatureAIImpl.h"
 
+#define NexusScriptName "instance_nexus"
 #define DataHeader "NEX"
 
-#define NexusScriptName "instance_nexus"
+uint32 const EncounterCount = 5;
 
-enum eTypes
+enum NEXDataTypes
 {
-    DATA_MAGUS_TELESTRA_EVENT       = 0,
-    DATA_ANOMALUS_EVENT             = 1,
-    DATA_ORMOROK_EVENT              = 2,
-    DATA_KERISTRASZA_EVENT          = 3,
-    DATA_COMMANDER_EVENT            = 4,
-    DATA_TELESTRA_ORB               = 5,
-    DATA_ANOMALUS_ORB               = 6,
-    DATA_ORMOROK_ORB                = 7,
-    MAX_ENCOUNTERS                  = 8
+    DATA_COMMANDER                    = 0,
+    DATA_MAGUS_TELESTRA               = 1,
+    DATA_ANOMALUS                     = 2,
+    DATA_ORMOROK                      = 3,
+    DATA_KERISTRASZA                  = 4,
+
+    ANOMALUS_CONTAINMENT_SPHERE        = 5,
+    ORMOROKS_CONTAINMENT_SPHERE        = 6,
+    TELESTRAS_CONTAINMENT_SPHERE       = 7
 };
 
-enum Npcs
+enum NEXCreatureIds
 {
-    NPC_ALLIANCE_RANGER             = 26802,
-    NPC_ALLIANCE_BERSERKER          = 26800,
-    NPC_ALLIANCE_COMMANDER          = 27949,
-    NPC_ALLIANCE_CLERIC             = 26805,
-    NPC_HORDE_RANGER                = 26801,
-    NPC_HORDE_BERSERKER             = 26799,
-    NPC_HORDE_COMMANDER             = 27947,
-    NPC_HORDE_CLERIC                = 26803,
+    NPC_ANOMALUS                      = 26763,
+    NPC_KERISTRASZA                   = 26723,
 
-    NPC_COMMANDER_STOUTBEARD        = 26796,
-    NPC_COMMANDER_KOLURG            = 26798,
+    // Alliance
+    NPC_ALLIANCE_BERSERKER            = 26800,
+    NPC_ALLIANCE_RANGER               = 26802,
+    NPC_ALLIANCE_CLERIC               = 26805,
+    NPC_ALLIANCE_COMMANDER            = 27949,
+    NPC_COMMANDER_STOUTBEARD          = 26796,
 
-    GO_TELESTRA_SPHERE              = 188526,
-    GO_ANOMALUS_SPHERE              = 188527,
-    GO_ORMOROK_SPHERE               = 188528
+    // Horde
+    NPC_HORDE_BERSERKER               = 26799,
+    NPC_HORDE_RANGER                  = 26801,
+    NPC_HORDE_CLERIC                  = 26803,
+    NPC_HORDE_COMMANDER               = 27947,
+    NPC_COMMANDER_KOLURG              = 26798
+};
+
+enum NEXGameObjectIds
+{
+    GO_ANOMALUS_CONTAINMENT_SPHERE     = 188527,
+    GO_ORMOROKS_CONTAINMENT_SPHERE     = 188528,
+    GO_TELESTRAS_CONTAINMENT_SPHERE    = 188526
 };
 
 template <class AI, class T>
@@ -61,5 +70,8 @@ inline AI* GetNexusAI(T* obj)
 {
     return GetInstanceAI<AI>(obj, NexusScriptName);
 }
+
+#define RegisterNexusCreatureAI(ai_name) RegisterCreatureAIWithFactory(ai_name, GetNexusAI)
+#define RegisterNexusGameObjectAI(ai_name) RegisterGameObjectAIWithFactory(ai_name, GetNexusAI)
 
 #endif

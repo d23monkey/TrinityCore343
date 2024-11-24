@@ -1,324 +1,341 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+/* ScriptData
+SDName: Boss_Warchief_Kargath_Bladefist
+SD%Complete: 90
+SDComment:
+SDCategory: Hellfire Citadel, Shattered Halls
+EndScriptData */
+
+/* ContentData
+boss_warchief_kargath_bladefist
+EndContentData */
+
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
 #include "ScriptedCreature.h"
-#include "SpellScript.h"
-#include "SpellScriptLoader.h"
-#include "TaskScheduler.h"
 #include "shattered_halls.h"
 
 enum Says
 {
-    SAY_AGGRO                   = 0,
-    SAY_SLAY                    = 1,
-    SAY_DEATH                   = 2,
-    SAY_EVADE                   = 5
+    SAY_AGGRO                      = 0,
+    SAY_SLAY                       = 1,
+    SAY_DEATH                      = 2,
+
+    SAY_CALL_EXECUTIONER_A         = 3,
+    SAY_CALL_EXECUTIONER_H         = 4
 };
 
 enum Spells
 {
-    // Blade dance
-    SPELL_BLADE_DANCE_TARGETING = 30738,
-    SPELL_BLADE_DANCE_DMG       = 30739,
-    SPELL_BLADE_DANCE_CHARGE    = 30751,
-
-    // Warchief portal
-    SPELL_SUMMON_HEATHEN        = 30737,
-    SPELL_SUMMON_REAVER         = 30785,
-    SPELL_SUMMON_SHARPSHOOTER   = 30786
+     SPELL_BLADE_DANCE             = 30739,
+     H_SPELL_CHARGE                = 25821
 };
 
 enum Creatures
 {
-    NPC_SHATTERED_ASSASSIN      = 17695,
-    NPC_BLADE_DANCE_TARGET      = 20709
+    NPC_SHATTERED_ASSASSIN         = 17695,
+    NPC_HEARTHEN_GUARD             = 17621,
+    NPC_SHARPSHOOTER_GUARD         = 17622,
+    NPC_REAVER_GUARD               = 17623
 };
 
-enum PortalData
-{
-    DATA_START_FIGHT            = 1,
-    DATA_RESET_FIGHT            = 2
-};
+#define TARGET_NUM                   5
 
-std::array<uint32, 3> const summonSpells = { SPELL_SUMMON_HEATHEN, SPELL_SUMMON_REAVER, SPELL_SUMMON_SHARPSHOOTER };
-std::vector<Position> const assassinsPos =
-{
-    { 172.68164f, -80.65692f, 2.0834563f, 5.4279f },
-    { 167.8295f,  -86.55783f, 1.9949634f, 0.8118f },
-    { 287.0375f,  -88.17879f, 2.0663502f, 3.2490f },
-    { 292.1491f,  -82.25267f, 1.9973913f, 5.8568f }
-};
+float AssassEntrance[3] = { 275.136f, -84.29f, 2.3f  }; // y -8
+float AssassExit[3]     = { 184.233f, -84.29f, 2.3f  }; // y -8
+float AddsEntrance[3]   = { 306.036f, -84.29f, 1.93f };
 
-Position const kargathRespawnPos = { 231.25f, -83.6449f, 5.02341f };
-
-struct boss_warchief_kargath_bladefist : public BossAI
+class boss_warchief_kargath_bladefist : public CreatureScript
 {
-    boss_warchief_kargath_bladefist(Creature* creature) : BossAI(creature, DATA_KARGATH)
-    {
-        scheduler.SetValidator([this]
+    public:
+        boss_warchief_kargath_bladefist() : CreatureScript("boss_warchief_kargath_bladefist") { }
+
+        struct boss_warchief_kargath_bladefistAI : public BossAI
         {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
-    }
-
-    void InitializeAI() override
-    {
-        BossAI::InitializeAI();
-        if (instance)
-        {
-            if (Creature* executioner = ObjectAccessor::GetCreature(*me, instance->GetGuidData(DATA_EXECUTIONER)))
+            boss_warchief_kargath_bladefistAI(Creature* creature) : BossAI(creature, DATA_KARGATH)
             {
-                executioner->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
+                Initialize();
+                target_num = 0;
             }
-        }
-    }
 
-    void JustSummoned(Creature* summon) override
-    {
-        summons.Summon(summon);
-    }
+            void Initialize()
+            {
+                summoned = 2;
+                InBlade = false;
+                Wait_Timer = 0;
 
-    void SummonedCreatureDies(Creature* summon, Unit* /*killer*/) override
-    {
-        if (summon)
-        {
-            summon->SetVisible(false);
-            scheduler.Schedule(20s, [summon](TaskContext /*context*/)
+                Charge_timer = 0;
+                Blade_Dance_Timer = 45000;
+                Summon_Assistant_Timer = 30000;
+                Assassins_Timer = 5000;
+                resetcheck_timer = 5000;
+            }
+
+            void DoAction(int32 action) override
+            {
+                if (action == ACTION_EXECUTIONER_TAUNT)
                 {
-                    if (summon)
+                    switch (instance->GetData(DATA_TEAM_IN_INSTANCE))
                     {
-                        summon->Respawn(true);
-                        summon->SetVisible(true);
+                        case ALLIANCE:
+                            Talk(SAY_CALL_EXECUTIONER_A);
+                            break;
+                        case HORDE:
+                            Talk(SAY_CALL_EXECUTIONER_H);
+                            break;
+                        default:
+                            break;
                     }
-                });
-        }
-    }
-
-    void RespawnAssassins()
-    {
-        for (Position const& summonPos : assassinsPos)
-            me->SummonCreature(NPC_SHATTERED_ASSASSIN, summonPos);
-    }
-
-    void Reset() override
-    {
-        BossAI::Reset();
-        if (Creature* warchiefPortal = instance->GetCreature(DATA_WARCHIEF_PORTAL))
-            warchiefPortal->AI()->SetData(DATA_RESET_FIGHT, 0);
-        _danceCount = 0;
-    }
-
-    void JustDied(Unit* killer) override
-    {
-        Talk(SAY_DEATH);
-        BossAI::JustDied(killer);
-        if (Creature* warchiefPortal = instance->GetCreature(DATA_WARCHIEF_PORTAL))
-            warchiefPortal->AI()->SetData(DATA_RESET_FIGHT, 0);
-        if (instance)
-        {
-            if (Creature* executioner = ObjectAccessor::GetCreature(*me, instance->GetGuidData(DATA_EXECUTIONER)))
-            {
-                executioner->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
+                }
             }
-        }
-    }
 
-    void JustEngagedWith(Unit* who) override
-    {
-        Talk(SAY_AGGRO);
-        BossAI::JustEngagedWith(who);
-        if (Creature* warchiefPortal = instance->GetCreature(DATA_WARCHIEF_PORTAL))
-            warchiefPortal->AI()->SetData(DATA_START_FIGHT, 0);
-        RespawnAssassins();
-        scheduler
-            .Schedule(30s, [this](TaskContext context)
-                {
-                    me->SetReactState(REACT_PASSIVE);
-                    _danceCount = 0;
-                    DoCastAOE(SPELL_BLADE_DANCE_TARGETING);
-                    context.Repeat(32850ms, 41350ms);
-                });
-    }
-
-    void KilledUnit(Unit* victim) override
-    {
-        if (victim && victim->IsPlayer())
-            Talk(SAY_SLAY);
-    }
-
-    void MovementInform(uint32 type, uint32 /*id*/) override
-    {
-        if (type != POINT_MOTION_TYPE)
-            return;
-
-        if (_danceCount < 8)
-        {
-            _danceCount++;
-            scheduler.Schedule(100ms, [this](TaskContext /*context*/)
-                {
-                    DoCastAOE(SPELL_BLADE_DANCE_TARGETING);
-                });
-        }
-        else
-            me->SetReactState(REACT_AGGRESSIVE);
-    }
-
-    bool IsInRoom()
-    {
-        if (me->GetExactDist2d(kargathRespawnPos) >= 42.f)
-            return false;
-        return true;
-    }
-
-    void UpdateAI(uint32 diff) override
-    {
-        if (!IsInRoom())
-        {
-            Talk(SAY_EVADE);
-            EnterEvadeMode();
-            return;
-        }
-
-        if (!UpdateVictim())
-            return;
-
-        scheduler.Update(diff, [this]
+            void Reset() override
             {
-                DoMeleeAttackIfReady();
-            });
-    }
+                removeAdds();
+                _Reset();
+                me->SetSpeedRate(MOVE_RUN, 2);
+                me->SetWalk(false);
 
-    protected:
-        uint8 _danceCount;
-};
+                Initialize();
+            }
 
-struct npc_warchief_portal : public ScriptedAI
-{
-public:
-    npc_warchief_portal(Creature* creature) : ScriptedAI(creature) { }
+            void JustDied(Unit* /*killer*/) override
+            {
+                _JustDied();
+                Talk(SAY_DEATH);
+                removeAdds();
+            }
 
-    void UpdateAI(uint32 diff) override
-    {
-        _scheduler.Update(diff);
-    }
+            void JustEngagedWith(Unit* /*who*/) override
+            {
+                Talk(SAY_AGGRO);
+            }
 
-    void JustSummoned(Creature* creature) override
-    {
-        InstanceScript* instance = me->GetInstanceScript();
-        if (!instance)
-            return;
-
-        if (Creature* kargath = instance->GetCreature(DATA_KARGATH))
-            kargath->AI()->JustSummoned(creature);
-    }
-
-    void SetData(uint32 type, uint32 /*data*/) override
-    {
-        if (type == DATA_START_FIGHT)
-        {
-            _scheduler.Schedule(20600ms, [this](TaskContext context)
+            void JustSummoned(Creature* summon) override
+            {
+                switch (summon->GetEntry())
                 {
-                    DoCastSelf(summonSpells[context.GetRepeatCounter() % 3]);
-                    context.Repeat();
-                });
-        }
+                    case NPC_HEARTHEN_GUARD:
+                    case NPC_SHARPSHOOTER_GUARD:
+                    case NPC_REAVER_GUARD:
+                        summon->AI()->AttackStart(SelectTarget(SelectTargetMethod::Random, 0));
+                        adds.push_back(summon->GetGUID());
+                        break;
+                    case NPC_SHATTERED_ASSASSIN:
+                        assassins.push_back(summon->GetGUID());
+                        break;
+                }
+            }
 
-        if (type == DATA_RESET_FIGHT)
-        {
-            _scheduler.CancelAll();
-        }
-    }
-
-protected:
-    TaskScheduler _scheduler;
-};
-
-class spell_blade_dance_targeting : public SpellScript
-{
-    PrepareSpellScript(spell_blade_dance_targeting);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_BLADE_DANCE_CHARGE, SPELL_BLADE_DANCE_DMG });
-    }
-
-    void FilterTargets(std::list<WorldObject*>& targets)
-    {
-        Unit* caster = GetCaster();
-        if (!caster)
-            return;
-
-        targets.remove_if([&](WorldObject* target) -> bool
+            void KilledUnit(Unit* victim) override
             {
-                float dist = caster->GetDistance2d(target);
-                // Do not target dummies that are too close or too far away
-                if (dist < 5.f || dist > 16.f)
-                    return true;
-                // Do not target anything that is not a target dummy
-                if (target->GetEntry() != NPC_BLADE_DANCE_TARGET)
-                    return true;
+                if (victim->GetTypeId() == TYPEID_PLAYER)
+                {
+                    Talk(SAY_SLAY);
+                }
+            }
 
-                return false;
-            });
-
-        std::list<WorldObject*> targets2 = targets;
-
-        targets.remove_if([&](WorldObject* target) -> bool
+            void MovementInform(uint32 type, uint32 id) override
             {
-                if (target->SelectNearestPlayer(15.f))
-                    return false;
-                return true;
-            });
+                if (InBlade)
+                {
+                    if (type != POINT_MOTION_TYPE)
+                        return;
 
-        Acore::Containers::RandomResize(targets2, 1);
+                    if (id != 1)
+                        return;
 
-        if (urand(0, 2))
+                    if (target_num > 0) // to prevent loops
+                    {
+                        Wait_Timer = 1;
+                        DoCast(me, SPELL_BLADE_DANCE, true);
+                        target_num--;
+                    }
+                }
+            }
+
+            void removeAdds()
+            {
+                for (GuidVector::const_iterator itr = adds.begin(); itr!= adds.end(); ++itr)
+                {
+                    Creature* creature = ObjectAccessor::GetCreature(*me, *itr);
+                    if (creature && creature->IsAlive())
+                        creature->DespawnOrUnsummon();
+                }
+                adds.clear();
+
+                for (GuidVector::const_iterator itr = assassins.begin(); itr!= assassins.end(); ++itr)
+                {
+                    Creature* creature = ObjectAccessor::GetCreature(*me, *itr);
+                    if (creature && creature->IsAlive())
+                        creature->DespawnOrUnsummon();
+                }
+                assassins.clear();
+            }
+            void SpawnAssassin()
+            {
+                me->SummonCreature(NPC_SHATTERED_ASSASSIN, AssassEntrance[0], AssassEntrance[1]+8, AssassEntrance[2], 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 30s);
+                me->SummonCreature(NPC_SHATTERED_ASSASSIN, AssassEntrance[0], AssassEntrance[1]-8, AssassEntrance[2], 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 30s);
+                me->SummonCreature(NPC_SHATTERED_ASSASSIN, AssassExit[0], AssassExit[1]+8, AssassExit[2], 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 30s);
+                me->SummonCreature(NPC_SHATTERED_ASSASSIN, AssassExit[0], AssassExit[1]-8, AssassExit[2], 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 30s);
+            }
+
+            void UpdateAI(uint32 diff) override
+            {
+                //Return since we have no target
+                if (!UpdateVictim())
+                    return;
+
+                if (Assassins_Timer)
+                {
+                    if (Assassins_Timer <= diff)
+                    {
+                        SpawnAssassin();
+                        Assassins_Timer = 0;
+                    }
+                    else
+                        Assassins_Timer -= diff;
+                }
+
+                if (InBlade)
+                {
+                    if (Wait_Timer)
+                    {
+                        if (Wait_Timer <= diff)
+                        {
+                            if (target_num <= 0)
+                            {
+                                // stop bladedance
+                                InBlade = false;
+                                me->SetSpeedRate(MOVE_RUN, 2);
+                                me->GetMotionMaster()->MoveChase(me->GetVictim());
+                                Blade_Dance_Timer = 30000;
+                                Wait_Timer = 0;
+                                if (IsHeroic())
+                                    Charge_timer = 5000;
+                            }
+                            else
+                            {
+                                //move in bladedance
+                                float x, y, randx, randy;
+                                randx = 0.0f + rand32() % 40;
+                                randy = 0.0f + rand32() % 40;
+                                x = 210+ randx;
+                                y = -60- randy;
+                                me->GetMotionMaster()->MovePoint(1, x, y, me->GetPositionZ());
+                                Wait_Timer = 0;
+                            }
+                        }
+                        else
+                            Wait_Timer -= diff;
+                    }
+                }
+                else
+                {
+                    if (Blade_Dance_Timer)
+                    {
+                        if (Blade_Dance_Timer <= diff)
+                        {
+                            target_num = TARGET_NUM;
+                            Wait_Timer = 1;
+                            InBlade = true;
+                            Blade_Dance_Timer = 0;
+                            me->SetSpeedRate(MOVE_RUN, 4);
+                            return;
+                        }
+                        else
+                            Blade_Dance_Timer -= diff;
+                    }
+
+                    if (Charge_timer)
+                    {
+                        if (Charge_timer <= diff)
+                        {
+                            DoCast(SelectTarget(SelectTargetMethod::Random, 0), H_SPELL_CHARGE);
+                            Charge_timer = 0;
+                        }
+                        else
+                            Charge_timer -= diff;
+                    }
+
+                    if (Summon_Assistant_Timer <= diff)
+                    {
+                        for (uint8 i = 0; i < summoned; ++i)
+                        {
+                            switch (urand(0, 2))
+                            {
+                                case 0:
+                                    me->SummonCreature(NPC_HEARTHEN_GUARD, AddsEntrance[0], AddsEntrance[1], AddsEntrance[2], 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 30s);
+                                    break;
+                                case 1:
+                                    me->SummonCreature(NPC_SHARPSHOOTER_GUARD, AddsEntrance[0], AddsEntrance[1], AddsEntrance[2], 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 30s);
+                                    break;
+                                case 2:
+                                    me->SummonCreature(NPC_REAVER_GUARD, AddsEntrance[0], AddsEntrance[1], AddsEntrance[2], 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 30s);
+                                    break;
+                            }
+                        }
+                        if (urand(0, 9) < 2)
+                            ++summoned;
+                        Summon_Assistant_Timer = urand(25000, 35000);
+                    }
+                    else
+                        Summon_Assistant_Timer -= diff;
+                }
+
+                if (resetcheck_timer <= diff)
+                {
+                    uint32 tempx = uint32(me->GetPositionX());
+                    if (tempx > 255 || tempx < 205)
+                    {
+                        EnterEvadeMode();
+                        return;
+                    }
+                    resetcheck_timer = 5000;
+                }
+                else
+                    resetcheck_timer -= diff;
+            }
+
+            private:
+                GuidVector adds;
+                GuidVector assassins;
+                uint32 Charge_timer;
+                uint32 Blade_Dance_Timer;
+                uint32 Summon_Assistant_Timer;
+                uint32 resetcheck_timer;
+                uint32 Wait_Timer;
+                uint32 Assassins_Timer;
+                uint32 summoned;
+                uint32 target_num;
+                bool InBlade;
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
         {
-            if (targets.empty())
-                targets = targets2;
-            else
-                Acore::Containers::RandomResize(targets, 1);
+            return GetShatteredHallsAI<boss_warchief_kargath_bladefistAI>(creature);
         }
-        else
-            targets = targets2;
-    }
-
-    void HandleOnHit()
-    {
-        Unit* caster = GetCaster();
-        Unit* target = GetHitUnit();
-        if (!caster || !target)
-            return;
-
-        caster->CastSpell(target, SPELL_BLADE_DANCE_CHARGE, true);
-        caster->CastSpell(target, SPELL_BLADE_DANCE_DMG, true);
-    }
-
-    void Register() override
-    {
-        OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_blade_dance_targeting::FilterTargets, EFFECT_0, TARGET_UNIT_SRC_AREA_ENTRY);
-        OnHit += SpellHitFn(spell_blade_dance_targeting::HandleOnHit);
-    }
 };
 
 void AddSC_boss_warchief_kargath_bladefist()
 {
-    RegisterShatteredHallsCreatureAI(boss_warchief_kargath_bladefist);
-    RegisterShatteredHallsCreatureAI(npc_warchief_portal);
-    RegisterSpellScript(spell_blade_dance_targeting);
+    new boss_warchief_kargath_bladefist();
 }

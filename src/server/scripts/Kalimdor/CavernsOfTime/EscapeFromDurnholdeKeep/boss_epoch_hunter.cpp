@@ -1,89 +1,132 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
+/* ScriptData
+SDName: Boss_Epoch_Hunter
+SD%Complete: 60
+SDComment: Missing spawns pre-event, missing speech to be coordinated with rest of escort event.
+SDCategory: Caverns of Time, Old Hillsbrad Foothills
+EndScriptData */
+
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
 #include "old_hillsbrad.h"
+#include "ScriptedCreature.h"
 
-enum Text
-{
-    SAY_AGGRO                    = 5,
-    SAY_SLAY                     = 6,
-    SAY_BREATH                   = 7,
-    SAY_DEATH                    = 8
-};
+/*###################
+# boss_epoch_hunter #
+####################*/
 
-enum Spells
+enum EpochHunter
 {
-    SPELL_SAND_BREATH            = 31914,
-    SPELL_IMPENDING_DEATH        = 31916,
-    SPELL_MAGIC_DISRUPTION_AURA  = 33834,
-    SPELL_WING_BUFFET            = 31475
+    SAY_ENTER                   = 0,
+    SAY_AGGRO                   = 1,
+    SAY_SLAY                    = 2,
+    SAY_BREATH                  = 3,
+    SAY_DEATH                   = 4,
+
+    SPELL_SAND_BREATH           = 31914,
+    SPELL_IMPENDING_DEATH       = 31916,
+    SPELL_MAGIC_DISRUPTION_AURA = 33834,
+    SPELL_WING_BUFFET           = 31475
 };
 
 struct boss_epoch_hunter : public BossAI
 {
-    boss_epoch_hunter(Creature* creature) : BossAI(creature, DATA_EPOCH_HUNTER) { }
-
-    void JustEngagedWith(Unit* /*who*/) override
+    boss_epoch_hunter(Creature* creature) : BossAI(creature, DATA_EPOCH_HUNTER)
     {
-        _JustEngagedWith();
-        Talk(SAY_AGGRO);
-        scheduler.Schedule(8s, [this](TaskContext context)
-        {
-            if (roll_chance_i(50))
-            {
-                Talk(SAY_BREATH);
-            }
-            DoCastVictim(SPELL_SAND_BREATH);
-            context.Repeat(20s);
-        }).Schedule(2s, [this](TaskContext context)
-        {
-            DoCastVictim(SPELL_IMPENDING_DEATH);
-            context.Repeat(30s);
-        }).Schedule(20s, [this](TaskContext context)
-        {
-            DoCastSelf(SPELL_MAGIC_DISRUPTION_AURA);
-            context.Repeat(30s);
-        }).Schedule(14s, [this](TaskContext context)
-        {
-            DoCastSelf(SPELL_WING_BUFFET);
-            context.Repeat(30s);
-        });
+        Initialize();
     }
 
-    void KilledUnit(Unit* victim) override
+    void Initialize()
     {
-        if (victim->IsPlayer())
-            Talk(SAY_SLAY);
+        SandBreath_Timer = urand(8000, 16000);
+        ImpendingDeath_Timer = urand(25000, 30000);
+        WingBuffet_Timer = 35000;
+        Mda_Timer = 40000;
+    }
+
+    uint32 SandBreath_Timer;
+    uint32 ImpendingDeath_Timer;
+    uint32 WingBuffet_Timer;
+    uint32 Mda_Timer;
+
+    void Reset() override
+    {
+        BossAI::Reset();
+        Initialize();
+    }
+
+    void JustEngagedWith(Unit* who) override
+    {
+        BossAI::JustEngagedWith(who);
+        Talk(SAY_AGGRO);
+    }
+
+    void KilledUnit(Unit* /*victim*/) override
+    {
+        Talk(SAY_SLAY);
     }
 
     void JustDied(Unit* killer) override
     {
-        if (killer && killer == me)
+        BossAI::JustDied(killer);
+        Talk(SAY_DEATH);
+
+        instance->SetData(TYPE_THRALL_EVENT, OH_ESCORT_FINISHED);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        //Return since we have no target
+        if (!UpdateVictim())
             return;
 
-        _JustDied();
-        Talk(SAY_DEATH);
-        me->GetInstanceScript()->SetData(DATA_ESCORT_PROGRESS, ENCOUNTER_PROGRESS_EPOCH_KILLED);
-        if (Creature* taretha = ObjectAccessor::GetCreature(*me, me->GetInstanceScript()->GetGuidData(DATA_TARETHA_GUID)))
+        //Sand Breath
+        if (SandBreath_Timer <= diff)
         {
-            taretha->AI()->DoAction(me->GetEntry());
-        }
+            if (me->IsNonMeleeSpellCast(false))
+                me->InterruptNonMeleeSpells(false);
+
+            DoCastVictim(SPELL_SAND_BREATH);
+
+            Talk(SAY_BREATH);
+
+            SandBreath_Timer = urand(10000, 20000);
+        } else SandBreath_Timer -= diff;
+
+        if (ImpendingDeath_Timer <= diff)
+        {
+            DoCastVictim(SPELL_IMPENDING_DEATH);
+            ImpendingDeath_Timer = 25000 + rand32() % 5000;
+        } else ImpendingDeath_Timer -= diff;
+
+        if (WingBuffet_Timer <= diff)
+        {
+            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
+                DoCast(target, SPELL_WING_BUFFET);
+            WingBuffet_Timer = 25000 + rand32() % 10000;
+        } else WingBuffet_Timer -= diff;
+
+        if (Mda_Timer <= diff)
+        {
+            DoCast(me, SPELL_MAGIC_DISRUPTION_AURA);
+            Mda_Timer = 15000;
+        } else Mda_Timer -= diff;
     }
 };
 

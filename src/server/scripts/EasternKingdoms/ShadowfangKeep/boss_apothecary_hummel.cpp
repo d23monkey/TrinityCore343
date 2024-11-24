@@ -1,281 +1,272 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
+#include "Containers.h"
 #include "GridNotifiersImpl.h"
 #include "Group.h"
+#include "InstanceScript.h"
 #include "LFGMgr.h"
+#include "Map.h"
+#include "MotionMaster.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
 #include "ScriptedGossip.h"
-#include "SpellAuraEffects.h"
-#include "SpellScript.h"
-#include "SpellScriptLoader.h"
-#include "TaskScheduler.h"
 #include "shadowfang_keep.h"
+#include "SpellScript.h"
 
 enum ApothecarySpells
 {
-    SPELL_ALLURING_PERFUME      = 68589,
-    SPELL_PERFUME_SPRAY         = 68607,
-    SPELL_CHAIN_REACTION        = 68821,
-    SPELL_SUMMON_TABLE          = 69218,
-    SPELL_PERMANENT_FEIGN_DEATH = 29266,
-    SPELL_QUIET_SUICIDE         = 3617,
-    SPELL_COLOGNE_SPRAY         = 68948,
-    SPELL_VALIDATE_AREA         = 68644,
-    SPELL_THROW_COLOGNE         = 68841,
-    SPELL_BUNNY_LOCKDOWN        = 69039,
-    SPELL_THROW_PERFUME         = 68799,
-    SPELL_PERFUME_SPILL         = 68798,
-    SPELL_COLOGNE_SPILL         = 68614,
-    SPELL_PERFUME_SPILL_DAMAGE  = 68927,
-    SPELL_COLOGNE_SPILL_DAMAGE  = 68934
+    SPELL_ALLURING_PERFUME       = 68589,
+    SPELL_PERFUME_SPRAY          = 68607,
+    SPELL_CHAIN_REACTION         = 68821,
+    SPELL_SUMMON_TABLE           = 69218,
+    SPELL_PERMANENT_FEIGN_DEATH  = 29266,
+    SPELL_QUIET_SUICIDE          = 3617,
+    SPELL_COLOGNE_SPRAY          = 68948,
+    SPELL_VALIDATE_AREA          = 68644,
+    SPELL_THROW_COLOGNE          = 68841,
+    SPELL_BUNNY_LOCKDOWN         = 69039,
+    SPELL_THROW_PERFUME          = 68799,
+    SPELL_PERFUME_SPILL          = 68798,
+    SPELL_COLOGNE_SPILL          = 68614,
+    SPELL_PERFUME_SPILL_DAMAGE   = 68927,
+    SPELL_COLOGNE_SPILL_DAMAGE   = 68934
 };
 
 enum ApothecarySays
 {
-    SAY_INTRO_0         = 0,
-    SAY_INTRO_1         = 1,
-    SAY_INTRO_2         = 2,
-    SAY_CALL_BAXTER     = 3,
-    SAY_CALL_FRYE       = 4,
-    SAY_HUMMEL_DEATH    = 5,
-    SAY_SUMMON_ADDS     = 6,
-    SAY_BAXTER_DEATH    = 0,
-    SAY_FRYE_DEATH      = 0
+    SAY_INTRO_0      = 0,
+    SAY_INTRO_1      = 1,
+    SAY_INTRO_2      = 2,
+    SAY_CALL_BAXTER  = 3,
+    SAY_CALL_FRYE    = 4,
+    SAY_HUMMEL_DEATH = 5,
+    SAY_SUMMON_ADDS  = 6,
+    SAY_BAXTER_DEATH = 0,
+    SAY_FRYE_DEATH   = 0
+};
+
+enum ApothecaryEvents
+{
+    EVENT_HUMMEL_SAY_0 = 1,
+    EVENT_HUMMEL_SAY_1,
+    EVENT_HUMMEL_SAY_2,
+    EVENT_START_FIGHT,
+    EVENT_CHAIN_REACTION,
+    EVENT_PERFUME_SPRAY,
+    EVENT_COLOGNE_SPRAY,
+    EVENT_CALL_BAXTER,
+    EVENT_CALL_FRYE
 };
 
 enum ApothecaryMisc
 {
-    ACTION_START_EVENT      = 1,
-    ACTION_START_FIGHT      = 2,
-    GOSSIP_OPTION_START     = 0,
-    GOSSIP_MENU_HUMMEL      = 10847,
-    QUEST_YOUVE_BEEN_SERVED = 14488,
-    NPC_APOTHECARY_FRYE     = 36272,
-    NPC_APOTHECARY_BAXTER   = 36565,
-    NPC_VIAL_BUNNY          = 36530,
-    NPC_CROWN_APOTHECARY    = 36885,
-    PHASE_ALL               = 0,
-    PHASE_INTRO             = 1,
-    PHASE_COMBAT            = 2
+    ACTION_START_EVENT          = 1,
+    ACTION_START_FIGHT          = 2,
+    GOSSIP_OPTION_START         = 0,
+    GOSSIP_MENU_HUMMEL          = 10847,
+    QUEST_YOUVE_BEEN_SERVED     = 14488,
+    NPC_APOTHECARY_FRYE         = 36272,
+    NPC_APOTHECARY_BAXTER       = 36565,
+    NPC_VIAL_BUNNY              = 36530,
+    NPC_CROWN_APOTHECARY        = 36885,
+    PHASE_ALL                   = 0,
+    PHASE_INTRO                 = 1
 };
 
 Position const BaxterMovePos = { -221.4115f, 2206.825f, 79.93151f, 0.0f };
-Position const FryeMovePos   = { -196.2483f, 2197.224f, 79.9315f, 0.0f };
+Position const FryeMovePos = { -196.2483f, 2197.224f, 79.9315f, 0.0f };
 
-class boss_apothecary_hummel : public CreatureScript
+struct boss_apothecary_hummel : public BossAI
 {
-public:
-    boss_apothecary_hummel() : CreatureScript("boss_apothecary_hummel") { }
+    boss_apothecary_hummel(Creature* creature) : BossAI(creature, DATA_APOTHECARY_HUMMEL), _deadCount(0), _isDead(false) { }
 
-    struct boss_apothecary_hummelAI : public BossAI
+    bool OnGossipSelect(Player* player, uint32 menuId, uint32 gossipListId) override
     {
-        boss_apothecary_hummelAI(Creature* creature) : BossAI(creature, DATA_APOTHECARY_HUMMEL), _deadCount(0), _isDead(false)
+        if (menuId == GOSSIP_MENU_HUMMEL && gossipListId == GOSSIP_OPTION_START)
         {
-            scheduler.SetValidator([this]
-            {
-                return !me->HasUnitState(UNIT_STATE_CASTING);
-            });
+            me->RemoveNpcFlag(UNIT_NPC_FLAG_GOSSIP);
+            CloseGossipMenuFor(player);
+            DoAction(ACTION_START_EVENT);
         }
+        return false;
+    }
 
-        void sGossipSelect(Player* player, uint32 menuId, uint32 gossipListId) override
+    void Reset() override
+    {
+        _Reset();
+        _deadCount = 0;
+        _isDead = false;
+        events.SetPhase(PHASE_ALL);
+        me->SetFaction(FACTION_FRIENDLY);
+        me->SummonCreatureGroup(1);
+    }
+
+    void EnterEvadeMode(EvadeReason /*why*/) override
+    {
+        summons.DespawnAll();
+        _EnterEvadeMode();
+        _DespawnAtEvade(Seconds(10));
+    }
+
+    void DoAction(int32 action) override
+    {
+        if (action == ACTION_START_EVENT && events.IsInPhase(PHASE_ALL))
         {
-            if (menuId == GOSSIP_MENU_HUMMEL && gossipListId == GOSSIP_OPTION_START)
+            events.SetPhase(PHASE_INTRO);
+            events.ScheduleEvent(EVENT_HUMMEL_SAY_0, Milliseconds(1));
+
+            me->SetImmuneToPC(true);
+            me->SetFaction(FACTION_MONSTER);
+            DummyEntryCheckPredicate pred;
+            summons.DoAction(ACTION_START_EVENT, pred);
+        }
+    }
+
+    void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
+    {
+        if (damage >= me->GetHealth())
+            if (_deadCount < 2)
             {
-                me->RemoveNpcFlag(UNIT_NPC_FLAG_GOSSIP);
-                CloseGossipMenuFor(player);
-                DoAction(ACTION_START_EVENT);
+                damage = me->GetHealth() - 1;
+                if (!_isDead)
+                {
+                    _isDead = true;
+                    me->RemoveAurasDueToSpell(SPELL_ALLURING_PERFUME);
+                    DoCastSelf(SPELL_PERMANENT_FEIGN_DEATH, true);
+                    me->SetUninteractible(true);
+                    Talk(SAY_HUMMEL_DEATH);
+                }
             }
-        }
+    }
 
-        void Reset() override
-        {
-            _Reset();
-            _deadCount = 0;
-            _isDead = false;
-            _phase = PHASE_ALL;
-            me->SetFaction(FACTION_FRIENDLY);
-            me->SummonCreatureGroup(1);
-            me->SetNpcFlag(UNIT_NPC_FLAG_GOSSIP);
-        }
+    void SummonedCreatureDies(Creature* summon, Unit* /*killer*/) override
+    {
+        if (summon->GetEntry() == NPC_APOTHECARY_FRYE || summon->GetEntry() == NPC_APOTHECARY_BAXTER)
+            _deadCount++;
 
-        void DoAction(int32 action) override
+        if (me->HasAura(SPELL_PERMANENT_FEIGN_DEATH) && _deadCount == 2)
+            DoCastSelf(SPELL_QUIET_SUICIDE, true);
+    }
+
+    void JustDied(Unit* /*killer*/) override
+    {
+        if (!_isDead)
+            Talk(SAY_HUMMEL_DEATH);
+
+        events.Reset();
+        me->SetUninteractible(false);
+        instance->SetBossState(DATA_APOTHECARY_HUMMEL, DONE);
+
+        Map::PlayerList const& players = me->GetMap()->GetPlayers();
+        if (!players.isEmpty())
         {
-            if (action == ACTION_START_EVENT && _phase == PHASE_ALL)
+            if (Group* group = players.begin()->GetSource()->GetGroup())
+                if (group->isLFGGroup())
+                    sLFGMgr->FinishDungeon(group->GetGUID(), 288, me->GetMap());
+        }
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim() && !events.IsInPhase(PHASE_INTRO))
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
             {
-                _phase = PHASE_INTRO;
-                scheduler.Schedule(1ms, [this](TaskContext /*context*/)
-                {
+                case EVENT_HUMMEL_SAY_0:
                     Talk(SAY_INTRO_0);
-                })
-                .Schedule(4s, [this](TaskContext /*context*/)
-                {
+                    events.ScheduleEvent(EVENT_HUMMEL_SAY_1, Seconds(4));
+                    break;
+                case EVENT_HUMMEL_SAY_1:
                     Talk(SAY_INTRO_1);
-                })
-                .Schedule(8s, [this](TaskContext /*context*/)
-                {
+                    events.ScheduleEvent(EVENT_HUMMEL_SAY_2, Seconds(4));
+                    break;
+                case EVENT_HUMMEL_SAY_2:
                     Talk(SAY_INTRO_2);
-                })
-                .Schedule(12s, [this](TaskContext context)
+                    events.ScheduleEvent(EVENT_START_FIGHT, 4s);
+                    break;
+                case EVENT_START_FIGHT:
                 {
                     me->SetImmuneToAll(false);
-                    _phase = PHASE_COMBAT;
                     DoZoneInCombat();
+                    events.ScheduleEvent(EVENT_CALL_BAXTER, 6s);
+                    events.ScheduleEvent(EVENT_CALL_FRYE, 14s);
+                    events.ScheduleEvent(EVENT_PERFUME_SPRAY, Milliseconds(3640));
+                    events.ScheduleEvent(EVENT_CHAIN_REACTION, 15s);
 
-                    context.Schedule(6s, [this](TaskContext /*context*/) // Call Baxter
-                    {
-                        Talk(SAY_CALL_BAXTER);
-                        EntryCheckPredicate pred(NPC_APOTHECARY_BAXTER);
-                        summons.DoAction(ACTION_START_FIGHT, pred);
-                        summons.DoZoneInCombat(NPC_APOTHECARY_BAXTER);
-                    })
-                    .Schedule(14s, [this](TaskContext /*context*/) // Call Frye
-                    {
-                        Talk(SAY_CALL_FRYE);
-                        EntryCheckPredicate pred(NPC_APOTHECARY_FRYE);
-                        summons.DoAction(ACTION_START_FIGHT, pred);
-                    })
-                    .Schedule(3640ms, [this](TaskContext context) // Perfume spray
-                    {
-                        DoCastVictim(SPELL_PERFUME_SPRAY);
-                        context.Repeat(3640ms);
-                    })
-                    .Schedule(15s, [this](TaskContext context) // Chain Reaction
-                    {
-                        DoCastVictim(SPELL_SUMMON_TABLE, true);
-                        DoCastAOE(SPELL_CHAIN_REACTION);
-                        context.Repeat(25s);
-                    })
-                    .Schedule(15s, [this](TaskContext /*context*/) // Call Crazed Apothecary (text)
-                    {
-                        Talk(SAY_SUMMON_ADDS);
-                    })
-                    .Schedule(15s, [this](TaskContext context) // Call Crazed Apothecary
-                    {
-                        instance->SetData(DATA_SPAWN_VALENTINE_ADDS, 0);
-                        context.Repeat(4s, 6s);
-                    });
-
-                    std::list<Creature*> trashs;
-                    me->GetCreatureListWithEntryInGrid(trashs, NPC_CROWN_APOTHECARY, 100.f);
+                    Talk(SAY_SUMMON_ADDS);
+                    std::vector<Creature*> trashs;
+                    me->GetCreatureListWithEntryInGrid(trashs, NPC_CROWN_APOTHECARY);
                     for (Creature* crea : trashs)
-                    {
                         crea->DespawnOrUnsummon();
-                    }
-                });
 
-                me->SetImmuneToPC(true);
-                me->SetFaction(FACTION_MONSTER);
-                summons.DoAction(ACTION_START_EVENT);
-            }
-        }
-
-        void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType, SpellSchoolMask) override
-        {
-            if (damage >= me->GetHealth())
-            {
-                if (_deadCount < 2)
-                {
-                    damage = me->GetHealth() - 1;
-                    if (!_isDead)
-                    {
-                        _isDead = true;
-                        me->RemoveAurasDueToSpell(SPELL_ALLURING_PERFUME);
-                        DoCastSelf(SPELL_PERMANENT_FEIGN_DEATH, true);
-                        me->SetUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
-                        Talk(SAY_HUMMEL_DEATH);
-                    }
+                    break;
                 }
-            }
-        }
-
-        void SummonedCreatureDies(Creature* summon, Unit* /*killer*/) override
-        {
-            if (summon->GetEntry() == NPC_APOTHECARY_FRYE || summon->GetEntry() == NPC_APOTHECARY_BAXTER)
-            {
-                _deadCount++;
-            }
-
-            if (me->HasAura(SPELL_PERMANENT_FEIGN_DEATH) && _deadCount == 2)
-            {
-                DoCastSelf(SPELL_QUIET_SUICIDE, true);
-            }
-        }
-
-        void JustDied(Unit* /*killer*/) override
-        {
-            if (!_isDead)
-            {
-                Talk(SAY_HUMMEL_DEATH);
-            }
-
-            _JustDied();
-            me->RemoveUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
-
-            Map::PlayerList const& players = me->GetMap()->GetPlayers();
-            if (!players.IsEmpty())
-            {
-                if (Group* group = players.begin()->GetSource()->GetGroup())
+                case EVENT_CALL_BAXTER:
                 {
-                    if (group->isLFGGroup())
-                    {
-                        sLFGMgr->FinishDungeon(group->GetGUID(), 288, me->GetMap());
-                    }
+                    Talk(SAY_CALL_BAXTER);
+                    EntryCheckPredicate pred(NPC_APOTHECARY_BAXTER);
+                    summons.DoAction(ACTION_START_FIGHT, pred);
+                    summons.DoZoneInCombat(NPC_APOTHECARY_BAXTER);
+                    break;
                 }
+                case EVENT_CALL_FRYE:
+                {
+                    Talk(SAY_CALL_FRYE);
+                    EntryCheckPredicate pred(NPC_APOTHECARY_FRYE);
+                    summons.DoAction(ACTION_START_FIGHT, pred);
+                    break;
+                }
+                case EVENT_PERFUME_SPRAY:
+                    DoCastVictim(SPELL_PERFUME_SPRAY);
+                    events.Repeat(Milliseconds(3640));
+                    break;
+                case EVENT_CHAIN_REACTION:
+                    DoCastVictim(SPELL_SUMMON_TABLE, true);
+                    DoCastAOE(SPELL_CHAIN_REACTION);
+                    events.Repeat(Seconds(25));
+                    break;
+                default:
+                    break;
             }
-        }
 
-        void UpdateAI(uint32 diff) override
-        {
-            if (!UpdateVictim() && _phase != PHASE_INTRO)
-            {
+            if (me->HasUnitState(UNIT_STATE_CASTING))
                 return;
-            }
-
-            scheduler.Update(diff, [this]
-            {
-                DoMeleeAttackIfReady();
-            });
         }
+    }
+
+    void OnQuestReward(Player* /*player*/, Quest const* quest, LootItemType /*type*/, uint32 /*opt*/) override
+    {
+        if (quest->GetQuestId() == QUEST_YOUVE_BEEN_SERVED)
+            DoAction(ACTION_START_EVENT);
+    }
 
     private:
         uint8 _deadCount;
         bool _isDead;
-        uint8 _phase;
-    };
-
-    bool OnQuestReward(Player* /*player*/, Creature* creature, const Quest* quest, uint32 /*slot*/) override
-    {
-        if (quest->GetQuestId() == QUEST_YOUVE_BEEN_SERVED)
-        {
-            if (creature && creature->AI())
-            {
-                creature->AI()->DoAction(ACTION_START_EVENT);
-            }
-        }
-        return true;
-    }
-
-    CreatureAI* GetAI(Creature* creature) const override
-    {
-        return new boss_apothecary_hummelAI(creature);
-    }
 };
 
 struct npc_apothecary_genericAI : public ScriptedAI
@@ -300,9 +291,7 @@ struct npc_apothecary_genericAI : public ScriptedAI
     void MovementInform(uint32 type, uint32 pointId) override
     {
         if (type == POINT_MOTION_TYPE && pointId == 1)
-        {
-            me->SetUInt32Value(UNIT_NPC_EMOTESTATE, EMOTE_STATE_USE_STANDING);
-        }
+            me->SetEmoteState(EMOTE_STATE_USE_STANDING);
     }
 
 protected:
@@ -321,57 +310,57 @@ struct npc_apothecary_frye : public npc_apothecary_genericAI
 
 struct npc_apothecary_baxter : public npc_apothecary_genericAI
 {
-    npc_apothecary_baxter(Creature* creature) : npc_apothecary_genericAI(creature, BaxterMovePos)
-    {
-        _scheduler.SetValidator([this]
-        {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
-    }
+    npc_apothecary_baxter(Creature* creature) : npc_apothecary_genericAI(creature, BaxterMovePos) { }
 
     void Reset() override
     {
-        _scheduler.CancelAll();
-        _scheduler.Schedule(7s, [this](TaskContext context)
-        {
-            DoCastVictim(SPELL_COLOGNE_SPRAY);
-            context.Repeat(4s);
-        })
-        .Schedule(12s, [this](TaskContext context)
-        {
-            DoCastVictim(SPELL_SUMMON_TABLE);
-            DoCastVictim(SPELL_CHAIN_REACTION);
-            context.Repeat(25s);
-        });
+        _events.Reset();
+        _events.ScheduleEvent(EVENT_COLOGNE_SPRAY, 7s);
+        _events.ScheduleEvent(EVENT_CHAIN_REACTION, 12s);
     }
 
     void JustDied(Unit* /*killer*/) override
     {
+        _events.Reset();
         Talk(SAY_BAXTER_DEATH);
     }
 
     void UpdateAI(uint32 diff) override
     {
         if (!UpdateVictim())
-        {
             return;
-        }
 
-        _scheduler.Update(diff, [this]
+        _events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = _events.ExecuteEvent())
         {
-            DoMeleeAttackIfReady();
-        });
+            switch (eventId)
+            {
+                case EVENT_COLOGNE_SPRAY:
+                    DoCastVictim(SPELL_COLOGNE_SPRAY);
+                    _events.Repeat(Seconds(4));
+                    break;
+                case EVENT_CHAIN_REACTION:
+                    DoCastVictim(SPELL_SUMMON_TABLE);
+                    DoCastVictim(SPELL_CHAIN_REACTION);
+                    _events.Repeat(Seconds(25));
+                    break;
+                default:
+                    break;
+            }
+        }
     }
 
 private:
-    TaskScheduler _scheduler;
+    EventMap _events;
 };
 
 // 68965 - [DND] Lingering Fumes Targetting (starter)
 class spell_apothecary_lingering_fumes : public SpellScript
 {
-    PrepareSpellScript(spell_apothecary_lingering_fumes);
-
     void HandleAfterCast()
     {
         Unit* caster = GetCaster();
@@ -383,7 +372,7 @@ class spell_apothecary_lingering_fumes : public SpellScript
         if (triggers.empty())
             return;
 
-        Creature* trigger = Acore::Containers::SelectRandomContainerElement(triggers);
+        Creature* trigger = Trinity::Containers::SelectRandomContainerElement(triggers);
         caster->GetMotionMaster()->MovePoint(0, trigger->GetPosition());
 
     }
@@ -404,20 +393,13 @@ class spell_apothecary_lingering_fumes : public SpellScript
 // 68644 - [DND] Valentine Boss Validate Area
 class spell_apothecary_validate_area : public SpellScript
 {
-    PrepareSpellScript(spell_apothecary_validate_area);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_BUNNY_LOCKDOWN, SPELL_THROW_COLOGNE, SPELL_THROW_PERFUME });
-    }
-
     void FilterTargets(std::list<WorldObject*>& targets)
     {
-        targets.remove_if(Acore::UnitAuraCheck(true, SPELL_BUNNY_LOCKDOWN));
+        targets.remove_if(Trinity::UnitAuraCheck(true, SPELL_BUNNY_LOCKDOWN));
         if (targets.empty())
             return;
 
-        WorldObject* target = Acore::Containers::SelectRandomContainerElement(targets);
+        WorldObject* target = Trinity::Containers::SelectRandomContainerElement(targets);
         targets.clear();
         targets.push_back(target);
     }
@@ -438,13 +420,6 @@ class spell_apothecary_validate_area : public SpellScript
 // 69038 - Throw Cologne
 class spell_apothecary_throw_cologne : public SpellScript
 {
-    PrepareSpellScript(spell_apothecary_throw_cologne);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_COLOGNE_SPILL });
-    }
-
     void HandleScript(SpellEffIndex /*effindex*/)
     {
         GetHitUnit()->CastSpell(GetHitUnit(), SPELL_COLOGNE_SPILL, true);
@@ -459,13 +434,6 @@ class spell_apothecary_throw_cologne : public SpellScript
 // 68966 - Throw Perfume
 class spell_apothecary_throw_perfume : public SpellScript
 {
-    PrepareSpellScript(spell_apothecary_throw_perfume);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_PERFUME_SPILL });
-    }
-
     void HandleScript(SpellEffIndex /*effindex*/)
     {
         GetHitUnit()->CastSpell(GetHitUnit(), SPELL_PERFUME_SPILL, true);
@@ -480,13 +448,6 @@ class spell_apothecary_throw_perfume : public SpellScript
 // 68798 - Concentrated Alluring Perfume Spill
 class spell_apothecary_perfume_spill : public AuraScript
 {
-    PrepareAuraScript(spell_apothecary_perfume_spill);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_PERFUME_SPILL_DAMAGE });
-    }
-
     void OnPeriodic(AuraEffect const* /*aurEff*/)
     {
         GetTarget()->CastSpell(GetTarget(), SPELL_PERFUME_SPILL_DAMAGE, true);
@@ -501,13 +462,6 @@ class spell_apothecary_perfume_spill : public AuraScript
 // 68614 - Concentrated Irresistible Cologne Spill
 class spell_apothecary_cologne_spill : public AuraScript
 {
-    PrepareAuraScript(spell_apothecary_cologne_spill);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_COLOGNE_SPILL_DAMAGE });
-    }
-
     void OnPeriodic(AuraEffect const* /*aurEff*/)
     {
         GetTarget()->CastSpell(GetTarget(), SPELL_COLOGNE_SPILL_DAMAGE, true);
@@ -521,7 +475,7 @@ class spell_apothecary_cologne_spill : public AuraScript
 
 void AddSC_boss_apothecary_hummel()
 {
-    new boss_apothecary_hummel();
+    RegisterShadowfangKeepCreatureAI(boss_apothecary_hummel);
     RegisterShadowfangKeepCreatureAI(npc_apothecary_baxter);
     RegisterShadowfangKeepCreatureAI(npc_apothecary_frye);
     RegisterSpellScript(spell_apothecary_lingering_fumes);

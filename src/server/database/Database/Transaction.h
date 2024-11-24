@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,16 +18,29 @@
 #ifndef _TRANSACTION_H
 #define _TRANSACTION_H
 
-#include "DatabaseEnvFwd.h"
 #include "Define.h"
-#include "SQLOperation.h"
+#include "DatabaseEnvFwd.h"
 #include "StringFormat.h"
 #include <functional>
 #include <mutex>
+#include <variant>
 #include <vector>
 
+class MySQLConnection;
+
+struct TransactionData
+{
+    std::variant<std::unique_ptr<PreparedStatementBase>, std::string> query;
+
+    template<typename... Args>
+    TransactionData(Args&&... args) : query(std::forward<Args>(args)...) { }
+
+    static PreparedStatementBase* ToExecutable(std::unique_ptr<PreparedStatementBase> const& stmt) { return stmt.get(); }
+    static char const* ToExecutable(std::string const& sql) { return sql.c_str(); }
+};
+
 /*! Transactions, high level class. */
-class AC_DATABASE_API TransactionBase
+class TC_DATABASE_API TransactionBase
 {
     friend class TransactionTask;
     friend class MySQLConnection;
@@ -35,27 +48,30 @@ class AC_DATABASE_API TransactionBase
     template <typename T>
     friend class DatabaseWorkerPool;
 
-public:
-    TransactionBase()  = default;
-    virtual ~TransactionBase() { Cleanup(); }
+    public:
+        TransactionBase() : _cleanedUp(false) { }
+        TransactionBase(TransactionBase const&) = delete;
+        TransactionBase(TransactionBase &&) noexcept = default;
+        TransactionBase& operator=(TransactionBase const&) = delete;
+        TransactionBase& operator=(TransactionBase &&) noexcept = default;
+        virtual ~TransactionBase() { Cleanup(); }
 
-    void Append(std::string_view sql);
+        void Append(char const* sql);
+        template<typename... Args>
+        void PAppend(Trinity::FormatString<Args...> sql, Args&&... args)
+        {
+            Append(Trinity::StringFormat(sql, std::forward<Args>(args)...).c_str());
+        }
 
-    template<typename... Args>
-    void Append(std::string_view sql, Args&&... args)
-    {
-        Append(Acore::StringFormat(sql, std::forward<Args>(args)...));
-    }
+        std::size_t GetSize() const { return m_queries.size(); }
 
-    [[nodiscard]] std::size_t GetSize() const { return m_queries.size(); }
+    protected:
+        void AppendPreparedStatement(PreparedStatementBase* statement);
+        void Cleanup();
+        std::vector<TransactionData> m_queries;
 
-protected:
-    void AppendPreparedStatement(PreparedStatementBase* statement);
-    void Cleanup();
-    std::vector<SQLElementData> m_queries;
-
-private:
-    bool _cleanedUp{false};
+    private:
+        bool _cleanedUp;
 };
 
 template<typename T>
@@ -63,7 +79,6 @@ class Transaction : public TransactionBase
 {
 public:
     using TransactionBase::Append;
-
     void Append(PreparedStatement<T>* statement)
     {
         AppendPreparedStatement(statement);
@@ -71,41 +86,18 @@ public:
 };
 
 /*! Low level class*/
-class AC_DATABASE_API TransactionTask : public SQLOperation
+class TC_DATABASE_API TransactionTask
 {
-    template <class T>
-    friend class DatabaseWorkerPool;
-
-    friend class DatabaseWorker;
-    friend class TransactionCallback;
-
 public:
-    TransactionTask(std::shared_ptr<TransactionBase> trans) : m_trans(std::move(trans)) { }
-    ~TransactionTask() override = default;
+    static bool Execute(MySQLConnection* conn, std::shared_ptr<TransactionBase> trans);
 
-protected:
-    bool Execute() override;
-    int TryExecute();
-    void CleanupOnFailure();
+private:
+    static int TryExecute(MySQLConnection* conn, std::shared_ptr<TransactionBase> trans);
 
-    std::shared_ptr<TransactionBase> m_trans;
     static std::mutex _deadlockLock;
 };
 
-class AC_DATABASE_API TransactionWithResultTask : public TransactionTask
-{
-public:
-    TransactionWithResultTask(std::shared_ptr<TransactionBase> trans) : TransactionTask(trans) { }
-
-    TransactionFuture GetFuture() { return m_result.get_future(); }
-
-protected:
-    bool Execute() override;
-
-    TransactionPromise m_result;
-};
-
-class AC_DATABASE_API TransactionCallback
+class TC_DATABASE_API TransactionCallback
 {
 public:
     TransactionCallback(TransactionFuture&& future) : m_future(std::move(future)) { }

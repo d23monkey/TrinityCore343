@@ -1,86 +1,98 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef DEF_UTGARDE_KEEP_H
-#define DEF_UTGARDE_KEEP_H
+#ifndef UTGARDE_KEEP_H_
+#define UTGARDE_KEEP_H_
 
 #include "CreatureAIImpl.h"
 
-#define UtgardeKeepScriptName "instance_utgarde_keep"
+#define UKScriptName "instance_utgarde_keep"
+#define DataHeader "UK"
 
-enum eData
+uint32 const EncounterCount = 3;
+
+enum UKDataTypes
 {
-    DATA_KELESETH,
-    DATA_DALRONN_AND_SKARVALD,
-    DATA_INGVAR,
-    MAX_ENCOUNTER,
-    DATA_FORGE_EVENT_MASK,
-    DATA_DALRONN,
-    DATA_SKARVALD,
-    DATA_DALRONN_GHOST,
-    DATA_SKARVALD_GHOST,
-    DATA_DARK_RANGER_MARRAH,
-    DATA_ON_THE_ROCKS_ACHIEV,
+    // Encounter States/Boss GUIDs
+    DATA_PRINCE_KELESETH    = 0,
+    DATA_SKARVALD_DALRONN   = 1,
+    DATA_INGVAR             = 2,
 
-    DATA_SPECIAL_DRAKE = 50,
+    // Additional Data
+    DATA_SKARVALD           = 3,
+    DATA_DALRONN            = 4,
 
-    DATA_FORGE_1 = 100,
-    DATA_FORGE_2,
-    DATA_FORGE_3,
-
-    DATA_UNLOCK_SKARVALD_LOOT = 200,
-    DATA_UNLOCK_DALRONN_LOOT,
+    DATA_FORGE_1            = 5,
+    DATA_FORGE_2            = 6,
+    DATA_FORGE_3            = 7
 };
 
-enum eGameObject
+enum UKCreatureIds
 {
-    GO_BELLOW_1                     = 186688,
-    GO_BELLOW_2                     = 186689,
-    GO_BELLOW_3                     = 186690,
+    NPC_PRINCE_KELESETH     = 23953,
+    NPC_SKARVALD            = 24200,
+    NPC_DALRONN             = 24201,
+    NPC_INGVAR              = 23954,
 
-    GO_FORGEFIRE_1                  = 186692,
-    GO_FORGEFIRE_2                  = 186693,
-    GO_FORGEFIRE_3                  = 186691,
+    // Skarvald - Dalronn
+    NPC_DALRONN_GHOST       = 27389,
+    NPC_SKARVALD_GHOST      = 27390,
 
-    GO_GLOWING_ANVIL_1              = 186609,
-    GO_GLOWING_ANVIL_2              = 186610,
-    GO_GLOWING_ANVIL_3              = 186611,
-
-    GO_GIANT_PORTCULLIS_1           = 186756,
-    GO_GIANT_PORTCULLIS_2           = 186694,
+    // Ingvar the Plunderer
+    NPC_INGVAR_UNDEAD       = 23980,
+    NPC_THROW_TARGET        = 23996,
+    NPC_ANNHYLDE_THE_CALLER = 24068
 };
 
-enum eCreatures
+enum UKGameObjectIds
 {
-    NPC_KELESETH                    = 23953,
-    NPC_DALRONN                     = 24201,
-    NPC_DALRONN_GHOST               = 27389,
-    NPC_SKARVALD                    = 24200,
-    NPC_SKARVALD_GHOST              = 27390,
-    NPC_INGVAR                      = 23954,
+    GO_BELLOW_1             = 186688,
+    GO_BELLOW_2             = 186689,
+    GO_BELLOW_3             = 186690,
 
-    NPC_DARK_RANGER_MARRAH          = 24137,
-    NPC_ENSLAVED_PROTO_DRAKE        = 24083,
+    GO_FORGEFIRE_1          = 186692,
+    GO_FORGEFIRE_2          = 186693,
+    GO_FORGEFIRE_3          = 186691,
+
+    GO_GLOWING_ANVIL_1      = 186609,
+    GO_GLOWING_ANVIL_2      = 186610,
+    GO_GLOWING_ANVIL_3      = 186611,
+
+    GO_GIANT_PORTCULLIS_1   = 186756,
+    GO_GIANT_PORTCULLIS_2   = 186694
+};
+
+struct ForgeInfo
+{
+    ForgeInfo() : Event(NOT_STARTED) { };
+
+    ObjectGuid AnvilGUID;
+    ObjectGuid BellowGUID;
+    ObjectGuid FireGUID;
+
+    uint32 Event;
 };
 
 template <class AI, class T>
 inline AI* GetUtgardeKeepAI(T* obj)
 {
-    return GetInstanceAI<AI>(obj, UtgardeKeepScriptName);
+    return GetInstanceAI<AI>(obj, UKScriptName);
 }
 
-#endif
+#define RegisterUtgardeKeepCreatureAI(ai_name) RegisterCreatureAIWithFactory(ai_name, GetUtgardeKeepAI)
+
+#endif // UTGARDE_KEEP_H_

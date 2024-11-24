@@ -1,22 +1,22 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef AZEROTHCORE_CRYPTO_GENERICS_HPP
-#define AZEROTHCORE_CRYPTO_GENERICS_HPP
+#ifndef TRINITY_CRYPTO_GENERICS_HPP
+#define TRINITY_CRYPTO_GENERICS_HPP
 
 #include "BigNumber.h"
 #include "CryptoRandom.h"
@@ -25,7 +25,7 @@
 #include <iterator>
 #include <vector>
 
-namespace Acore::Impl
+namespace Trinity::Impl
 {
     struct CryptoGenericsImpl
     {
@@ -33,7 +33,7 @@ namespace Acore::Impl
         static typename Cipher::IV GenerateRandomIV()
         {
             typename Cipher::IV iv;
-            Acore::Crypto::GetRandomBytes(iv);
+            Trinity::Crypto::GetRandomBytes(iv);
             return iv;
         }
 
@@ -47,7 +47,7 @@ namespace Acore::Impl
         static void SplitFromBack(std::vector<uint8>& data, Container& tail)
         {
             ASSERT(data.size() >= std::size(tail));
-            for (std::size_t i = 1, N = std::size(tail); i <= N; ++i)
+            for (size_t i = 1, N = std::size(tail); i <= N; ++i)
             {
                 tail[N - i] = data.back();
                 data.pop_back();
@@ -56,7 +56,7 @@ namespace Acore::Impl
     };
 }
 
-namespace Acore::Crypto
+namespace Trinity::Crypto
 {
     template <typename Cipher>
     void AEEncryptWithRandomIV(std::vector<uint8>& data, typename Cipher::Key const& key)
@@ -64,7 +64,7 @@ namespace Acore::Crypto
         using IV = typename Cipher::IV;
         using Tag = typename Cipher::Tag;
         // select random IV
-        IV iv = Acore::Impl::CryptoGenericsImpl::GenerateRandomIV<Cipher>();
+        IV iv = Trinity::Impl::CryptoGenericsImpl::GenerateRandomIV<Cipher>();
         Tag tag;
 
         // encrypt data
@@ -74,8 +74,8 @@ namespace Acore::Crypto
         ASSERT(success);
 
         // append trailing IV and tag
-        Acore::Impl::CryptoGenericsImpl::AppendToBack(data, iv);
-        Acore::Impl::CryptoGenericsImpl::AppendToBack(data, tag);
+        Trinity::Impl::CryptoGenericsImpl::AppendToBack(data, iv);
+        Trinity::Impl::CryptoGenericsImpl::AppendToBack(data, tag);
     }
 
     template <typename Cipher>
@@ -89,12 +89,11 @@ namespace Acore::Crypto
     {
         using IV = typename Cipher::IV;
         using Tag = typename Cipher::Tag;
-
         // extract trailing IV and tag
         IV iv;
         Tag tag;
-        Acore::Impl::CryptoGenericsImpl::SplitFromBack(data, tag);
-        Acore::Impl::CryptoGenericsImpl::SplitFromBack(data, iv);
+        Trinity::Impl::CryptoGenericsImpl::SplitFromBack(data, tag);
+        Trinity::Impl::CryptoGenericsImpl::SplitFromBack(data, iv);
 
         // decrypt data
         Cipher cipher(false);

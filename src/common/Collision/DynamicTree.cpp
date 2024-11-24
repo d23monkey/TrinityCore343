@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,43 +20,45 @@
 #include "GameObjectModel.h"
 #include "MapTree.h"
 #include "ModelIgnoreFlags.h"
-#include "ModelInstance.h"
 #include "RegularGrid.h"
 #include "Timer.h"
 #include "VMapFactory.h"
-#include "VMapMgr2.h"
+#include "VMapManager2.h"
 #include "WorldModel.h"
-
 #include <G3D/AABox.h>
 #include <G3D/Ray.h>
 #include <G3D/Vector3.h>
 
 using VMAP::ModelInstance;
 
-namespace
-{
-    int CHECK_TREE_PERIOD = 200;
+namespace {
+
+int CHECK_TREE_PERIOD = 200;
+
+} // namespace
+
+template<> struct HashTrait< GameObjectModel>{
+    static size_t hashCode(GameObjectModel const& g) { return (size_t)(void*)&g; }
+};
+
+template<> struct PositionTrait< GameObjectModel> {
+    static void getPosition(GameObjectModel const& g, G3D::Vector3& p) { p = g.getPosition(); }
+};
+
+template<> struct BoundsTrait< GameObjectModel> {
+    static void getBounds(GameObjectModel const& g, G3D::AABox& out) { out = g.getBounds();}
+    static void getBounds2(GameObjectModel const* g, G3D::AABox& out) { out = g->getBounds();}
+};
+
+/*
+static bool operator==(GameObjectModel const& mdl, GameObjectModel const& mdl2){
+    return &mdl == &mdl2;
 }
+*/
 
-template<> struct HashTrait< GameObjectModel>
-{
-    static std::size_t hashCode(const GameObjectModel& g) { return (size_t)(void*)&g; }
-};
+typedef RegularGrid2D<GameObjectModel, BIHWrap<GameObjectModel> > ParentTree;
 
-template<> struct PositionTrait< GameObjectModel>
-{
-    static void GetPosition(const GameObjectModel& g, G3D::Vector3& p) { p = g.GetPosition(); }
-};
-
-template<> struct BoundsTrait< GameObjectModel>
-{
-    static void GetBounds(const GameObjectModel& g, G3D::AABox& out) { out = g.GetBounds();}
-    static void GetBounds2(const GameObjectModel* g, G3D::AABox& out) { out = g->GetBounds();}
-};
-
-typedef RegularGrid2D<GameObjectModel, BIHWrap<GameObjectModel>> ParentTree;
-
-struct DynTreeImpl : public ParentTree
+struct DynTreeImpl : public ParentTree/*, public Intersectable*/
 {
     typedef GameObjectModel Model;
     typedef ParentTree base;
@@ -67,13 +69,13 @@ struct DynTreeImpl : public ParentTree
     {
     }
 
-    void insert(const Model& mdl)
+    void insert(Model const& mdl)
     {
         base::insert(mdl);
         ++unbalanced_times;
     }
 
-    void remove(const Model& mdl)
+    void remove(Model const& mdl)
     {
         base::remove(mdl);
         ++unbalanced_times;
@@ -87,23 +89,19 @@ struct DynTreeImpl : public ParentTree
 
     void update(uint32 difftime)
     {
-        if (!size())
-        {
+        if (empty())
             return;
-        }
 
         rebalance_timer.Update(difftime);
         if (rebalance_timer.Passed())
         {
             rebalance_timer.Reset(CHECK_TREE_PERIOD);
             if (unbalanced_times > 0)
-            {
                 balance();
-            }
         }
     }
 
-    TimeTrackerSmall rebalance_timer;
+    TimeTracker rebalance_timer;
     int unbalanced_times;
 };
 
@@ -114,17 +112,17 @@ DynamicMapTree::~DynamicMapTree()
     delete impl;
 }
 
-void DynamicMapTree::insert(const GameObjectModel& mdl)
+void DynamicMapTree::insert(GameObjectModel const& mdl)
 {
     impl->insert(mdl);
 }
 
-void DynamicMapTree::remove(const GameObjectModel& mdl)
+void DynamicMapTree::remove(GameObjectModel const& mdl)
 {
     impl->remove(mdl);
 }
 
-bool DynamicMapTree::contains(const GameObjectModel& mdl) const
+bool DynamicMapTree::contains(GameObjectModel const& mdl) const
 {
     return impl->contains(mdl);
 }
@@ -134,11 +132,6 @@ void DynamicMapTree::balance()
     impl->balance();
 }
 
-int DynamicMapTree::size() const
-{
-    return impl->size();
-}
-
 void DynamicMapTree::update(uint32 t_diff)
 {
     impl->update(t_diff);
@@ -146,90 +139,67 @@ void DynamicMapTree::update(uint32 t_diff)
 
 struct DynamicTreeIntersectionCallback
 {
-    DynamicTreeIntersectionCallback(uint32 phasemask, VMAP::ModelIgnoreFlags ignoreFlags) :
-        _didHit(false), _phaseMask(phasemask), _ignoreFlags(ignoreFlags) { }
+    DynamicTreeIntersectionCallback(PhaseShift const& phaseShift) : _didHit(false), _phaseShift(phaseShift) { }
 
-    bool operator()(const G3D::Ray& r, const GameObjectModel& obj, float& distance, bool stopAtFirstHit)
+    bool operator()(G3D::Ray const& r, GameObjectModel const& obj, float& distance)
     {
-        bool result = obj.intersectRay(r, distance, stopAtFirstHit, _phaseMask, _ignoreFlags);
-        if (result)
-        {
-            _didHit = result;
-        }
-        return result;
-    }
-
-    [[nodiscard]] bool didHit() const
-    {
+        _didHit = obj.intersectRay(r, distance, true, _phaseShift, VMAP::ModelIgnoreFlags::Nothing);
         return _didHit;
     }
 
+    bool didHit() const { return _didHit; }
+
 private:
     bool _didHit;
-    uint32 _phaseMask;
-    VMAP::ModelIgnoreFlags _ignoreFlags;
+    PhaseShift const& _phaseShift;
 };
 
 struct DynamicTreeAreaInfoCallback
 {
-    DynamicTreeAreaInfoCallback(uint32 phaseMask) : _phaseMask(phaseMask) { }
+    DynamicTreeAreaInfoCallback(PhaseShift const& phaseShift) : _phaseShift(phaseShift) {}
 
     void operator()(G3D::Vector3 const& p, GameObjectModel const& obj)
     {
-        obj.IntersectPoint(p, _areaInfo, _phaseMask);
+        obj.intersectPoint(p, _areaInfo, _phaseShift);
     }
 
-    VMAP::AreaInfo const& GetAreaInfo() const
-    {
-        return _areaInfo;
-    }
+    VMAP::AreaInfo const& GetAreaInfo() const { return _areaInfo; }
 
 private:
-    uint32 _phaseMask;
+    PhaseShift const& _phaseShift;
     VMAP::AreaInfo _areaInfo;
 };
 
 struct DynamicTreeLocationInfoCallback
 {
-    DynamicTreeLocationInfoCallback(uint32 phaseMask)
-        : _phaseMask(phaseMask), _hitModel(nullptr) {}
+    DynamicTreeLocationInfoCallback(PhaseShift const& phaseShift) : _phaseShift(phaseShift), _hitModel(nullptr) {}
 
     void operator()(G3D::Vector3 const& p, GameObjectModel const& obj)
     {
-        if (obj.GetLocationInfo(p, _locationInfo, _phaseMask))
+        if (obj.GetLocationInfo(p, _locationInfo, _phaseShift))
             _hitModel = &obj;
     }
 
-    VMAP::LocationInfo& GetLocationInfo()
-    {
-        return _locationInfo;
-    }
-    GameObjectModel const* GetHitModel() const
-    {
-        return _hitModel;
-    }
+    VMAP::LocationInfo& GetLocationInfo() { return _locationInfo; }
+    GameObjectModel const* GetHitModel() const { return _hitModel; }
 
 private:
-    uint32                 _phaseMask;
-    VMAP::LocationInfo     _locationInfo;
+    PhaseShift const& _phaseShift;
+    VMAP::LocationInfo _locationInfo;
     GameObjectModel const* _hitModel;
 };
 
-bool DynamicMapTree::GetIntersectionTime(const uint32 phasemask, const G3D::Ray& ray, const G3D::Vector3& endPos, float& maxDist) const
+bool DynamicMapTree::getIntersectionTime(G3D::Ray const& ray, G3D::Vector3 const& endPos, PhaseShift const& phaseShift, float& maxDist) const
 {
     float distance = maxDist;
-    DynamicTreeIntersectionCallback callback(phasemask, VMAP::ModelIgnoreFlags::Nothing);
-    impl->intersectRay(ray, callback, distance, endPos, false);
+    DynamicTreeIntersectionCallback callback(phaseShift);
+    impl->intersectRay(ray, callback, distance, endPos);
     if (callback.didHit())
-    {
         maxDist = distance;
-    }
     return callback.didHit();
 }
 
-bool DynamicMapTree::GetObjectHitPos(const uint32 phasemask, const G3D::Vector3& startPos,
-                                     const G3D::Vector3& endPos, G3D::Vector3& resultHit,
-                                     float modifyDist) const
+bool DynamicMapTree::getObjectHitPos(G3D::Vector3 const& startPos, G3D::Vector3 const& endPos, G3D::Vector3& resultHitPos, float modifyDist, PhaseShift const& phaseShift) const
 {
     bool result = false;
     float maxDist = (endPos - startPos).magnitude();
@@ -238,80 +208,66 @@ bool DynamicMapTree::GetObjectHitPos(const uint32 phasemask, const G3D::Vector3&
     // prevent NaN values which can cause BIH intersection to enter infinite loop
     if (maxDist < 1e-10f)
     {
-        resultHit = endPos;
+        resultHitPos = endPos;
         return false;
     }
-    G3D::Vector3 dir = (endPos - startPos) / maxDist;            // direction with length of 1
+    G3D::Vector3 dir = (endPos - startPos)/maxDist;              // direction with length of 1
     G3D::Ray ray(startPos, dir);
     float dist = maxDist;
-    if (GetIntersectionTime(phasemask, ray, endPos, dist))
+    if (getIntersectionTime(ray, endPos, phaseShift, dist))
     {
-        resultHit = startPos + dir * dist;
+        resultHitPos = startPos + dir * dist;
         if (modifyDist < 0)
         {
-            if ((resultHit - startPos).magnitude() > -modifyDist)
-            {
-                resultHit = resultHit + dir * modifyDist;
-            }
+            if ((resultHitPos - startPos).magnitude() > -modifyDist)
+                resultHitPos += dir * modifyDist;
             else
-            {
-                resultHit = startPos;
-            }
+                resultHitPos = startPos;
         }
         else
-        {
-            resultHit = resultHit + dir * modifyDist;
-        }
+            resultHitPos += dir * modifyDist;
 
         result = true;
     }
     else
     {
-        resultHit = endPos;
+        resultHitPos = endPos;
         result = false;
     }
     return result;
 }
 
-bool DynamicMapTree::isInLineOfSight(float x1, float y1, float z1, float x2, float y2, float z2, uint32 phasemask, VMAP::ModelIgnoreFlags ignoreFlags) const
+bool DynamicMapTree::isInLineOfSight(G3D::Vector3 const& startPos, G3D::Vector3 const& endPos, PhaseShift const& phaseShift) const
 {
-    G3D::Vector3 v1(x1, y1, z1), v2(x2, y2, z2);
+    float maxDist = (endPos - startPos).magnitude();
 
-    float maxDist = (v2 - v1).magnitude();
-
-    if (!G3D::fuzzyGt(maxDist, 0))
-    {
+    if (!G3D::fuzzyGt(maxDist, 0) )
         return true;
-    }
 
-    G3D::Ray r(v1, (v2 - v1) / maxDist);
-    DynamicTreeIntersectionCallback callback(phasemask, ignoreFlags);
-    impl->intersectRay(r, callback, maxDist, v2, true);
+    G3D::Ray r(startPos, (endPos - startPos) / maxDist);
+    DynamicTreeIntersectionCallback callback(phaseShift);
+    impl->intersectRay(r, callback, maxDist, endPos);
 
     return !callback.didHit();
 }
 
-float DynamicMapTree::getHeight(float x, float y, float z, float maxSearchDist, uint32 phasemask) const
+float DynamicMapTree::getHeight(float x, float y, float z, float maxSearchDist, PhaseShift const& phaseShift) const
 {
     G3D::Vector3 v(x, y, z);
     G3D::Ray r(v, G3D::Vector3(0, 0, -1));
-    DynamicTreeIntersectionCallback callback(phasemask, VMAP::ModelIgnoreFlags::Nothing);
+    DynamicTreeIntersectionCallback callback(phaseShift);
     impl->intersectZAllignedRay(r, callback, maxSearchDist);
 
     if (callback.didHit())
-    {
         return v.z - maxSearchDist;
-    }
     else
-    {
         return -G3D::finf();
-    }
 }
 
-bool DynamicMapTree::GetAreaInfo(float x, float y, float& z, uint32 phasemask, uint32& flags, int32& adtId, int32& rootId, int32& groupId) const
+bool DynamicMapTree::getAreaInfo(float x, float y, float& z, PhaseShift const& phaseShift, uint32& flags, int32& adtId, int32& rootId, int32& groupId) const
 {
     G3D::Vector3 v(x, y, z + 0.5f);
-    DynamicTreeAreaInfoCallback intersectionCallBack(phasemask);
+    DynamicTreeAreaInfoCallback intersectionCallBack(phaseShift);
     impl->intersectPoint(v, intersectionCallBack);
     if (intersectionCallBack.GetAreaInfo().result)
     {
@@ -325,21 +281,21 @@ bool DynamicMapTree::GetAreaInfo(float x, float y, float& z, uint32 phasemask, u
     return false;
 }
 
-void DynamicMapTree::GetAreaAndLiquidData(float x, float y, float z, uint32 phasemask, uint8 reqLiquidType, VMAP::AreaAndLiquidData& data) const
+void DynamicMapTree::getAreaAndLiquidData(float x, float y, float z, PhaseShift const& phaseShift, uint8 reqLiquidType, VMAP::AreaAndLiquidData& data) const
 {
     G3D::Vector3 v(x, y, z + 0.5f);
-    DynamicTreeLocationInfoCallback intersectionCallBack(phasemask);
+    DynamicTreeLocationInfoCallback intersectionCallBack(phaseShift);
     impl->intersectPoint(v, intersectionCallBack);
     if (intersectionCallBack.GetLocationInfo().hitModel)
     {
         data.floorZ = intersectionCallBack.GetLocationInfo().ground_Z;
         uint32 liquidType = intersectionCallBack.GetLocationInfo().hitModel->GetLiquidType();
         float liquidLevel;
-        if (!reqLiquidType || (dynamic_cast<VMAP::VMapMgr2*>(VMAP::VMapFactory::createOrGetVMapMgr())->GetLiquidFlagsPtr(liquidType) & reqLiquidType))
+        if (!reqLiquidType || VMAP::VMapFactory::createOrGetVMapManager()->GetLiquidFlagsPtr(liquidType) & reqLiquidType)
             if (intersectionCallBack.GetHitModel()->GetLiquidLevel(v, intersectionCallBack.GetLocationInfo(), liquidLevel))
                 data.liquidInfo.emplace(liquidType, liquidLevel);
 
-        data.areaInfo.emplace(0,
+        data.areaInfo.emplace(intersectionCallBack.GetHitModel()->GetNameSetId(),
             intersectionCallBack.GetLocationInfo().rootId,
             intersectionCallBack.GetLocationInfo().hitModel->GetWmoID(),
             intersectionCallBack.GetLocationInfo().hitModel->GetMogpFlags());

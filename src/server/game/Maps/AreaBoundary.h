@@ -1,26 +1,26 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef ACORE_AREA_BOUNDARY_H
-#define ACORE_AREA_BOUNDARY_H
+#ifndef TRINITY_AREA_BOUNDARY_H
+#define TRINITY_AREA_BOUNDARY_H
 
 #include "Position.h"
 
-class AC_GAME_API AreaBoundary
+class TC_GAME_API AreaBoundary
 {
     public:
         bool IsWithinBoundary(Position const* pos) const { return pos && (IsWithinBoundaryArea(pos) != _isInvertedBoundary); }
@@ -39,15 +39,14 @@ class AC_GAME_API AreaBoundary
             DoublePosition(float x, float y = 0.0f, float z = 0.0f, float o = 0.0f)
                 : Position(x, y, z, o), DoublePosX(x), DoublePosY(y), DoublePosZ(z) { }
 
-            DoublePosition(Position const& pos)
+            DoublePosition(Position const & pos)
                 : Position(pos), DoublePosX(pos.m_positionX), DoublePosY(pos.m_positionY), DoublePosZ(pos.m_positionZ) { }
 
             double GetDoublePositionX() const { return DoublePosX; }
             double GetDoublePositionY() const { return DoublePosY; }
             double GetDoublePositionZ() const { return DoublePosZ; }
 
-            double GetDoubleExactDist2dSq(DoublePosition const& pos) const
-            {
+            double GetDoubleExactDist2dSq(DoublePosition const& pos) const {
                 double const offX = GetDoublePositionX() - pos.GetDoublePositionX();
                 double const offY = GetDoublePositionY() - pos.GetDoublePositionY();
                 return (offX * offX) + (offY * offY);
@@ -72,7 +71,7 @@ class AC_GAME_API AreaBoundary
         bool _isInvertedBoundary;
 };
 
-class AC_GAME_API RectangleBoundary : public AreaBoundary
+class TC_GAME_API RectangleBoundary : public AreaBoundary
 {
     public:
         // X axis is north/south, Y axis is east/west, larger values are northwest
@@ -85,7 +84,7 @@ class AC_GAME_API RectangleBoundary : public AreaBoundary
         float const _minX, _maxX, _minY, _maxY;
 };
 
-class AC_GAME_API CircleBoundary : public AreaBoundary
+class TC_GAME_API CircleBoundary : public AreaBoundary
 {
     public:
         CircleBoundary(Position const& center, double radius, bool isInverted = false);
@@ -99,7 +98,7 @@ class AC_GAME_API CircleBoundary : public AreaBoundary
         double const _radiusSq;
 };
 
-class AC_GAME_API EllipseBoundary : public AreaBoundary
+class TC_GAME_API EllipseBoundary : public AreaBoundary
 {
     public:
         EllipseBoundary(Position const& center, double radiusX, double radiusY, bool isInverted = false);
@@ -112,7 +111,7 @@ class AC_GAME_API EllipseBoundary : public AreaBoundary
         double const _radiusYSq, _scaleXSq;
 };
 
-class AC_GAME_API TriangleBoundary : public AreaBoundary
+class TC_GAME_API TriangleBoundary : public AreaBoundary
 {
     public:
         TriangleBoundary(Position const& pointA, Position const& pointB, Position const& pointC, bool isInverted = false);
@@ -125,7 +124,7 @@ class AC_GAME_API TriangleBoundary : public AreaBoundary
         double const _abx, _bcx, _cax, _aby, _bcy, _cay;
 };
 
-class AC_GAME_API ParallelogramBoundary : public AreaBoundary
+class TC_GAME_API ParallelogramBoundary : public AreaBoundary
 {
     public:
         // Note: AB must be orthogonal to AD
@@ -139,7 +138,7 @@ class AC_GAME_API ParallelogramBoundary : public AreaBoundary
         double const _abx, _dax, _aby, _day;
 };
 
-class AC_GAME_API ZRangeBoundary : public AreaBoundary
+class TC_GAME_API ZRangeBoundary : public AreaBoundary
 {
     public:
         ZRangeBoundary(float minZ, float maxZ, bool isInverted = false);
@@ -151,7 +150,7 @@ class AC_GAME_API ZRangeBoundary : public AreaBoundary
         float const _minZ, _maxZ;
 };
 
-class AC_GAME_API BoundaryUnionBoundary : public AreaBoundary
+class TC_GAME_API BoundaryUnionBoundary : public AreaBoundary
 {
     public:
         BoundaryUnionBoundary(AreaBoundary const* b1, AreaBoundary const* b2, bool isInverted = false);
@@ -165,18 +164,4 @@ class AC_GAME_API BoundaryUnionBoundary : public AreaBoundary
         AreaBoundary const* const _b2;
 };
 
-class AC_GAME_API BoundaryIntersectBoundary : public AreaBoundary
-{
-    public:
-        BoundaryIntersectBoundary(AreaBoundary const* b1, AreaBoundary const* b2, bool isInverted = false);
-
-    protected:
-        virtual ~BoundaryIntersectBoundary();
-        bool IsWithinBoundaryArea(Position const* pos) const override;
-
-    private:
-        AreaBoundary const* const _b1;
-        AreaBoundary const* const _b2;
-};
-
-#endif //ACORE_AREA_BOUNDARY_H
+#endif //TRINITY_AREA_BOUNDARY_H

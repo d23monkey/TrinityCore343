@@ -1,380 +1,395 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "InstanceMapScript.h"
+/* ScriptData
+SDName: Instance_Serpent_Shrine
+SD%Complete: 100
+SDComment: Instance Data Scripts and functions to acquire mobs and set encounter status for use in various Serpent Shrine Scripts
+SDCategory: Coilfang Resevoir, Serpent Shrine Cavern
+EndScriptData */
+
+#include "ScriptMgr.h"
+#include "GameObject.h"
+#include "GameObjectAI.h"
 #include "InstanceScript.h"
+#include "Map.h"
 #include "Player.h"
-#include "ScriptedCreature.h"
-#include "SpellScriptLoader.h"
-#include "TemporarySummon.h"
 #include "serpent_shrine.h"
-#include "SpellAuraEffects.h"
-#include "SpellScript.h"
+#include "TemporarySummon.h"
 
-DoorData const doorData[] =
+#define MAX_ENCOUNTER 6
+
+enum Misc
 {
-    { GO_LADY_VASHJ_BRIDGE_CONSOLE, DATA_BRIDGE_EMERGED, DOOR_TYPE_PASSAGE },
-    { GO_COILFANG_BRIDGE1,          DATA_BRIDGE_EMERGED, DOOR_TYPE_PASSAGE },
-    { GO_COILFANG_BRIDGE2,          DATA_BRIDGE_EMERGED, DOOR_TYPE_PASSAGE },
-    { GO_COILFANG_BRIDGE3,          DATA_BRIDGE_EMERGED, DOOR_TYPE_PASSAGE }
+    // Spells
+    SPELL_SCALDINGWATER             = 37284,
+
+    // Creatures
+    NPC_COILFANG_FRENZY             = 21508,
+    NPC_COILFANG_PRIESTESS          = 21220,
+    NPC_COILFANG_SHATTERER          = 21301,
+
+    // Misc
+    MIN_KILLS                       = 30
 };
 
-ObjectData const creatureData[] =
+//NOTE: there are 6 platforms
+//there should be 3 shatterers and 2 priestess on all platforms, total of 30 elites, else it won't work!
+//delete all other elites not on platforms! these mobs should only be on those platforms nowhere else.
+
+/* Serpentshrine cavern encounters:
+0 - Hydross The Unstable event
+1 - Leotheras The Blind Event
+2 - The Lurker Below Event
+3 - Fathom-Lord Karathress Event
+4 - Morogrim Tidewalker Event
+5 - Lady Vashj Event
+*/
+
+DungeonEncounterData const encounters[] =
 {
-    { NPC_LEOTHERAS_THE_BLIND,    DATA_LEOTHERAS_THE_BLIND    },
-    { NPC_FATHOM_LORD_KARATHRESS, DATA_FATHOM_LORD_KARATHRESS },
-    { NPC_LADY_VASHJ,             DATA_LADY_VASHJ             },
-    { NPC_SEER_OLUM,              DATA_SEER_OLUM              },
-    { 0,                          0                           }
+    { BOSS_HYDROSS_THE_UNSTABLE, {{ 623 }} },
+    { BOSS_THE_LURKER_BELOW, {{ 624 }} },
+    { BOSS_LEOTHERAS_THE_BLIND, {{ 625 }} },
+    { BOSS_FATHOM_LORD_KARATHRESS, {{ 626 }} },
+    { BOSS_MOROGRIM_TIDEWALKER, {{ 627 }} },
+    { BOSS_LADY_VASHJ, {{ 628 }} }
 };
 
-ObjectData const gameObjectData[] =
+class go_bridge_console : public GameObjectScript
 {
-    { GO_STRANGE_POOL, DATA_STRANGE_POOL },
-    { 0,               0                 }
-};
+    public:
+        go_bridge_console() : GameObjectScript("go_bridge_console") { }
 
-MinionData const minionData[] =
-{
-    { NPC_FATHOM_GUARD_SHARKKIS,  DATA_FATHOM_LORD_KARATHRESS },
-    { NPC_FATHOM_GUARD_TIDALVESS, DATA_FATHOM_LORD_KARATHRESS },
-    { NPC_FATHOM_GUARD_CARIBDIS,  DATA_FATHOM_LORD_KARATHRESS },
-    { 0,                          0,                          }
-};
+        struct go_bridge_consoleAI : public GameObjectAI
+        {
+            go_bridge_consoleAI(GameObject* go) : GameObjectAI(go), instance(go->GetInstanceScript()) { }
 
-BossBoundaryData const boundaries =
-{
-    { DATA_FATHOM_LORD_KARATHRESS, new RectangleBoundary(456.86f, 571.56f, -602.07f, -449.59f) },
-    { DATA_MOROGRIM_TIDEWALKER,    new RectangleBoundary(304.32f, 457.59f, -786.5f, -661.3f) },
-    { DATA_LADY_VASHJ,             new CircleBoundary(Position(29.99f, -922.409f), 83.65f) }
+            InstanceScript* instance;
+
+            bool OnGossipHello(Player* /*player*/) override
+            {
+                if (instance)
+                    instance->SetData(DATA_CONTROL_CONSOLE, DONE);
+                return true;
+            }
+        };
+
+        GameObjectAI* GetAI(GameObject* go) const override
+        {
+            return GetSerpentshrineCavernAI<go_bridge_consoleAI>(go);
+        }
 };
 
 class instance_serpent_shrine : public InstanceMapScript
 {
-public:
-    instance_serpent_shrine() : InstanceMapScript("instance_serpent_shrine", 548) { }
+    public:
+        instance_serpent_shrine() : InstanceMapScript(SSCScriptName, 548) { }
 
-    struct instance_serpentshrine_cavern_InstanceMapScript : public InstanceScript
-    {
-        instance_serpentshrine_cavern_InstanceMapScript(Map* map) : InstanceScript(map) { }
-
-        void Initialize() override
+        struct instance_serpentshrine_cavern_InstanceMapScript : public InstanceScript
         {
-            SetHeaders(DataHeader);
-            SetBossNumber(MAX_ENCOUNTERS);
-            LoadDoorData(doorData);
-            LoadObjectData(creatureData, gameObjectData);
-            LoadMinionData(minionData);
-            LoadBossBoundaries(boundaries);
-
-            _aliveKeepersCount = 0;
-        }
-
-        bool SetBossState(uint32 type, EncounterState state) override
-        {
-            if (!InstanceScript::SetBossState(type, state))
-                return false;
-
-            if (type == DATA_LADY_VASHJ)
-                for (uint8 i = 0; i < 4; ++i)
-                    if (GameObject* gobject = instance->GetGameObject(_shieldGeneratorGUID[i]))
-                        gobject->SetGameObjectFlag(GO_FLAG_NOT_SELECTABLE);
-
-            return true;
-        }
-
-        void OnGameObjectCreate(GameObject* go) override
-        {
-            switch (go->GetEntry())
+            instance_serpentshrine_cavern_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
             {
-                case GO_SHIELD_GENERATOR1:
-                case GO_SHIELD_GENERATOR2:
-                case GO_SHIELD_GENERATOR3:
-                case GO_SHIELD_GENERATOR4:
-                    _shieldGeneratorGUID[go->GetEntry() - GO_SHIELD_GENERATOR1] = go->GetGUID();
-                    break;
+                SetHeaders(DataHeader);
+                SetBossNumber(MAX_ENCOUNTER);
+                LoadDungeonEncounterData(encounters);
+
+                StrangePool = 0;
+                Water = WATERSTATE_FRENZY;
+
+                ShieldGeneratorDeactivated[0] = false;
+                ShieldGeneratorDeactivated[1] = false;
+                ShieldGeneratorDeactivated[2] = false;
+                ShieldGeneratorDeactivated[3] = false;
+                FishingTimer = 1000;
+                WaterCheckTimer = 500;
+                FrenzySpawnTimer = 2000;
+                DoSpawnFrenzy = false;
+                TrashCount = 0;
             }
 
-            InstanceScript::OnGameObjectCreate(go);
-        }
-
-        void OnCreatureCreate(Creature* creature) override
-        {
-            switch (creature->GetEntry())
+            void Update(uint32 diff) override
             {
-                case NPC_COILFANG_SHATTERER:
-                case NPC_COILFANG_PRIESTESS:
-                    if (creature->GetPositionX() > 190.0f)
-                        --_aliveKeepersCount;
-                    break;
-                case NPC_CYCLONE_KARATHRESS:
-                    creature->GetMotionMaster()->MoveRandom(50.0f);
-                    break;
-                case NPC_ENCHANTED_ELEMENTAL:
-                case NPC_COILFANG_ELITE:
-                case NPC_COILFANG_STRIDER:
-                case NPC_TAINTED_ELEMENTAL:
-                    if (Creature* vashj = GetCreature(DATA_LADY_VASHJ))
-                        vashj->AI()->JustSummoned(creature);
-                    break;
-                case NPC_SEER_OLUM:
-                    creature->RemoveNpcFlag(UNIT_NPC_FLAG_GOSSIP);
-                    creature->RemoveNpcFlag(UNIT_NPC_FLAG_QUESTGIVER);
-                    break;
-                default:
-                    break;
-            }
-            InstanceScript::OnCreatureCreate(creature);
-        }
+                //Water checks
+                if (WaterCheckTimer <= diff)
+                {
+                    if (TrashCount >= MIN_KILLS)
+                        Water = WATERSTATE_SCALDING;
+                    else
+                        Water = WATERSTATE_FRENZY;
 
-        void SetData(uint32 type, uint32  /*data*/) override
-        {
-            switch (type)
-            {
-                case DATA_PLATFORM_KEEPER_RESPAWNED:
-                    if (_aliveKeepersCount < MAX_KEEPER_COUNT)
+                    Map::PlayerList const& PlayerList = instance->GetPlayers();
+                    if (PlayerList.isEmpty())
+                        return;
+                    for (Map::PlayerList::const_iterator i = PlayerList.begin(); i != PlayerList.end(); ++i)
                     {
-                        ++_aliveKeepersCount;
-                    }
-                    break;
-                case DATA_PLATFORM_KEEPER_DIED:
-                    if (_aliveKeepersCount > MIN_KEEPER_COUNT)
-                    {
-                        --_aliveKeepersCount;
-                    }
-                    break;
-                case DATA_BRIDGE_ACTIVATED:
-                    SetBossState(DATA_BRIDGE_EMERGED, NOT_STARTED);
-                    SetBossState(DATA_BRIDGE_EMERGED, DONE);
-                    break;
-                case DATA_ACTIVATE_SHIELD:
-                    if (Creature* vashj = GetCreature(DATA_LADY_VASHJ))
-                    {
-                        for (auto const& shieldGuid : _shieldGeneratorGUID)
+                        if (Player* player = i->GetSource())
                         {
-                            if (GameObject* gobject = instance->GetGameObject(shieldGuid))
+                            if (player->IsAlive() && /*i->GetSource()->GetPositionZ() <= -21.434931f*/player->IsInWater())
                             {
-                                gobject->RemoveGameObjectFlag(GO_FLAG_NOT_SELECTABLE);
-                                vashj->SummonTrigger(gobject->GetPositionX(), gobject->GetPositionY(), gobject->GetPositionZ(), 0.0f, 0);
+                                if (Water == WATERSTATE_SCALDING)
+                                {
+                                    if (!player->HasAura(SPELL_SCALDINGWATER))
+                                        player->CastSpell(player, SPELL_SCALDINGWATER, true);
+
+                                }
+                                else
+                                {
+                                    //spawn frenzy
+                                    if (DoSpawnFrenzy)
+                                    {
+                                        if (Creature* frenzy = player->SummonCreature(NPC_COILFANG_FRENZY, player->GetPositionX(), player->GetPositionY(), player->GetPositionZ(), player->GetOrientation(), TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 2s))
+                                        {
+                                            frenzy->Attack(player, false);
+                                            frenzy->SetSwim(true);
+                                            frenzy->SetDisableGravity(true);
+                                        }
+                                        DoSpawnFrenzy = false;
+                                    }
+                                }
                             }
+                            if (!player->IsInWater())
+                                player->RemoveAurasDueToSpell(SPELL_SCALDINGWATER);
                         }
+
                     }
-                    break;
+                    WaterCheckTimer = 500;//remove stress from core
+                }
+                else
+                    WaterCheckTimer -= diff;
+
+                if (FrenzySpawnTimer <= diff)
+                {
+                    DoSpawnFrenzy = true;
+                    FrenzySpawnTimer = 2000;
+                }
+                else
+                    FrenzySpawnTimer -= diff;
             }
+
+            void OnGameObjectCreate(GameObject* go) override
+            {
+                switch (go->GetEntry())
+                {
+                    case 184568:
+                        ControlConsole = go->GetGUID();
+                        go->setActive(true);
+                        go->SetFarVisible(true);
+                        break;
+                    case 184203:
+                        BridgePart[0] = go->GetGUID();
+                        go->setActive(true);
+                        go->SetFarVisible(true);
+                        break;
+                    case 184204:
+                        BridgePart[1] = go->GetGUID();
+                        go->setActive(true);
+                        go->SetFarVisible(true);
+                        break;
+                    case 184205:
+                        BridgePart[2] = go->GetGUID();
+                        go->setActive(true);
+                        go->SetFarVisible(true);
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            void OnCreatureCreate(Creature* creature) override
+            {
+                switch (creature->GetEntry())
+                {
+                    case 21212:
+                        LadyVashj = creature->GetGUID();
+                        break;
+                    case 21214:
+                        Karathress = creature->GetGUID();
+                        break;
+                    case 21966:
+                        Sharkkis = creature->GetGUID();
+                        break;
+                    case 21217:
+                        LurkerBelow = creature->GetGUID();
+                        break;
+                    case 21965:
+                        Tidalvess = creature->GetGUID();
+                        break;
+                    case 21964:
+                        Caribdis = creature->GetGUID();
+                        break;
+                    case 21215:
+                        LeotherasTheBlind = creature->GetGUID();
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            void SetGuidData(uint32 type, ObjectGuid data) override
+            {
+                if (type == DATA_KARATHRESSEVENT_STARTER)
+                    KarathressEvent_Starter = data;
+                if (type == DATA_LEOTHERAS_EVENT_STARTER)
+                    LeotherasEventStarter = data;
+            }
+
+            ObjectGuid GetGuidData(uint32 identifier) const override
+            {
+                switch (identifier)
+                {
+                    case DATA_THELURKERBELOW:
+                        return LurkerBelow;
+                    case DATA_SHARKKIS:
+                        return Sharkkis;
+                    case DATA_TIDALVESS:
+                        return Tidalvess;
+                    case DATA_CARIBDIS:
+                        return Caribdis;
+                    case DATA_LADYVASHJ:
+                        return LadyVashj;
+                    case DATA_KARATHRESS:
+                        return Karathress;
+                    case DATA_KARATHRESSEVENT_STARTER:
+                        return KarathressEvent_Starter;
+                    case DATA_LEOTHERAS:
+                        return LeotherasTheBlind;
+                    case DATA_LEOTHERAS_EVENT_STARTER:
+                        return LeotherasEventStarter;
+                    default:
+                        break;
+                }
+                return ObjectGuid::Empty;
+            }
+
+            void SetData(uint32 type, uint32 data) override
+            {
+                switch (type)
+                {
+                    case DATA_STRANGE_POOL:
+                        StrangePool = data;
+                        break;
+                    case DATA_CONTROL_CONSOLE:
+                        if (data == DONE)
+                        {
+                            HandleGameObject(BridgePart[0], true);
+                            HandleGameObject(BridgePart[1], true);
+                            HandleGameObject(BridgePart[2], true);
+                        }
+                        break;
+                    case DATA_TRASH:
+                        if (data == 1 && TrashCount < MIN_KILLS)
+                            ++TrashCount;//+1 died
+                        break;
+                    case DATA_WATER:
+                        Water = data;
+                        break;
+                    case DATA_SHIELDGENERATOR1:
+                        ShieldGeneratorDeactivated[0] = data != 0;
+                        break;
+                    case DATA_SHIELDGENERATOR2:
+                        ShieldGeneratorDeactivated[1] = data != 0;
+                        break;
+                    case DATA_SHIELDGENERATOR3:
+                        ShieldGeneratorDeactivated[2] = data != 0;
+                        break;
+                    case DATA_SHIELDGENERATOR4:
+                        ShieldGeneratorDeactivated[3] = data != 0;
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            bool SetBossState(uint32 id, EncounterState state) override
+            {
+                if (!InstanceScript::SetBossState(id, state))
+                    return false;
+
+                if (id == BOSS_LADY_VASHJ && state == NOT_STARTED)
+                {
+                    ShieldGeneratorDeactivated[0] = false;
+                    ShieldGeneratorDeactivated[1] = false;
+                    ShieldGeneratorDeactivated[2] = false;
+                    ShieldGeneratorDeactivated[3] = false;
+                }
+
+                return true;
+            }
+
+            uint32 GetData(uint32 type) const override
+            {
+                switch (type)
+                {
+                    case DATA_SHIELDGENERATOR1:
+                        return ShieldGeneratorDeactivated[0];
+                    case DATA_SHIELDGENERATOR2:
+                        return ShieldGeneratorDeactivated[1];
+                    case DATA_SHIELDGENERATOR3:
+                        return ShieldGeneratorDeactivated[2];
+                    case DATA_SHIELDGENERATOR4:
+                        return ShieldGeneratorDeactivated[3];
+                    case DATA_CANSTARTPHASE3:
+                        if (ShieldGeneratorDeactivated[0] && ShieldGeneratorDeactivated[1] && ShieldGeneratorDeactivated[2] && ShieldGeneratorDeactivated[3])
+                            return 1;
+                        break;
+                    case DATA_STRANGE_POOL:
+                        return StrangePool;
+                    case DATA_WATER:
+                        return Water;
+                    default:
+                        break;
+                }
+
+                return 0;
+            }
+
+        private:
+            ObjectGuid LurkerBelow;
+            ObjectGuid Sharkkis;
+            ObjectGuid Tidalvess;
+            ObjectGuid Caribdis;
+            ObjectGuid LadyVashj;
+            ObjectGuid Karathress;
+            ObjectGuid KarathressEvent_Starter;
+            ObjectGuid LeotherasTheBlind;
+            ObjectGuid LeotherasEventStarter;
+
+            ObjectGuid ControlConsole;
+            ObjectGuid BridgePart[3];
+            uint32 StrangePool;
+            uint32 FishingTimer;
+            uint32 WaterCheckTimer;
+            uint32 FrenzySpawnTimer;
+            uint32 Water;
+            uint32 TrashCount;
+
+            bool ShieldGeneratorDeactivated[4];
+            bool DoSpawnFrenzy;
+        };
+
+        InstanceScript* GetInstanceScript(InstanceMap* map) const override
+        {
+            return new instance_serpentshrine_cavern_InstanceMapScript(map);
         }
-
-        uint32 GetData(uint32 type) const override
-        {
-            if (type == DATA_ALIVE_KEEPERS)
-                return _aliveKeepersCount;
-
-            return 0;
-        }
-
-    private:
-        ObjectGuid _shieldGeneratorGUID[4];
-        int32 _aliveKeepersCount;
-    };
-
-    InstanceScript* GetInstanceScript(InstanceMap* map) const override
-    {
-        return new instance_serpentshrine_cavern_InstanceMapScript(map);
-    }
-};
-
-class spell_serpentshrine_cavern_serpentshrine_parasite : public AuraScript
-{
-    PrepareAuraScript(spell_serpentshrine_cavern_serpentshrine_parasite);
-
-    void HandleEffectRemove(AuraEffect const*  /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        if (GetTarget()->GetInstanceScript())
-            GetTarget()->CastSpell(GetTarget(), SPELL_SUMMON_SERPENTSHRINE_PARASITE, true);
-    }
-
-    void Register() override
-    {
-        AfterEffectRemove += AuraEffectRemoveFn(spell_serpentshrine_cavern_serpentshrine_parasite::HandleEffectRemove, EFFECT_0, SPELL_AURA_PERIODIC_DAMAGE, AURA_EFFECT_HANDLE_REAL);
-    }
-};
-
-class spell_serpentshrine_cavern_serpentshrine_parasite_trigger_aura : public AuraScript
-{
-    PrepareAuraScript(spell_serpentshrine_cavern_serpentshrine_parasite_trigger_aura);
-
-    void HandleEffectRemove(AuraEffect const*  /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        if (GetTarget()->GetInstanceScript() && GetTarget()->GetInstanceScript()->IsEncounterInProgress())
-            GetTarget()->CastSpell(GetTarget(), SPELL_SUMMON_SERPENTSHRINE_PARASITE, true);
-    }
-
-    void Register() override
-    {
-        AfterEffectRemove += AuraEffectRemoveFn(spell_serpentshrine_cavern_serpentshrine_parasite_trigger_aura::HandleEffectRemove, EFFECT_0, SPELL_AURA_PERIODIC_DAMAGE, AURA_EFFECT_HANDLE_REAL);
-    }
-};
-
-class spell_serpentshrine_cavern_serpentshrine_parasite_trigger : public SpellScript
-{
-    PrepareSpellScript(spell_serpentshrine_cavern_serpentshrine_parasite_trigger);
-
-    void HandleApplyAura(SpellEffIndex effIndex)
-    {
-        PreventHitDefaultEffect(effIndex);
-        if (Creature* target = GetHitCreature())
-            target->DespawnOrUnsummon(1);
-    }
-
-    void Register() override
-    {
-        OnEffectHitTarget += SpellEffectFn(spell_serpentshrine_cavern_serpentshrine_parasite_trigger::HandleApplyAura, EFFECT_0, SPELL_EFFECT_APPLY_AURA);
-    }
-};
-
-class spell_serpentshrine_cavern_infection : public AuraScript
-{
-    PrepareAuraScript(spell_serpentshrine_cavern_infection);
-
-    void HandleEffectRemove(AuraEffect const* aurEff, AuraEffectHandleModes /*mode*/)
-    {
-        if (GetTargetApplication()->GetRemoveMode() == AURA_REMOVE_BY_EXPIRE && GetTarget()->GetInstanceScript())
-        {
-            CustomSpellValues values;
-            values.AddSpellMod(SPELLVALUE_MAX_TARGETS, 1);
-            values.AddSpellMod(SPELLVALUE_BASE_POINT0, aurEff->GetAmount() + 500);
-            values.AddSpellMod(SPELLVALUE_BASE_POINT1, aurEff->GetAmount() + 500);
-            GetTarget()->CastCustomSpell(SPELL_RAMPART_INFECTION, values, GetTarget(), TRIGGERED_FULL_MASK, nullptr);
-        }
-    }
-
-    void Register() override
-    {
-        AfterEffectRemove += AuraEffectRemoveFn(spell_serpentshrine_cavern_infection::HandleEffectRemove, EFFECT_1, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
-    }
-};
-
-class spell_serpentshrine_cavern_coilfang_water : public AuraScript
-{
-    PrepareAuraScript(spell_serpentshrine_cavern_coilfang_water);
-
-    void HandleEffectApply(AuraEffect const*  /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        if (InstanceScript* instance = GetUnitOwner()->GetInstanceScript())
-            if (instance->GetBossState(DATA_THE_LURKER_BELOW) != DONE)
-                if (instance->GetData(DATA_ALIVE_KEEPERS) == 0)
-                    GetUnitOwner()->CastSpell(GetUnitOwner(), SPELL_SCALDING_WATER, true);
-    }
-
-    void HandleEffectRemove(AuraEffect const*  /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        GetUnitOwner()->RemoveAurasDueToSpell(SPELL_SCALDING_WATER);
-    }
-
-    void CalcPeriodic(AuraEffect const* /*aurEff*/, bool& isPeriodic, int32& amplitude)
-    {
-        InstanceScript* instance = GetUnitOwner()->GetInstanceScript();
-        if (!instance || instance->GetBossState(DATA_THE_LURKER_BELOW) == DONE)
-            return;
-
-        isPeriodic = true;
-        amplitude = 8 * IN_MILLISECONDS;
-    }
-
-    void HandlePeriodic(AuraEffect const*  /*aurEff*/)
-    {
-        PreventDefaultAction();
-        InstanceScript* instance = GetUnitOwner()->GetInstanceScript();
-        if (!instance || GetUnitOwner()->GetMapId() != 548)
-        {
-            SetDuration(0);
-            return;
-        }
-
-        if (instance->GetBossState(DATA_THE_LURKER_BELOW) == DONE || instance->GetData(DATA_ALIVE_KEEPERS) == 0 || GetUnitOwner()->GetPositionZ() > -20.5f || !GetUnitOwner()->IsInWater())
-            return;
-
-        for (uint8 i = 0; i < 3; ++i)
-            GetUnitOwner()->CastSpell(GetUnitOwner(), SPELL_FRENZY_WATER, true);
-    }
-
-    void Register() override
-    {
-        AfterEffectApply += AuraEffectApplyFn(spell_serpentshrine_cavern_coilfang_water::HandleEffectApply, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
-        AfterEffectRemove += AuraEffectRemoveFn(spell_serpentshrine_cavern_coilfang_water::HandleEffectRemove, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
-
-        DoEffectCalcPeriodic += AuraEffectCalcPeriodicFn(spell_serpentshrine_cavern_coilfang_water::CalcPeriodic, EFFECT_0, SPELL_AURA_DUMMY);
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_serpentshrine_cavern_coilfang_water::HandlePeriodic, EFFECT_0, SPELL_AURA_DUMMY);
-    }
-};
-
-struct npc_rancid_mushroom : public ScriptedAI
-{
-    npc_rancid_mushroom(Creature* creature) : ScriptedAI(creature) { }
-
-    enum Spells : uint32
-    {
-        SPELL_GROW        = 31698,
-        SPELL_SPORE_CLOUD = 38652
-    };
-
-    void InitializeAI() override
-    {
-        scheduler.Schedule(1150ms, [this](TaskContext context)
-        {
-            DoCastSelf(SPELL_GROW);
-            context.Repeat(1200ms, 3400ms);
-        })
-        .Schedule(22950ms, [this](TaskContext /*context*/)
-        {
-            DoCastSelf(SPELL_SPORE_CLOUD);
-            me->KillSelf();
-        });
-    }
-
-    void UpdateAI(uint32 diff) override
-    {
-        scheduler.Update(diff);
-    }
-};
-
-class spell_rancid_spore_cloud : public AuraScript
-{
-    PrepareAuraScript(spell_rancid_spore_cloud);
-
-    void HandlePeriodic(AuraEffect const* /*aurEff*/)
-    {
-        PreventDefaultAction();
-        GetCaster()->CastSpell((Unit*)nullptr, GetSpellInfo()->Effects[EFFECT_0].TriggerSpell, true);
-    }
-
-    void Register() override
-    {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_rancid_spore_cloud::HandlePeriodic, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
-    }
 };
 
 void AddSC_instance_serpentshrine_cavern()
 {
     new instance_serpent_shrine();
-    RegisterSpellScript(spell_serpentshrine_cavern_serpentshrine_parasite);
-    RegisterSpellAndAuraScriptPair(spell_serpentshrine_cavern_serpentshrine_parasite_trigger, spell_serpentshrine_cavern_serpentshrine_parasite_trigger_aura);
-    RegisterSpellScript(spell_serpentshrine_cavern_infection);
-    RegisterSpellScript(spell_serpentshrine_cavern_coilfang_water);
-    RegisterSerpentShrineAI(npc_rancid_mushroom);
-    RegisterSpellScript(spell_rancid_spore_cloud);
+    new go_bridge_console();
 }

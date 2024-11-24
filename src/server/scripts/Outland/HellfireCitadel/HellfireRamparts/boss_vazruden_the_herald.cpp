@@ -1,367 +1,531 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
-#include "SpellScriptLoader.h"
-#include "TaskScheduler.h"
+/* ScriptData
+Name: Boss_Vazruden_the_Herald
+%Complete: 90
+Comment:
+Category: Hellfire Citadel, Hellfire Ramparts
+EndScriptData */
+
+#include "ScriptMgr.h"
 #include "hellfire_ramparts.h"
-#include "SpellScript.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
+#include "Player.h"
+#include "ScriptedCreature.h"
+#include "SpellInfo.h"
+#include "TemporarySummon.h"
 
 enum Says
 {
-    SAY_INTRO                   = 0,
-    SAY_WIPE                    = 0,
-    SAY_AGGRO                   = 1,
-    SAY_KILL                    = 2,
-    SAY_DIE                     = 3,
-    EMOTE_NAZAN                 = 0
+    SAY_INTRO                     = 0,
+
+    SAY_WIPE                      = 0,
+    SAY_AGGRO                     = 1,
+    SAY_KILL                      = 2,
+    SAY_DIE                       = 3,
+
+    EMOTE                         = 0
 };
 
 enum Spells
 {
-    SPELL_FIREBALL              = 33793,
-    SPELL_SUMMON_LIQUID_FIRE    = 31706,
-    SPELL_REVENGE               = 19130,
-    SPELL_CALL_NAZAN            = 30693,
-    SPELL_BELLOWING_ROAR        = 39427,
-    SPELL_CONE_OF_FIRE          = 30926
+    SPELL_FIREBALL                = 34653,
+    SPELL_CONE_OF_FIRE            = 30926,
+    SPELL_SUMMON_LIQUID_FIRE      = 23971,
+    SPELL_SUMMON_LIQUID_FIRE_H    = 30928,
+    SPELL_BELLOWING_ROAR          = 39427,
+    SPELL_REVENGE                 = 19130,
+    SPELL_REVENGE_H               = 40392,
+    SPELL_KIDNEY_SHOT             = 30621,
+    SPELL_FIRE_NOVA_VISUAL        = 19823
 };
 
-enum Misc
+const float VazrudenMiddle[3] = { -1406.5f, 1746.5f, 81.2f };
+
+const float VazrudenRing[2][3] =
 {
-    ACTION_FLY_DOWN             = 0,
-    POINT_MIDDLE                = 0,
-    POINT_FLIGHT                = 1
+    { -1430.0f, 1705.0f, 112.0f },
+    { -1377.0f, 1760.0f, 112.0f }
 };
 
-enum GroupPhase
+class boss_nazan : public CreatureScript
 {
-    GROUP_PHASE_1               = 0,
-    GROUP_PHASE_2               = 1
-};
+    public:
+        boss_nazan() : CreatureScript("boss_nazan") { }
 
-const Position NazanPos[3] =
-{
-    {-1430.37f, 1710.03f, 111.0f, 0.0f},
-    {-1428.40f, 1772.09f, 111.0f, 0.0f},
-    {-1373.84f, 1771.57f, 111.0f, 0.0f}
-};
-
-struct boss_vazruden_the_herald : public BossAI
-{
-    boss_vazruden_the_herald(Creature* creature) : BossAI(creature, DATA_VAZRUDEN) {}
-
-    void Reset() override
-    {
-        _Reset();
-        me->SetVisible(true);
-        me->SetReactState(REACT_PASSIVE);
-        me->SummonCreature(NPC_HELLFIRE_SENTRY, -1372.56f, 1724.31f, 82.967f, 5.3058f);
-        me->SummonCreature(NPC_HELLFIRE_SENTRY, -1383.39f, 1711.82f, 82.7961f, 5.67232f);
-    }
-
-    void AttackStart(Unit*) override {}
-
-    void JustSummoned(Creature* summon) override
-    {
-        summons.Summon(summon);
-        if (summon->GetEntry() != NPC_HELLFIRE_SENTRY)
+        struct boss_nazanAI : public BossAI
         {
-            summon->SetInCombatWithZone();
-        }
-    }
-
-    void MovementInform(uint32 type, uint32 id) override
-    {
-        if (type == POINT_MOTION_TYPE && id == POINT_MIDDLE)
-        {
-            me->SetVisible(false);
-            me->SummonCreature(NPC_VAZRUDEN, me->GetPositionX(), me->GetPositionY(), 81.2f, 5.46f);
-            me->SummonCreature(NPC_NAZAN, me->GetPositionX(), me->GetPositionY(), me->GetPositionZ(), 5.46f);
-        }
-    }
-
-    void SummonedCreatureDies(Creature* summon, Unit*) override
-    {
-        summons.Despawn(summon);
-        if (summon->GetEntry() == NPC_HELLFIRE_SENTRY && summons.size() == 0)
-        {
-            Talk(SAY_INTRO);
-            me->GetMotionMaster()->MovePoint(POINT_MIDDLE, -1406.5f, 1746.5f, 85.0f, false);
-            _JustEngagedWith();
-        }
-        else if (summons.size() == 0)
-        {
-            me->KillSelf();
-        }
-    }
-
-    void SummonedCreatureDespawn(Creature* summon) override
-    {
-        summons.Despawn(summon);
-        if (summon->GetEntry() != NPC_HELLFIRE_SENTRY)
-        {
-            BossAI::EnterEvadeMode();
-        }
-    }
-
-    void SetData(uint32 type, uint32 data) override
-    {
-        if (type == 0 && data == 1)
-        {
-            summons.DoZoneInCombat(NPC_HELLFIRE_SENTRY);
-        }
-    }
-
-    void UpdateAI(uint32  /*diff*/) override
-    {
-        if (!me->IsVisible() && summons.size() == 0)
-        {
-            BossAI::EnterEvadeMode();
-        }
-    }
-};
-
-struct boss_nazan : public ScriptedAI
-{
-    boss_nazan(Creature* creature) : ScriptedAI(creature)
-    {
-        _scheduler.SetValidator([this]
-        {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
-    }
-
-    void Reset() override
-    {
-        me->SetCanFly(true);
-        me->SetDisableGravity(true);
-    }
-
-    void EnterEvadeMode(EvadeReason /*why*/) override
-    {
-        me->DespawnOrUnsummon(1);
-    }
-
-    void JustEngagedWith(Unit*) override
-    {
-        _scheduler.CancelAll();
-        _scheduler.Schedule(5ms, GROUP_PHASE_1, [this](TaskContext context)
-        {
-            me->GetMotionMaster()->MovePoint(POINT_FLIGHT, NazanPos[urand(0, 2)], false);
-            _scheduler.DelayAll(7s);
-            context.Repeat(30s);
-        }).Schedule(5s, GROUP_PHASE_1, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_FIREBALL);
-            context.Repeat(4s, 6s);
-        });
-    }
-
-    void AttackStart(Unit* who) override
-    {
-        if (me->IsLevitating())
-        {
-            me->Attack(who, true);
-        }
-        else
-        {
-            ScriptedAI::AttackStart(who);
-        }
-    }
-
-    void DoAction(int32 param) override
-    {
-        if (param == ACTION_FLY_DOWN)
-        {
-            _scheduler.CancelGroup(GROUP_PHASE_1);
-            Talk(EMOTE_NAZAN);
-            me->SetReactState(REACT_PASSIVE);
-            me->InterruptNonMeleeSpells(true);
-            me->GetMotionMaster()->MovePoint(POINT_MIDDLE, -1406.5f, 1746.5f, 81.2f, false);
-        }
-    }
-
-    void MovementInform(uint32 type, uint32 id) override
-    {
-        if (type == POINT_MOTION_TYPE && id == POINT_MIDDLE)
-        {
-            me->SetCanFly(false);
-            me->SetDisableGravity(false);
-            me->SetReactState(REACT_AGGRESSIVE);
-            me->GetMotionMaster()->MoveChase(me->GetVictim());
-            _scheduler.Schedule(5s, GROUP_PHASE_2, [this](TaskContext context)
+            boss_nazanAI(Creature* creature) : BossAI(creature, DATA_NAZAN)
             {
-                DoCastVictim(SPELL_CONE_OF_FIRE);
-                context.Repeat(12s);
-            }).Schedule(6s, GROUP_PHASE_2, [this](TaskContext context)
-            {
-                DoCastRandomTarget(SPELL_FIREBALL);
-                context.Repeat(4s, 6s);
-            });
-
-            if (IsHeroic())
-            {
-                _scheduler.Schedule(10s, GROUP_PHASE_2, [this](TaskContext context)
-                {
-                    DoCastSelf(SPELL_BELLOWING_ROAR);
-                    context.Repeat(30s);
-                });
+                Initialize();
+                flight = true;
+                BellowingRoar_Timer = 0;
+                ConeOfFire_Timer = 0;
             }
-        }
-    }
 
-    void UpdateAI(uint32 diff) override
-    {
-        if (!UpdateVictim())
-            return;
-
-        _scheduler.Update(diff, [this]
+            void Initialize()
             {
-            if (!me->IsLevitating())
-                DoMeleeAttackIfReady();
-            });
+                Fireball_Timer = 4000;
+                Fly_Timer = 45000;
+                Turn_Timer = 0;
+            }
 
-    }
-
-private:
-    TaskScheduler _scheduler;
-};
-
-struct boss_vazruden : public ScriptedAI
-{
-    boss_vazruden(Creature* creature) : ScriptedAI(creature)
-    {
-        _scheduler.SetValidator([this]
-        {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
-    }
-
-    void Reset() override
-    {
-        _scheduler.CancelAll();
-        _nazanCalled = false;
-    }
-
-    void EnterEvadeMode(EvadeReason /*why*/) override
-    {
-        Talk(SAY_WIPE);
-        me->DespawnOrUnsummon(1);
-    }
-
-    void JustEngagedWith(Unit*) override
-    {
-        _scheduler.Schedule(5s, [this](TaskContext /*context*/)
-        {
-            Talk(SAY_AGGRO);
-        }).Schedule(4s, [this](TaskContext context)
-        {
-            DoCastVictim(SPELL_REVENGE);
-            context.Repeat(6s);
-        });
-    }
-
-    void KilledUnit(Unit*) override
-    {
-        if (!_hasSpoken)
-        {
-            _hasSpoken = true;
-            Talk(SAY_KILL);
-        }
-        _scheduler.Schedule(6s, [this](TaskContext /*context*/)
-        {
-            _hasSpoken = false;
-        });
-    }
-
-    void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*type*/, SpellSchoolMask /*school*/) override
-    {
-        if (!_nazanCalled && me->HealthBelowPctDamaged(35, damage))
-        {
-            _nazanCalled = true;
-            DoCastSelf(SPELL_CALL_NAZAN, true);
-        }
-    }
-
-    void JustDied(Unit*) override
-    {
-        Talk(SAY_DIE);
-    }
-
-    void UpdateAI(uint32 diff) override
-    {
-        if (!UpdateVictim())
-            return;
-
-        _scheduler.Update(diff, [this]
+            void Reset() override
             {
-                DoMeleeAttackIfReady();
-            });
-    }
+                Initialize();
+                _Reset();
+            }
 
-private:
-    bool _hasSpoken;
-    bool _nazanCalled;
-    TaskScheduler _scheduler;
-};
+            void JustEngagedWith(Unit* /*who*/) override { }
 
-class spell_vazruden_fireball : public SpellScript
-{
-    PrepareSpellScript(spell_vazruden_fireball);
+            void IsSummonedBy(WorldObject* summoner) override
+            {
+                if (summoner->GetEntry() == NPC_VAZRUDEN_HERALD)
+                    VazrudenGUID = summoner->GetGUID();
+            }
 
-    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
-    {
-        if (Unit* target = GetHitUnit())
+            void JustSummoned(Creature* summoned) override
+            {
+                if (summoned && summoned->GetEntry() == NPC_LIQUID_FIRE)
+                {
+                    summoned->SetLevel(me->GetLevel());
+                    summoned->SetFaction(me->GetFaction());
+                    summoned->CastSpell(summoned, DUNGEON_MODE(SPELL_SUMMON_LIQUID_FIRE, SPELL_SUMMON_LIQUID_FIRE_H), true);
+                    summoned->CastSpell(summoned, SPELL_FIRE_NOVA_VISUAL, true);
+                }
+            }
+
+            void SpellHitTarget(WorldObject* target, SpellInfo const* spellInfo) override
+            {
+                if (spellInfo->Id == uint32(SPELL_FIREBALL))
+                    me->SummonCreature(NPC_LIQUID_FIRE, target->GetPositionX(), target->GetPositionY(), target->GetPositionZ(), target->GetOrientation(), TEMPSUMMON_TIMED_DESPAWN, 30s);
+            }
+
+            void UpdateAI(uint32 diff) override
+            {
+                if (!UpdateVictim())
+                    return;
+
+                if (Fireball_Timer <= diff)
+                {
+                    if (Unit* victim = SelectTarget(SelectTargetMethod::Random, 0))
+                        DoCast(victim, SPELL_FIREBALL, true);
+                    Fireball_Timer = urand(4000, 7000);
+                }
+                else
+                    Fireball_Timer -= diff;
+
+                if (flight) // phase 1 - the flight
+                {
+                    Creature* Vazruden = ObjectAccessor::GetCreature(*me, VazrudenGUID);
+                    if (Fly_Timer < diff || !(Vazruden && Vazruden->IsAlive() && Vazruden->HealthAbovePct(20)))
+                    {
+                        flight = false;
+                        BellowingRoar_Timer = 6000;
+                        ConeOfFire_Timer = 12000;
+                        me->SetDisableGravity(false);
+                        me->SetWalk(true);
+                        me->GetMotionMaster()->Clear();
+                        if (Unit* victim = SelectTarget(SelectTargetMethod::MinDistance, 0))
+                            AttackStart(victim);
+                        DoStartMovement(me->GetVictim());
+                        Talk(EMOTE);
+                        return;
+                    }
+                    else
+                        Fly_Timer -= diff;
+
+                    if (Turn_Timer <= diff)
+                    {
+                        uint32 waypoint = (Fly_Timer/10000)%2;
+                        if (!me->IsWithinDist3d(VazrudenRing[waypoint][0], VazrudenRing[waypoint][1], VazrudenRing[waypoint][2], 5))
+                            me->GetMotionMaster()->MovePoint(0, VazrudenRing[waypoint][0], VazrudenRing[waypoint][1], VazrudenRing[waypoint][2]);
+                        Turn_Timer = 10000;
+                    }
+                    else
+                        Turn_Timer -= diff;
+                }
+                else // phase 2 - land fight
+                {
+                    if (ConeOfFire_Timer <= diff)
+                    {
+                        DoCast(me, SPELL_CONE_OF_FIRE);
+                        ConeOfFire_Timer = 12000;
+                        Fireball_Timer = 4000;
+                    }
+                    else
+                        ConeOfFire_Timer -= diff;
+
+                    if (IsHeroic())
+                    {
+                        if (BellowingRoar_Timer <= diff)
+                        {
+                            DoCast(me, SPELL_BELLOWING_ROAR);
+                            BellowingRoar_Timer = 45000;
+                        }
+                        else
+                            BellowingRoar_Timer -= diff;
+                    }
+                }
+            }
+
+            private:
+                uint32 Fireball_Timer;
+                uint32 ConeOfFire_Timer;
+                uint32 BellowingRoar_Timer;
+                uint32 Fly_Timer;
+                uint32 Turn_Timer;
+                bool flight;
+                ObjectGuid VazrudenGUID;
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
         {
-            target->CastSpell(target, SPELL_SUMMON_LIQUID_FIRE, true);
+            return GetHellfireRampartsAI<boss_nazanAI>(creature);
         }
-    }
-
-    void Register() override
-    {
-        OnEffectHitTarget += SpellEffectFn(spell_vazruden_fireball::HandleScriptEffect, EFFECT_1, SPELL_EFFECT_SCRIPT_EFFECT);
-    }
 };
 
-class spell_vazruden_call_nazan : public SpellScript
+class boss_vazruden : public CreatureScript
 {
-    PrepareSpellScript(spell_vazruden_call_nazan);
+    public:
+        boss_vazruden() : CreatureScript("boss_vazruden") { }
 
-    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
-    {
-        if (Unit* target = GetHitUnit())
+        struct boss_vazrudenAI : public BossAI
         {
-            target->GetAI()->DoAction(ACTION_FLY_DOWN);
-        }
-    }
+            boss_vazrudenAI(Creature* creature) : BossAI(creature, DATA_VAZRUDEN)
+            {
+                Initialize();
+            }
 
-    void Register() override
-    {
-        OnEffectHitTarget += SpellEffectFn(spell_vazruden_call_nazan::HandleScriptEffect, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
-    }
+            void Initialize()
+            {
+                Revenge_Timer = 4000;
+                UnsummonCheck = 2000;
+                WipeSaid = false;
+            }
+
+            void Reset() override
+            {
+                Initialize();
+                _Reset();
+            }
+
+            void JustEngagedWith(Unit* who) override
+            {
+                Talk(SAY_AGGRO);
+                BossAI::JustEngagedWith(who);
+            }
+
+            void KilledUnit(Unit* who) override
+            {
+                if (who && who->GetEntry() != NPC_VAZRUDEN)
+                    Talk(SAY_KILL);
+            }
+
+            void JustDied(Unit* killer) override
+            {
+                if (killer && killer != me)
+                    Talk(SAY_DIE);
+                _JustDied();
+            }
+
+            void UpdateAI(uint32 diff) override
+            {
+                if (!UpdateVictim())
+                {
+                    if (UnsummonCheck < diff && me->IsAlive())
+                    {
+                        if (!WipeSaid)
+                        {
+                            Talk(SAY_WIPE);
+                            WipeSaid = true;
+                        }
+                        me->DisappearAndDie();
+                    }
+                    else
+                        UnsummonCheck -= diff;
+                    return;
+                }
+
+                if (Revenge_Timer <= diff)
+                {
+                    if (Unit* victim = me->GetVictim())
+                        DoCast(victim, DUNGEON_MODE(SPELL_REVENGE, SPELL_REVENGE_H));
+                    Revenge_Timer = 5000;
+                }
+                else
+                    Revenge_Timer -= diff;
+            }
+
+            private:
+                uint32 Revenge_Timer;
+                bool WipeSaid;
+                uint32 UnsummonCheck;
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
+        {
+            return GetHellfireRampartsAI<boss_vazrudenAI>(creature);
+        }
 };
 
+class boss_vazruden_the_herald : public CreatureScript
+{
+    public:
+        boss_vazruden_the_herald() : CreatureScript("boss_vazruden_the_herald") { }
+
+        struct boss_vazruden_the_heraldAI : public ScriptedAI
+        {
+            boss_vazruden_the_heraldAI(Creature* creature) : ScriptedAI(creature)
+            {
+                Initialize();
+                summoned = false;
+                sentryDown = false;
+            }
+
+            void Initialize()
+            {
+                phase = 0;
+                waypoint = 0;
+                check = 0;
+            }
+
+            void Reset() override
+            {
+                Initialize();
+                UnsummonAdds();
+            }
+
+            void UnsummonAdds()
+            {
+                if (summoned)
+                {
+                    Creature* Nazan = ObjectAccessor::GetCreature(*me, NazanGUID);
+                    if (!Nazan)
+                        Nazan = me->FindNearestCreature(NPC_NAZAN, 5000);
+                    if (Nazan)
+                    {
+                        Nazan->DisappearAndDie();
+                        NazanGUID.Clear();
+                    }
+
+                    Creature* Vazruden = ObjectAccessor::GetCreature(*me, VazrudenGUID);
+                    if (!Vazruden)
+                        Vazruden = me->FindNearestCreature(NPC_VAZRUDEN, 5000);
+                    if (Vazruden)
+                    {
+                        Vazruden->DisappearAndDie();
+                        VazrudenGUID.Clear();
+                    }
+                    summoned = false;
+                    me->ClearUnitState(UNIT_STATE_ROOT);
+                    me->SetVisible(true);
+                }
+            }
+
+            void SummonAdds()
+            {
+                if (!summoned)
+                {
+                    if (Creature* Vazruden = me->SummonCreature(NPC_VAZRUDEN, VazrudenMiddle[0], VazrudenMiddle[1], VazrudenMiddle[2], 0, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 100min))
+                        VazrudenGUID = Vazruden->GetGUID();
+                    if (Creature* Nazan = me->SummonCreature(NPC_NAZAN, VazrudenMiddle[0], VazrudenMiddle[1], VazrudenMiddle[2], 0, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 100min))
+                    {
+                        NazanGUID = Nazan->GetGUID();
+                        if (Player* player = Nazan->SelectNearestPlayer(60.0f))
+                            Nazan->AI()->AttackStart(player);
+                    }
+                    summoned = true;
+                    me->SetVisible(false);
+                    me->AddUnitState(UNIT_STATE_ROOT);
+                }
+            }
+
+            void JustEngagedWith(Unit* /*who*/) override
+            {
+                if (phase == 0)
+                {
+                    phase = 1;
+                    check = 0;
+                    Talk(SAY_INTRO);
+                }
+            }
+
+            void JustSummoned(Creature* summon) override
+            {
+                if (!summon)
+                    return;
+                Unit* victim = me->GetVictim();
+                if (summon->GetEntry() == NPC_NAZAN)
+                {
+                    summon->SetDisableGravity(true);
+                    summon->SetSpeedRate(MOVE_FLIGHT, 2.5f);
+                    if (victim)
+                        AttackStartNoMove(victim);
+                }
+                else
+                    if (victim)
+                        summon->AI()->AttackStart(victim);
+            }
+
+            void SentryDownBy(Unit* killer)
+            {
+                if (sentryDown)
+                {
+                    AttackStartNoMove(killer);
+                    sentryDown = false;
+                }
+                else
+                    sentryDown = true;
+            }
+
+            void UpdateAI(uint32 diff) override
+            {
+                switch (phase)
+                {
+                case 0: // circle around the platform
+                    return;
+                    break;
+                case 1: // go to the middle and begin the fight
+                    if (check <= diff)
+                    {
+                        if (!me->IsWithinDist3d(VazrudenMiddle[0], VazrudenMiddle[1], VazrudenMiddle[2], 5))
+                        {
+                            me->GetMotionMaster()->Clear();
+                            me->GetMotionMaster()->MovePoint(0, VazrudenMiddle[0], VazrudenMiddle[1], VazrudenMiddle[2]);
+                            check = 1000;
+                        }
+                        else
+                        {
+                            SummonAdds();
+                            phase = 2;
+                            return;
+                        }
+                    }
+                    else
+                        check -= diff;
+                    break;
+                default: // adds do the job now
+                    if (check <= diff)
+                    {
+                        Creature* Nazan = ObjectAccessor::GetCreature(*me, NazanGUID);
+                        Creature* Vazruden = ObjectAccessor::GetCreature(*me, VazrudenGUID);
+                        if ((Nazan && Nazan->IsAlive()) || (Vazruden && Vazruden->IsAlive()))
+                        {
+                            if ((Nazan && Nazan->GetVictim()) || (Vazruden && Vazruden->GetVictim()))
+                                return;
+                            else
+                            {
+                                UnsummonAdds();
+                                EnterEvadeMode();
+                                return;
+                            }
+                        }
+                        if (!(Nazan && Nazan->IsAlive()) && !(Vazruden && Vazruden->IsAlive()))
+                        {
+                            me->DisappearAndDie();
+                        }
+                        check = 2000;
+                    }
+                    else
+                        check -= diff;
+                    break;
+                }
+            }
+
+            private:
+                uint32 phase;
+                uint32 waypoint;
+                uint32 check;
+                bool sentryDown;
+                ObjectGuid NazanGUID;
+                ObjectGuid VazrudenGUID;
+                bool summoned;
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
+        {
+            return GetHellfireRampartsAI<boss_vazruden_the_heraldAI>(creature);
+        }
+};
+
+class npc_hellfire_sentry : public CreatureScript
+{
+    public:
+        npc_hellfire_sentry() : CreatureScript("npc_hellfire_sentry") { }
+
+        struct npc_hellfire_sentryAI : public ScriptedAI
+        {
+            npc_hellfire_sentryAI(Creature* creature) : ScriptedAI(creature)
+            {
+                Initialize();
+            }
+
+            void Initialize()
+            {
+                KidneyShot_Timer = urand(3000, 7000);
+            }
+
+            void Reset() override
+            {
+                Initialize();
+            }
+
+            void JustEngagedWith(Unit* /*who*/) override { }
+
+            void JustDied(Unit* killer) override
+            {
+                if (!killer)
+                    return;
+
+                if (Creature* herald = me->FindNearestCreature(NPC_VAZRUDEN_HERALD, 150))
+                    ENSURE_AI(boss_vazruden_the_herald::boss_vazruden_the_heraldAI, herald->AI())->SentryDownBy(killer);
+            }
+
+            void UpdateAI(uint32 diff) override
+            {
+                if (!UpdateVictim())
+                    return;
+
+                if (KidneyShot_Timer <= diff)
+                {
+                    if (Unit* victim = me->GetVictim())
+                        DoCast(victim, SPELL_KIDNEY_SHOT);
+                    KidneyShot_Timer = 20000;
+                }
+                else
+                    KidneyShot_Timer -= diff;
+            }
+
+            private:
+                uint32 KidneyShot_Timer;
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
+        {
+            return GetHellfireRampartsAI<npc_hellfire_sentryAI>(creature);
+        }
+};
 void AddSC_boss_vazruden_the_herald()
 {
-    RegisterHellfireRampartsCreatureAI(boss_vazruden_the_herald);
-    RegisterHellfireRampartsCreatureAI(boss_vazruden);
-    RegisterHellfireRampartsCreatureAI(boss_nazan);
-    RegisterSpellScript(spell_vazruden_fireball);
-    RegisterSpellScript(spell_vazruden_call_nazan);
+    new boss_vazruden_the_herald();
+    new boss_vazruden();
+    new boss_nazan();
+    new npc_hellfire_sentry();
 }

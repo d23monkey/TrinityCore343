@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -43,7 +43,7 @@ void EventProcessor::Update(uint32 p_time)
     m_time += p_time;
 
     // main event loop
-    EventList::iterator i;
+    std::multimap<uint64, BasicEvent*>::iterator i;
     while (((i = m_events.begin()) != m_events.end()) && i->first <= m_time)
     {
         // get and remove event from queue
@@ -75,13 +75,12 @@ void EventProcessor::Update(uint32 p_time)
 
         // Reschedule non deletable events to be checked at
         // the next update tick
-        AddEvent(event, CalculateTime(1), false, 0);
+        AddEvent(event, CalculateTime(1ms), false);
     }
 }
 
 void EventProcessor::KillAllEvents(bool force)
 {
-    // first, abort all existing events
     for (auto itr = m_events.begin(); itr != m_events.end();)
     {
         // Abort events which weren't aborted already
@@ -111,35 +110,12 @@ void EventProcessor::KillAllEvents(bool force)
         m_events.clear();
 }
 
-void EventProcessor::CancelEventGroup(uint8 group)
-{
-    for (auto itr = m_events.begin(); itr != m_events.end();)
-    {
-        if (itr->second->m_eventGroup != group)
-        {
-            ++itr;
-            continue;
-        }
-
-        // Abort events which weren't aborted already
-        if (!itr->second->IsAborted())
-        {
-            itr->second->SetAborted();
-            itr->second->Abort(m_time);
-        }
-
-        delete itr->second;
-        itr = m_events.erase(itr);
-    }
-}
-
-void EventProcessor::AddEvent(BasicEvent* Event, uint64 e_time, bool set_addtime, uint8 eventGroup)
+void EventProcessor::AddEvent(BasicEvent* event, Milliseconds e_time, bool set_addtime)
 {
     if (set_addtime)
-        Event->m_addTime = m_time;
-    Event->m_execTime = e_time;
-    Event->m_eventGroup = eventGroup;
-    m_events.insert(std::pair<uint64, BasicEvent*>(e_time, Event));
+        event->m_addTime = m_time;
+    event->m_execTime = e_time.count();
+    m_events.insert(std::pair<uint64, BasicEvent*>(e_time.count(), event));
 }
 
 void EventProcessor::ModifyEventTime(BasicEvent* event, Milliseconds newTime)
@@ -154,14 +130,4 @@ void EventProcessor::ModifyEventTime(BasicEvent* event, Milliseconds newTime)
         m_events.insert(std::pair<uint64, BasicEvent*>(newTime.count(), event));
         break;
     }
-}
-
-uint64 EventProcessor::CalculateTime(uint64 t_offset) const
-{
-    return (m_time + t_offset);
-}
-
-uint64 EventProcessor::CalculateQueueTime(uint64 delay) const
-{
-    return CalculateTime(delay - (m_time % delay));
 }

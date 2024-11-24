@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,17 +18,12 @@
 #include "TotemAI.h"
 #include "CellImpl.h"
 #include "Creature.h"
-#include "DBCStores.h"
 #include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
 #include "ObjectAccessor.h"
+#include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Totem.h"
-
-/// @todo: this import is not necessary for compilation and marked as unused by the IDE
-//  however, for some reasons removing it would cause a damn linking issue
-//  there is probably some underlying problem with imports which should properly addressed
-//  see: https://github.com/azerothcore/azerothcore-wotlk/issues/9766
-#include "GridNotifiersImpl.h"
 
 int32 TotemAI::Permissible(Creature const* creature)
 {
@@ -38,26 +33,9 @@ int32 TotemAI::Permissible(Creature const* creature)
     return PERMIT_BASE_NO;
 }
 
-TotemAI::TotemAI(Creature* c) : CreatureAI(c)
+TotemAI::TotemAI(Creature* creature, uint32 scriptId) : NullCreatureAI(creature, scriptId), _victimGUID()
 {
-    ASSERT(c->IsTotem());
-}
-
-void TotemAI::SpellHit(Unit* /*caster*/, SpellInfo const* /*spellInfo*/)
-{
-}
-
-void TotemAI::DoAction(int32 /*param*/)
-{
-}
-
-void TotemAI::MoveInLineOfSight(Unit* /*who*/)
-{
-}
-
-void TotemAI::EnterEvadeMode(EvadeReason /*why*/)
-{
-    me->CombatStop(true);
+    ASSERT(creature->IsTotem(), "TotemAI: AI assigned to a non-totem creature (%s)!", creature->GetGUID().ToString().c_str());
 }
 
 void TotemAI::UpdateAI(uint32 /*diff*/)
@@ -65,76 +43,45 @@ void TotemAI::UpdateAI(uint32 /*diff*/)
     if (me->ToTotem()->GetTotemType() != TOTEM_ACTIVE)
         return;
 
-    if (!me->IsAlive())
-    {
+    if (!me->IsAlive() || me->IsNonMeleeSpellCast(false))
         return;
-    }
-
-    if (me->IsNonMeleeSpellCast(false))
-    {
-        if (Unit* victim = ObjectAccessor::GetUnit(*me, i_victimGuid))
-        {
-            if (!victim || !victim->IsAlive())
-            {
-                me->InterruptNonMeleeSpells(false);
-            }
-        }
-
-        return;
-    }
 
     // Search spell
-    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(me->ToTotem()->GetSpell());
+    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(me->ToTotem()->GetSpell(), me->GetMap()->GetDifficultyID());
     if (!spellInfo)
         return;
 
     // Get spell range
     float max_range = spellInfo->GetMaxRange(false);
 
-    // SPELLMOD_RANGE not applied in this place just because not existence range mods for attacking totems
+    // SpellModOp::Range not applied in this place just because not existence range mods for attacking totems
 
     // pointer to appropriate target if found any
-    Unit* victim = i_victimGuid ? ObjectAccessor::GetUnit(*me, i_victimGuid) : nullptr;
+    Unit* victim = !_victimGUID.IsEmpty() ? ObjectAccessor::GetUnit(*me, _victimGUID) : nullptr;
 
     // Search victim if no, not attackable, or out of range, or friendly (possible in case duel end)
-    if (!victim ||
-            !victim->isTargetableForAttack(true, me) || !me->IsWithinDistInMap(victim, max_range) ||
-            me->IsFriendlyTo(victim) || !me->CanSeeOrDetect(victim))
+    if (!victim || !victim->isTargetableForAttack() || !me->IsWithinDistInMap(victim, max_range) || me->IsFriendlyTo(victim) || !me->CanSeeOrDetect(victim))
     {
         victim = nullptr;
-        Acore::NearestAttackableUnitInObjectRangeCheck u_check(me, me, max_range);
-        Acore::UnitLastSearcher<Acore::NearestAttackableUnitInObjectRangeCheck> checker(me, victim, u_check);
-        Cell::VisitAllObjects(me, checker, max_range);
-    }
-
-    if (!victim && me->GetCharmerOrOwnerOrSelf()->IsInCombat())
-    {
-        victim = me->GetCharmerOrOwnerOrSelf()->getAttackerForHelper();
+        float extraSearchRadius = max_range > 0.0f ? EXTRA_CELL_SEARCH_RADIUS : 0.0f;
+        Trinity::NearestAttackableUnitInObjectRangeCheck u_check(me, me->GetCharmerOrOwnerOrSelf(), max_range);
+        Trinity::UnitLastSearcher<Trinity::NearestAttackableUnitInObjectRangeCheck> checker(me, victim, u_check);
+        Cell::VisitAllObjects(me, checker, max_range + extraSearchRadius);
     }
 
     // If have target
     if (victim)
     {
         // remember
-        i_victimGuid = victim->GetGUID();
+        _victimGUID = victim->GetGUID();
 
         // attack
-        me->SetInFront(victim);                         // client change orientation by self
-        me->CastSpell(victim, me->ToTotem()->GetSpell(), false);
+        me->CastSpell(victim, me->ToTotem()->GetSpell());
     }
     else
-        i_victimGuid.Clear();
+        _victimGUID.Clear();
 }
 
 void TotemAI::AttackStart(Unit* /*victim*/)
 {
-    // Sentry totem sends ping on attack
-    if (me->GetEntry() == SENTRY_TOTEM_ENTRY && me->GetOwner()->IsPlayer())
-    {
-        WorldPacket data(MSG_MINIMAP_PING, (8 + 4 + 4));
-        data << me->GetGUID();
-        data << me->GetPositionX();
-        data << me->GetPositionY();
-        me->GetOwner()->ToPlayer()->GetSession()->SendPacket(&data);
-    }
 }

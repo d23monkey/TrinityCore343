@@ -1,686 +1,470 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "AchievementCriteriaScript.h"
-#include "CombatAI.h"
-#include "CreatureScript.h"
-#include "PassiveAI.h"
+#include "ScriptMgr.h"
+#include "Creature.h"
+#include "CreatureAI.h"
 #include "Player.h"
 #include "SpellAuraEffects.h"
 #include "SpellMgr.h"
 #include "SpellScript.h"
-#include "SpellScriptLoader.h"
 #include "Vehicle.h"
 
-///////////////////////////////////////
-////// TABLE EVENT
-///////////////////////////////////////
-
-enum tableEvent
+enum PilgrimsBountyBuffFood
 {
-    // Spells
-    SPELL_PASS_TURKEY               = 66250,
-    SPELL_PASS_STUFFING             = 66259,
-    SPELL_PASS_PIE                  = 66260,
-    SPELL_PASS_CRANBERRY            = 66261,
-    SPELL_PASS_SWEET_POTATO         = 66262,
-
-    SPELL_VISUAL_THROW_TURKEY       = 61822,
-    SPELL_VISUAL_THROW_STUFFING     = 61823,
-    SPELL_VISUAL_THROW_PIE          = 61825,
-    SPELL_VISUAL_THROW_CRANBERRY    = 61821,
-    SPELL_VISUAL_THROW_SWEET_POTATO = 61824,
-
-    SPELL_VISUAL_BOUNCE_TURKEY      = 61928,
-    SPELL_VISUAL_BOUNCE_STUFFING    = 61927,
-    SPELL_VISUAL_BOUNCE_PIE         = 61926,
-    SPELL_VISUAL_BOUNCE_CRANBERRY   = 61925,
-    SPELL_VISUAL_BOUNCE_SWEET_POTATO = 61929,
-
-    SPELL_PLATE_TURKEY              = 61835,
-    SPELL_PLATE_STUFFING            = 61836,
-    SPELL_PLATE_PIE                 = 61838,
-    SPELL_PLATE_CRANBERRY           = 61833,
-    SPELL_PLATE_SWEET_POTATO        = 61837,
-
-    SPELL_STORE_TURKEY              = 61807,
-    SPELL_STORE_STUFFING            = 61806,
-    SPELL_STORE_PIE                 = 61805,
-    SPELL_STORE_CRANBERRY           = 61804,
-    SPELL_STORE_SWEET_POTATO        = 61808,
-
-    SPELL_CAN_EAT_TURKEY            = 61801,
-    SPELL_CAN_EAT_STUFFING          = 61800,
-    SPELL_CAN_EAT_PIE               = 61799,
-    SPELL_CAN_EAT_CRANBERRY         = 61798,
-    SPELL_CAN_EAT_SWEET_POTATO      = 61802,
-
-    SPELL_FEAST_ON_TURKEY           = 61784,
-    SPELL_FEAST_ON_STUFFING         = 61788,
-    SPELL_FEAST_ON_PIE              = 61787,
-    SPELL_FEAST_ON_CRANBERRY        = 61785,
-    SPELL_FEAST_ON_SWEET_POTATOES   = 61786,
-
-    SPELL_PLAYER_TURKEY             = 61842,
-    SPELL_PLAYER_STUFFING           = 61843,
-    SPELL_PLAYER_PIE                = 61845,
-    SPELL_PLAYER_CRANBERRY          = 61841,
-    SPELL_PLAYER_SWEET_POTATOES     = 61844,
-
-    SPELL_WELL_FED_TURKEY           = 65414,
-    SPELL_WELL_FED_STUFFING         = 65416,
-    SPELL_WELL_FED_PIE              = 65415,
-    SPELL_WELL_FED_CRANBERRY        = 65412,
-    SPELL_WELL_FED_SWEET_POTATOES   = 65410,
-
-    SPELL_ACHI_PASS_TURKEY          = 66373,
-    SPELL_ACHI_PASS_STUFFING        = 66375,
-    SPELL_ACHI_PASS_PIE             = 66374,
-    SPELL_ACHI_PASS_CRANBERRY       = 66372,
-    SPELL_ACHI_PASS_SWEET_POTATOES  = 66376,
-
-    SPELL_SPIRIT_OF_SHARING         = 61849,
-
-    // NPCs
-    NPC_STRUDY_PLATE                = 32839,
-    NPC_BOUNTIFUL_TABLE             = 32823,
+    // Pilgrims Bounty Buff Food
+    SPELL_WELL_FED_AP_TRIGGER       = 65414,
+    SPELL_WELL_FED_ZM_TRIGGER       = 65412,
+    SPELL_WELL_FED_HIT_TRIGGER      = 65416,
+    SPELL_WELL_FED_HASTE_TRIGGER    = 65410,
+    SPELL_WELL_FED_SPIRIT_TRIGGER   = 65415
 };
 
-/////////////////////////////
-// NPCs
-/////////////////////////////
-
-struct npc_pilgrims_bounty_chair : public VehicleAI
+class spell_pilgrims_bounty_buff_food : public AuraScript
 {
-    npc_pilgrims_bounty_chair(Creature* creature) : VehicleAI(creature)
+    uint32 const _triggeredSpellId;
+
+public:
+    spell_pilgrims_bounty_buff_food(uint32 triggeredSpellId) : AuraScript(), _triggeredSpellId(triggeredSpellId)
     {
-        plateGUID.Clear();
-        timerSpawnPlate = 1;
-        timerRotateChair = 0;
-        me->SetReactState(REACT_PASSIVE);
+        _handled = false;
     }
 
-    void MoveInLineOfSight(Unit*  /*who*/) override {}
-    void AttackStart(Unit*) override {}
-
-    void PassengerBoarded(Unit* who, int8  /*seatId*/, bool apply) override
+    void HandleTriggerSpell(AuraEffect const* /*aurEff*/)
     {
-        if (apply && who->IsPlayer())
-            who->ToPlayer()->SetClientControl(me, 0, true);
-    }
-
-    ObjectGuid plateGUID;
-    uint32 timerSpawnPlate;
-    uint32 timerRotateChair;
-
-    Creature* GetPlate() { return plateGUID ? ObjectAccessor::GetCreature(*me, plateGUID) : nullptr; }
-
-    void DamageTaken(Unit*, uint32& damage, DamageEffectType, SpellSchoolMask) override
-    {
-        damage = 0;
-    }
-
-    void DoAction(int32 param) override
-    {
-        switch (param)
-        {
-            case SPELL_VISUAL_THROW_TURKEY:
-            case SPELL_VISUAL_BOUNCE_TURKEY:
-                me->CastSpell(me, SPELL_STORE_TURKEY, true);
-                me->CastSpell(me, SPELL_CAN_EAT_TURKEY, true);
-                if (Unit* plate = GetPlate())
-                    plate->CastSpell(plate, SPELL_PLATE_TURKEY, true);
-                break;
-            case SPELL_VISUAL_THROW_STUFFING:
-            case SPELL_VISUAL_BOUNCE_STUFFING:
-                me->CastSpell(me, SPELL_STORE_STUFFING, true);
-                me->CastSpell(me, SPELL_CAN_EAT_STUFFING, true);
-                if (Unit* plate = GetPlate())
-                    plate->CastSpell(plate, SPELL_PLATE_STUFFING, true);
-                break;
-            case SPELL_VISUAL_THROW_PIE:
-            case SPELL_VISUAL_BOUNCE_PIE:
-                me->CastSpell(me, SPELL_STORE_PIE, true);
-                me->CastSpell(me, SPELL_CAN_EAT_PIE, true);
-                if (Unit* plate = GetPlate())
-                    plate->CastSpell(plate, SPELL_PLATE_PIE, true);
-                break;
-            case SPELL_VISUAL_THROW_CRANBERRY:
-            case SPELL_VISUAL_BOUNCE_CRANBERRY:
-                me->CastSpell(me, SPELL_STORE_CRANBERRY, true);
-                me->CastSpell(me, SPELL_CAN_EAT_CRANBERRY, true);
-                if (Unit* plate = GetPlate())
-                    plate->CastSpell(plate, SPELL_PLATE_CRANBERRY, true);
-                break;
-            case SPELL_VISUAL_THROW_SWEET_POTATO:
-            case SPELL_VISUAL_BOUNCE_SWEET_POTATO:
-                me->CastSpell(me, SPELL_STORE_SWEET_POTATO, true);
-                me->CastSpell(me, SPELL_CAN_EAT_SWEET_POTATO, true);
-                if (Unit* plate = GetPlate())
-                    plate->CastSpell(plate, SPELL_PLATE_SWEET_POTATO, true);
-                break;
-
-            // AURA REMOVAL
-            case SPELL_STORE_SWEET_POTATO:
-                me->RemoveAura(SPELL_CAN_EAT_SWEET_POTATO);
-                if (Unit* plate = GetPlate())
-                    plate->RemoveAura(SPELL_PLATE_SWEET_POTATO);
-                break;
-            case SPELL_STORE_TURKEY:
-                me->RemoveAura(SPELL_CAN_EAT_TURKEY);
-                if (Unit* plate = GetPlate())
-                    plate->RemoveAura(SPELL_PLATE_TURKEY);
-                break;
-            case SPELL_STORE_PIE:
-                me->RemoveAura(SPELL_CAN_EAT_PIE);
-                if (Unit* plate = GetPlate())
-                    plate->RemoveAura(SPELL_PLATE_PIE);
-                break;
-            case SPELL_STORE_STUFFING:
-                me->RemoveAura(SPELL_CAN_EAT_STUFFING);
-                if (Unit* plate = GetPlate())
-                    plate->RemoveAura(SPELL_PLATE_STUFFING);
-                break;
-            case SPELL_STORE_CRANBERRY:
-                me->RemoveAura(SPELL_CAN_EAT_CRANBERRY);
-                if (Unit* plate = GetPlate())
-                    plate->RemoveAura(SPELL_PLATE_CRANBERRY);
-                break;
-        }
-    }
-
-    void SpellHitTarget(Unit* target, SpellInfo const* spellInfo) override
-    {
-        Unit* charm = target->GetCharm();
-        if (!charm || !charm->ToCreature())
+        PreventDefaultAction();
+        if (_handled)
             return;
 
-        charm->ToCreature()->AI()->DoAction(spellInfo->Id);
-    }
-
-    void SpellHit(Unit*  /*target*/, SpellInfo const* spellInfo) override
-    {
-        switch (spellInfo->Id)
-        {
-            case SPELL_FEAST_ON_SWEET_POTATOES:
-                if (Aura* aur = me->GetAura(SPELL_STORE_SWEET_POTATO))
-                    aur->ModStackAmount(-1);
-                break;
-            case SPELL_FEAST_ON_TURKEY:
-                if (Aura* aur = me->GetAura(SPELL_STORE_TURKEY))
-                    aur->ModStackAmount(-1);
-                break;
-            case SPELL_FEAST_ON_PIE:
-                if (Aura* aur = me->GetAura(SPELL_STORE_PIE))
-                    aur->ModStackAmount(-1);
-                break;
-            case SPELL_FEAST_ON_STUFFING:
-                if (Aura* aur = me->GetAura(SPELL_STORE_STUFFING))
-                    aur->ModStackAmount(-1);
-                break;
-            case SPELL_FEAST_ON_CRANBERRY:
-                if (Aura* aur = me->GetAura(SPELL_STORE_CRANBERRY))
-                    aur->ModStackAmount(-1);
-                break;
-        }
-    }
-
-    void UpdateAI(uint32 diff) override
-    {
-        if (timerSpawnPlate)
-        {
-            timerSpawnPlate += diff;
-            if (timerSpawnPlate >= 1000)
-            {
-                if (Vehicle* table = me->GetVehicle())
-                    if (Unit* plateHolder = table->GetPassenger(6))
-                    {
-                        SeatMap::const_iterator itr = table->GetSeatIteratorForPassenger(me);
-                        if (itr == table->Seats.end())
-                            return;
-
-                        uint8 vehicleSeatId = itr->first;
-                        Creature* plate = me->SummonCreature(NPC_STRUDY_PLATE, me->GetPositionX(), me->GetPositionY(), me->GetPositionZ(), 0.0f);
-                        if (!plate)
-                            return;
-
-                        plateGUID = plate->GetGUID();
-                        plate->EnterVehicle(plateHolder, vehicleSeatId);
-                        timerSpawnPlate = 0;
-                        timerRotateChair = 1;
-                    }
-            }
-        }
-        if (timerRotateChair)
-        {
-            timerRotateChair += diff;
-            if (timerRotateChair >= 1000)
-            {
-                if (Creature* plate = GetPlate())
-                    me->SetFacingToObject(plate);
-
-                timerRotateChair = 0;
-            }
-        }
-    }
-};
-
-struct npc_pilgrims_bounty_plate : public NullCreatureAI
-{
-    npc_pilgrims_bounty_plate(Creature* creature) : NullCreatureAI(creature) { }
-
-    void SpellHit(Unit*  /*caster*/, SpellInfo const* spellInfo) override
-    {
-        switch (spellInfo->Id)
-        {
-            case SPELL_VISUAL_THROW_TURKEY:
-            case SPELL_VISUAL_THROW_STUFFING:
-            case SPELL_VISUAL_THROW_PIE:
-            case SPELL_VISUAL_THROW_CRANBERRY:
-            case SPELL_VISUAL_THROW_SWEET_POTATO:
-                if (TempSummon* ts = me->ToTempSummon())
-                    if (Unit* owner = ts->GetSummonerUnit())
-                        owner->ToCreature()->AI()->DoAction(spellInfo->Id);
-                break;
-        }
-    }
-};
-
-/////////////////////////////
-// Spells
-/////////////////////////////
-
-class spell_pilgrims_bounty_pass_generic : public SpellScript
-{
-    PrepareSpellScript(spell_pilgrims_bounty_pass_generic);
-
-    uint32 GetVisualThrow(uint32 passSpell, bool isPlayer)
-    {
-        if (isPlayer)
-        {
-            switch (passSpell)
-            {
-                case SPELL_PASS_TURKEY:
-                    return SPELL_VISUAL_BOUNCE_TURKEY;
-                case SPELL_PASS_STUFFING:
-                    return SPELL_VISUAL_BOUNCE_STUFFING;
-                case SPELL_PASS_PIE:
-                    return SPELL_VISUAL_BOUNCE_PIE;
-                case SPELL_PASS_CRANBERRY:
-                    return SPELL_VISUAL_BOUNCE_CRANBERRY;
-                case SPELL_PASS_SWEET_POTATO:
-                    return SPELL_VISUAL_BOUNCE_SWEET_POTATO;
-            }
-        }
-        else
-        {
-            switch (passSpell)
-            {
-                case SPELL_PASS_TURKEY:
-                    return SPELL_VISUAL_THROW_TURKEY;
-                case SPELL_PASS_STUFFING:
-                    return SPELL_VISUAL_THROW_STUFFING;
-                case SPELL_PASS_PIE:
-                    return SPELL_VISUAL_THROW_PIE;
-                case SPELL_PASS_CRANBERRY:
-                    return SPELL_VISUAL_THROW_CRANBERRY;
-                case SPELL_PASS_SWEET_POTATO:
-                    return SPELL_VISUAL_THROW_SWEET_POTATO;
-            }
-        }
-
-        return 0;
-    }
-
-    void HandleDummy(SpellEffIndex /*effIndex*/)
-    {
-        if (Unit* target = GetHitUnit())
-        {
-            uint32 spellId = 0;
-            switch (GetSpellInfo()->Id)
-            {
-                case SPELL_PASS_TURKEY:
-                    spellId = SPELL_STORE_TURKEY;
-                    break;
-                case SPELL_PASS_STUFFING:
-                    spellId = SPELL_STORE_STUFFING;
-                    break;
-                case SPELL_PASS_PIE:
-                    spellId = SPELL_STORE_PIE;
-                    break;
-                case SPELL_PASS_CRANBERRY:
-                    spellId = SPELL_STORE_CRANBERRY;
-                    break;
-                case SPELL_PASS_SWEET_POTATO:
-                    spellId = SPELL_STORE_SWEET_POTATO;
-                    break;
-            }
-
-            // player case
-            if (target->IsVehicle() && target->ToCreature())
-            {
-                if (Player* player = target->GetCharmerOrOwnerPlayerOrPlayerItself())
-                {
-                    GetCaster()->CastSpell(player, GetVisualThrow(GetSpellInfo()->Id, true), true);
-                    if (AuraEffect* aur = target->GetAuraEffectDummy(spellId))
-                    {
-                        if (aur->GetBase()->GetStackAmount() >= 5)
-                        {
-                            if (Player* casterPlayer = GetCaster()->GetCharmerOrOwnerPlayerOrPlayerItself())
-                            {
-                                casterPlayer->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_CAST_SPELL2, GetVisualThrow(GetSpellInfo()->Id, true));
-                            }
-                        }
-                    }
-                }
-            }
-            // normal case
-            else
-            {
-                if (TempSummon* ts = target->ToTempSummon())
-                    if (Unit* owner = ts->GetSummonerUnit())
-                        if (owner->GetEntry() == GetCaster()->GetEntry())
-                            return;
-
-                GetCaster()->CastSpell(target, GetVisualThrow(GetSpellInfo()->Id, false), true);
-            }
-        }
-
-        // Get chair charmer, passing achievement
-        if (Player* player = GetCaster()->GetCharmerOrOwnerPlayerOrPlayerItself())
-        {
-            uint32 spellId = 0;
-            switch (GetSpellInfo()->Id)
-            {
-                case SPELL_PASS_TURKEY:
-                    spellId = SPELL_ACHI_PASS_TURKEY;
-                    break;
-                case SPELL_PASS_STUFFING:
-                    spellId = SPELL_ACHI_PASS_STUFFING;
-                    break;
-                case SPELL_PASS_PIE:
-                    spellId = SPELL_ACHI_PASS_PIE;
-                    break;
-                case SPELL_PASS_CRANBERRY:
-                    spellId = SPELL_ACHI_PASS_CRANBERRY;
-                    break;
-                case SPELL_PASS_SWEET_POTATO:
-                    spellId = SPELL_ACHI_PASS_SWEET_POTATOES;
-                    break;
-            }
-
-            if (spellId)
-                player->CastSpell(player, spellId, true);
-        }
+        _handled = true;
+        GetTarget()->CastSpell(GetTarget(), _triggeredSpellId, true);
     }
 
     void Register() override
     {
-        OnEffectHitTarget += SpellEffectFn(spell_pilgrims_bounty_pass_generic::HandleDummy, EFFECT_0, SPELL_EFFECT_DUMMY);
+        OnEffectPeriodic += AuraEffectPeriodicFn(spell_pilgrims_bounty_buff_food::HandleTriggerSpell, EFFECT_2, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
     }
+
+    bool _handled;
 };
 
-class spell_pilgrims_bounty_feast_on_generic : public SpellScript
+enum FeastOnSpells
 {
-    PrepareSpellScript(spell_pilgrims_bounty_feast_on_generic);
+    FEAST_ON_TURKEY                     = 61784,
+    FEAST_ON_CRANBERRIES                = 61785,
+    FEAST_ON_SWEET_POTATOES             = 61786,
+    FEAST_ON_PIE                        = 61787,
+    FEAST_ON_STUFFING                   = 61788,
+    SPELL_CRANBERRY_HELPINS             = 61841,
+    SPELL_TURKEY_HELPINS                = 61842,
+    SPELL_STUFFING_HELPINS              = 61843,
+    SPELL_SWEET_POTATO_HELPINS          = 61844,
+    SPELL_PIE_HELPINS                   = 61845,
+    SPELL_ON_PLATE_EAT_VISUAL           = 61826
+};
+
+/* 61784 - Feast On Turkey
+   61785 - Feast On Cranberries
+   61786 - Feast On Sweet Potatoes
+   61787 - Feast On Pie
+   61788 - Feast On Stuffing */
+class spell_pilgrims_bounty_feast_on : public SpellScript
+{
+    bool Validate(SpellInfo const* spellInfo) override
+    {
+        return ValidateSpellEffect({ { spellInfo->Id, EFFECT_0 } })
+            && ValidateSpellEffect({ { uint32(spellInfo->GetEffect(EFFECT_0).CalcValue()), EFFECT_0 } });
+    }
 
     void HandleDummy(SpellEffIndex /*effIndex*/)
     {
-        Player* player = GetCaster()->GetCharmerOrOwnerPlayerOrPlayerItself();
-        if (!player)
-            return;
+        Unit* caster = GetCaster();
 
-        uint32 spellId = 0;
+        uint32 _spellId = 0;
         switch (GetSpellInfo()->Id)
         {
-            case SPELL_FEAST_ON_TURKEY:
-                spellId = SPELL_PLAYER_TURKEY;
+            case FEAST_ON_TURKEY:
+                _spellId = SPELL_TURKEY_HELPINS;
                 break;
-            case SPELL_FEAST_ON_STUFFING:
-                spellId = SPELL_PLAYER_STUFFING;
+            case FEAST_ON_CRANBERRIES:
+                _spellId = SPELL_CRANBERRY_HELPINS;
                 break;
-            case SPELL_FEAST_ON_PIE:
-                spellId = SPELL_PLAYER_PIE;
+            case FEAST_ON_SWEET_POTATOES:
+                _spellId = SPELL_SWEET_POTATO_HELPINS;
                 break;
-            case SPELL_FEAST_ON_CRANBERRY:
-                spellId = SPELL_PLAYER_CRANBERRY;
+            case FEAST_ON_PIE:
+                _spellId = SPELL_PIE_HELPINS;
                 break;
-            case SPELL_FEAST_ON_SWEET_POTATOES:
-                spellId = SPELL_PLAYER_SWEET_POTATOES;
+            case FEAST_ON_STUFFING:
+                _spellId = SPELL_STUFFING_HELPINS;
                 break;
+            default:
+                return;
         }
 
-        if (spellId)
-        {
-            player->CastSpell(player, spellId, true);
-            if (AuraEffect* aur = player->GetAuraEffectDummy(spellId))
-            {
-                if (aur->GetBase()->GetStackAmount() >= 5)
+        if (Vehicle* vehicle = caster->GetVehicleKit())
+            if (Unit* target = vehicle->GetPassenger(0))
+                if (Player* player = target->ToPlayer())
                 {
-                    switch (spellId)
-                    {
-                        case SPELL_PLAYER_TURKEY:
-                            player->CastSpell(player, SPELL_WELL_FED_TURKEY, true);
-                            break;
-                        case SPELL_PLAYER_STUFFING:
-                            player->CastSpell(player, SPELL_WELL_FED_STUFFING, true);
-                            break;
-                        case SPELL_PLAYER_PIE:
-                            player->CastSpell(player, SPELL_WELL_FED_PIE, true);
-                            break;
-                        case SPELL_PLAYER_CRANBERRY:
-                            player->CastSpell(player, SPELL_WELL_FED_CRANBERRY, true);
-                            break;
-                        case SPELL_PLAYER_SWEET_POTATOES:
-                            player->CastSpell(player, SPELL_WELL_FED_SWEET_POTATOES, true);
-                            break;
-                    }
-
-                    uint8 count = 0;
-                    Unit::AuraEffectList const& dummyAuras = player->GetAuraEffectsByType(SPELL_AURA_DUMMY);
-                    for (Unit::AuraEffectList::const_iterator i = dummyAuras.begin(); i != dummyAuras.end(); ++i)
-                    {
-                        if ((*i)->GetId() >= SPELL_PLAYER_CRANBERRY && (*i)->GetId() <= SPELL_PLAYER_PIE)
-                            if ((*i)->GetBase()->GetStackAmount() >= 5)
-                                ++count;
-                    }
-
-                    // Cast spirit of sharing
-                    if (count >= 5)
-                        player->CastSpell(player, SPELL_SPIRIT_OF_SHARING, true);
+                    player->CastSpell(player, SPELL_ON_PLATE_EAT_VISUAL, true);
+                    caster->CastSpell(player, _spellId, CastSpellExtraArgs(TRIGGERED_FULL_MASK)
+                        .SetOriginalCaster(player->GetGUID()));
                 }
-            }
+
+        if (Aura* aura = caster->GetAura(GetEffectValue()))
+        {
+            if (aura->GetStackAmount() == 1)
+                caster->RemoveAurasDueToSpell(aura->GetSpellInfo()->GetEffect(EFFECT_0).CalcValue());
+            aura->ModStackAmount(-1);
         }
     }
 
     void Register() override
     {
-        OnEffectHitTarget += SpellEffectFn(spell_pilgrims_bounty_feast_on_generic::HandleDummy, EFFECT_0, SPELL_EFFECT_DUMMY);
+        OnEffectHitTarget += SpellEffectFn(spell_pilgrims_bounty_feast_on::HandleDummy, EFFECT_0, SPELL_EFFECT_DUMMY);
     }
 };
 
-enum tTracker
+enum TheTurkinator
 {
-    SPELL_TURKEY_TRACKER                = 62014,
-    SPELL_ACHI_TURKINATOR_CREDIT        = 62021
+    SPELL_KILL_COUNTER_VISUAL       = 62015,
+    SPELL_KILL_COUNTER_VISUAL_MAX   = 62021,
+    EMOTE_TURKEY_HUNTER             = 0,
+    EMOTE_TURKEY_DOMINATION         = 1,
+    EMOTE_TURKEY_SLAUGHTER          = 2,
+    EMOTE_TURKEY_TRIUMPH            = 3
 };
 
-enum Say
-{
-    SAY_TURKEY_HUNTER                       = 33163,
-    SAY_TURKEY_DOMINATION                   = 33164,
-    SAY_TURKEY_SLAUGHTER                    = 33165,
-    SAY_TURKEY_TRIUMPH                      = 33167
-};
-
+// 62014 - Turkey Tracker
 class spell_pilgrims_bounty_turkey_tracker : public SpellScript
 {
-    PrepareSpellScript(spell_pilgrims_bounty_turkey_tracker);
-
-    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
+    bool Validate(SpellInfo const* /*spell*/) override
     {
-        if (Player* target = GetHitPlayer())
+        return ValidateSpellInfo({ SPELL_KILL_COUNTER_VISUAL, SPELL_KILL_COUNTER_VISUAL_MAX });
+    }
+
+    void HandleScript(SpellEffIndex /*effIndex*/)
+    {
+        Creature* caster = GetCaster()->ToCreature();
+        Unit* target = GetHitUnit();
+
+        if (!target || !caster)
+            return;
+
+        if (target->HasAura(SPELL_KILL_COUNTER_VISUAL_MAX))
+            return;
+
+        if (Aura const* aura = target->GetAura(GetSpellInfo()->Id))
         {
-            if (AuraEffect* aurEff = target->GetAuraEffectDummy(SPELL_TURKEY_TRACKER))
+            switch (aura->GetStackAmount())
             {
-                uint32 stackAmount = aurEff->GetBase()->GetStackAmount();
-                switch (stackAmount)
+                case 10:
+                    caster->AI()->Talk(EMOTE_TURKEY_HUNTER, target);
+                    break;
+                case 20:
+                    caster->AI()->Talk(EMOTE_TURKEY_DOMINATION, target);
+                    break;
+                case 30:
+                    caster->AI()->Talk(EMOTE_TURKEY_SLAUGHTER, target);
+                    break;
+                case 40:
+                    caster->AI()->Talk(EMOTE_TURKEY_TRIUMPH, target);
+                    target->CastSpell(target, SPELL_KILL_COUNTER_VISUAL_MAX, true);
+                    target->RemoveAurasDueToSpell(GetSpellInfo()->Id);
+                    break;
+                default:
+                    return;
+            }
+            target->CastSpell(target, SPELL_KILL_COUNTER_VISUAL, true);
+        }
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget += SpellEffectFn(spell_pilgrims_bounty_turkey_tracker::HandleScript, EFFECT_1, SPELL_EFFECT_SCRIPT_EFFECT);
+    }
+};
+
+enum SpiritOfSharing
+{
+    SPELL_THE_SPIRIT_OF_SHARING    = 61849
+};
+
+class spell_pilgrims_bounty_well_fed : public SpellScript
+{
+    uint32 _triggeredSpellId;
+
+public:
+    spell_pilgrims_bounty_well_fed(uint32 triggeredSpellId) : SpellScript(), _triggeredSpellId(triggeredSpellId) { }
+
+private:
+    bool Validate(SpellInfo const* /*spell*/) override
+    {
+        return ValidateSpellInfo({ _triggeredSpellId });
+    }
+
+    void HandleScript(SpellEffIndex effIndex)
+    {
+        PreventHitDefaultEffect(effIndex);
+        Player* target = GetHitPlayer();
+        if (!target)
+            return;
+
+        if (Aura const* aura = target->GetAura(GetSpellInfo()->Id))
+        {
+            if (aura->GetStackAmount() == 5)
+                target->CastSpell(target, _triggeredSpellId, true);
+        }
+
+        Aura const* turkey = target->GetAura(SPELL_TURKEY_HELPINS);
+        Aura const* cranberies = target->GetAura(SPELL_CRANBERRY_HELPINS);
+        Aura const* stuffing = target->GetAura(SPELL_STUFFING_HELPINS);
+        Aura const* sweetPotatoes = target->GetAura(SPELL_SWEET_POTATO_HELPINS);
+        Aura const* pie = target->GetAura(SPELL_PIE_HELPINS);
+
+        if ((turkey && turkey->GetStackAmount() == 5) && (cranberies && cranberies->GetStackAmount() == 5) && (stuffing && stuffing->GetStackAmount() == 5)
+            && (sweetPotatoes && sweetPotatoes->GetStackAmount() == 5) && (pie && pie->GetStackAmount() == 5))
+        {
+            target->CastSpell(target, SPELL_THE_SPIRIT_OF_SHARING, true);
+            target->RemoveAurasDueToSpell(SPELL_TURKEY_HELPINS);
+            target->RemoveAurasDueToSpell(SPELL_CRANBERRY_HELPINS);
+            target->RemoveAurasDueToSpell(SPELL_STUFFING_HELPINS);
+            target->RemoveAurasDueToSpell(SPELL_SWEET_POTATO_HELPINS);
+            target->RemoveAurasDueToSpell(SPELL_PIE_HELPINS);
+        }
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget += SpellEffectFn(spell_pilgrims_bounty_well_fed::HandleScript, EFFECT_1, SPELL_EFFECT_SCRIPT_EFFECT);
+    }
+};
+
+enum BountifulTableMisc
+{
+    SEAT_PLAYER                             = 0,
+    SEAT_PLATE_HOLDER                       = 6,
+    NPC_BOUNTIFUL_TABLE                     = 32823,
+    SPELL_ON_PLATE_TURKEY                   = 61928,
+    SPELL_ON_PLATE_CRANBERRIES              = 61925,
+    SPELL_ON_PLATE_STUFFING                 = 61927,
+    SPELL_ON_PLATE_SWEET_POTATOES           = 61929,
+    SPELL_ON_PLATE_PIE                      = 61926,
+    SPELL_PASS_THE_TURKEY                   = 66373,
+    SPELL_PASS_THE_CRANBERRIES              = 66372,
+    SPELL_PASS_THE_STUFFING                 = 66375,
+    SPELL_PASS_THE_SWEET_POTATOES           = 66376,
+    SPELL_PASS_THE_PIE                      = 66374,
+    SPELL_ON_PLATE_VISUAL_PIE               = 61825,
+    SPELL_ON_PLATE_VISUAL_CRANBERRIES       = 61821,
+    SPELL_ON_PLATE_VISUAL_POTATOES          = 61824,
+    SPELL_ON_PLATE_VISUAL_TURKEY            = 61822,
+    SPELL_ON_PLATE_VISUAL_STUFFING          = 61823,
+    SPELL_A_SERVING_OF_CRANBERRIES_PLATE    = 61833,
+    SPELL_A_SERVING_OF_TURKEY_PLATE         = 61835,
+    SPELL_A_SERVING_OF_STUFFING_PLATE       = 61836,
+    SPELL_A_SERVING_OF_SWEET_POTATOES_PLATE = 61837,
+    SPELL_A_SERVING_OF_PIE_PLATE            = 61838,
+    SPELL_A_SERVING_OF_CRANBERRIES_CHAIR    = 61804,
+    SPELL_A_SERVING_OF_TURKEY_CHAIR         = 61807,
+    SPELL_A_SERVING_OF_STUFFING_CHAIR       = 61806,
+    SPELL_A_SERVING_OF_SWEET_POTATOES_CHAIR = 61808,
+    SPELL_A_SERVING_OF_PIE_CHAIR            = 61805
+};
+
+/* 66250 - Pass The Turkey
+   66259 - Pass The Stuffing
+   66260 - Pass The Pie
+   66261 - Pass The Cranberries
+   66262 - Pass The Sweet Potatoes */
+class spell_pilgrims_bounty_on_plate : public SpellScript
+{
+    uint32 _triggeredSpellId1;
+    uint32 _triggeredSpellId2;
+    uint32 _triggeredSpellId3;
+    uint32 _triggeredSpellId4;
+
+public:
+    spell_pilgrims_bounty_on_plate(uint32 triggeredSpellId1, uint32 triggeredSpellId2, uint32 triggeredSpellId3, uint32 triggeredSpellId4) : SpellScript(),
+        _triggeredSpellId1(triggeredSpellId1), _triggeredSpellId2(triggeredSpellId2), _triggeredSpellId3(triggeredSpellId3), _triggeredSpellId4(triggeredSpellId4) { }
+
+private:
+    bool Validate(SpellInfo const* /*spell*/) override
+    {
+        return ValidateSpellInfo(
+        {
+            _triggeredSpellId1,
+            _triggeredSpellId2,
+            _triggeredSpellId3,
+            _triggeredSpellId4
+        });
+    }
+
+    Vehicle* GetTable(Unit* target)
+    {
+        if (target->GetTypeId() == TYPEID_PLAYER)
+        {
+            if (Unit* vehBase = target->GetVehicleBase())
+                if (Vehicle* table = vehBase->GetVehicle())
+                    if (table->GetCreatureEntry() == NPC_BOUNTIFUL_TABLE)
+                        return table;
+        }
+        else if (Vehicle* veh = target->GetVehicle())
+            if (veh->GetCreatureEntry() == NPC_BOUNTIFUL_TABLE)
+                return veh;
+
+        return nullptr;
+    }
+
+    Unit* GetPlateInSeat(Vehicle* table, uint8 seat)
+    {
+        if (Unit* holderUnit = table->GetPassenger(SEAT_PLATE_HOLDER))
+            if (Vehicle* holder = holderUnit->GetVehicleKit())
+                if (Unit* plate = holder->GetPassenger(seat))
+                    return plate;
+
+        return nullptr;
+    }
+
+    void HandleDummy(SpellEffIndex /*effIndex*/)
+    {
+        Unit* caster = GetCaster();
+        Unit* target = GetHitUnit();
+        if (!target || caster == target)
+            return;
+
+        Vehicle* table = GetTable(caster);
+        if (!table || table != GetTable(target))
+            return;
+
+        if (Vehicle* casterChair = caster->GetVehicleKit())
+            if (Unit* casterPlr = casterChair->GetPassenger(SEAT_PLAYER))
+            {
+                if (casterPlr == target)
+                    return;
+
+                casterPlr->CastSpell(casterPlr, _triggeredSpellId2, true); //Credit for Sharing is Caring(always)
+
+                uint8 seat = target->GetTransSeat();
+                if (target->GetTypeId() == TYPEID_PLAYER && target->GetVehicleBase())
+                    seat = target->GetVehicleBase()->GetTransSeat();
+
+                if (Unit* plate = GetPlateInSeat(table, seat))
                 {
-                    case 10:
-                        target->Whisper(SAY_TURKEY_HUNTER, target, true);
-                        break;
-                    case 20:
-                        target->Whisper(SAY_TURKEY_DOMINATION, target, true);
-                        break;
-                    case 30:
-                        target->Whisper(SAY_TURKEY_SLAUGHTER, target, true);
-                        break;
-                    case 40:
-                        target->Whisper(SAY_TURKEY_TRIUMPH, target, true);
-                        target->CastSpell(target, SPELL_ACHI_TURKINATOR_CREDIT, true);
-                        aurEff->GetBase()->Remove();
-                        break;
+                    if (target->GetTypeId() == TYPEID_PLAYER) //Food Fight case
+                    {
+                        casterPlr->CastSpell(target, _triggeredSpellId1, true);
+                        caster->CastSpell(target->GetVehicleBase(), _triggeredSpellId4, true); //CanEat-chair(always)
+                    }
+                    else
+                    {
+                        casterPlr->CastSpell(plate, _triggeredSpellId3, true); //Food Visual on plate
+                        caster->CastSpell(target, _triggeredSpellId4, true); //CanEat-chair(always)
+                    }
                 }
             }
-        }
     }
 
     void Register() override
     {
-        OnEffectHitTarget += SpellEffectFn(spell_pilgrims_bounty_turkey_tracker::HandleScriptEffect, EFFECT_1, SPELL_EFFECT_SCRIPT_EFFECT);
+        OnEffectHitTarget += SpellEffectFn(spell_pilgrims_bounty_on_plate::HandleDummy, EFFECT_0, SPELL_EFFECT_DUMMY);
     }
 };
 
-class spell_pilgrims_bounty_serve_generic : public AuraScript
+/* 61804 - A Serving of Cranberries
+   61805 - A Serving of Pie
+   61806 - A Serving of Stuffing
+   61807 - A Serving of Turkey
+   61808 - A Serving of Sweet Potatoes
+   61793 - Cranberry Server
+   61794 - Pie Server
+   61795 - Stuffing Server
+   61796 - Turkey Server
+   61797 - Sweet Potatoes Server */
+class spell_pilgrims_bounty_a_serving_of : public AuraScript
 {
-    PrepareAuraScript(spell_pilgrims_bounty_serve_generic);
+    uint32 _triggeredSpellId;
 
-    void OnAuraRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
+public:
+    spell_pilgrims_bounty_a_serving_of(uint32 triggeredSpellId) : AuraScript(), _triggeredSpellId(triggeredSpellId) { }
+
+private:
+    bool Validate(SpellInfo const* /*spell*/) override
+    {
+        return ValidateSpellInfo({ _triggeredSpellId });
+    }
+
+    void OnApply(AuraEffect const* aurEff, AuraEffectHandleModes /*mode*/)
     {
         Unit* target = GetTarget();
-        if (target->IsCreature())
-            target->ToCreature()->AI()->DoAction(GetSpellInfo()->Id);
+        target->CastSpell(target, uint32(aurEff->GetAmount()), true);
+        HandlePlate(target, true);
+    }
+
+    void OnRemove(AuraEffect const* aurEff, AuraEffectHandleModes /*mode*/)
+    {
+        Unit* target = GetTarget();
+        target->RemoveAurasDueToSpell(aurEff->GetAmount());
+        HandlePlate(target, false);
+    }
+
+    void HandlePlate(Unit* target, bool apply)
+    {
+        if (Vehicle* table = target->GetVehicle())
+            if (Unit* holderUnit = table->GetPassenger(SEAT_PLATE_HOLDER))
+                if (Vehicle* holder = holderUnit->GetVehicleKit())
+                    if (Unit* plate = holder->GetPassenger(target->GetTransSeat()))
+                    {
+                        if (apply)
+                            target->CastSpell(plate, _triggeredSpellId, true);
+                        else
+                            plate->RemoveAurasDueToSpell(_triggeredSpellId);
+                    }
     }
 
     void Register() override
     {
-        OnEffectRemove += AuraEffectRemoveFn(spell_pilgrims_bounty_serve_generic::OnAuraRemove, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
+        AfterEffectApply += AuraEffectApplyFn(spell_pilgrims_bounty_a_serving_of::OnApply, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
+        OnEffectRemove += AuraEffectRemoveFn(spell_pilgrims_bounty_a_serving_of::OnRemove, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
     }
 };
 
-class spell_pilgrims_bounty_food_aura : public AuraScript
+void AddSC_event_pilgrims_bounty()
 {
-    PrepareAuraScript(spell_pilgrims_bounty_food_aura);
-
-    void RecalculateHook(AuraEffect const* /*aurEffect*/, int32& amount, bool& canBeRecalculated)
-    {
-        if (GetCaster())
-        {
-            if (GetId() == 66041)
-                amount = CalculatePct(GetCaster()->GetMaxPower(POWER_MANA), 20);
-            else
-                amount = CalculatePct(GetCaster()->GetMaxHealth(), 15);
-        }
-        canBeRecalculated = true;
-    }
-
-    void Register() override
-    {
-        if (m_scriptSpellId == 66041)
-            DoEffectCalcAmount += AuraEffectCalcAmountFn(spell_pilgrims_bounty_food_aura::RecalculateHook, EFFECT_0, SPELL_AURA_MOD_POWER_REGEN);
-        else if (m_scriptSpellId != 66477)
-            DoEffectCalcAmount += AuraEffectCalcAmountFn(spell_pilgrims_bounty_food_aura::RecalculateHook, EFFECT_0, SPELL_AURA_MOD_REGEN);
-    }
-};
-
-class spell_pilgrims_bounty_food : public SpellScript
-{
-    PrepareSpellScript(spell_pilgrims_bounty_food);
-
-    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
-    {
-        if (Unit* target = GetHitUnit())
-        {
-            target->AddAura(sSpellMgr->GetSpellInfo(65422), 1, target);
-            target->CastSpell(target, 66041, true);
-            target->CastSpell(target, 66622, true);
-        }
-    }
-
-    void Register() override
-    {
-        if (m_scriptSpellId == 66477)
-            OnEffectHitTarget += SpellEffectFn(spell_pilgrims_bounty_food::HandleScriptEffect, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
-    }
-};
-
-/////////////////////////////
-// Achievements
-/////////////////////////////
-enum pilgrimsPeril
-{
-    ITEM_PILGRIMS_ROBE          = 46824,
-    ITEM_PILGRIMS_ATTIRE        = 46800,
-    ITEM_PILGRIMS_DRESS         = 44785,
-    ITEM_PILGRIMS_HAT           = 46723,
-};
-
-class achievement_pb_pilgrims_peril : public AchievementCriteriaScript
-{
-public:
-    achievement_pb_pilgrims_peril() : AchievementCriteriaScript("achievement_pb_pilgrims_peril") { }
-
-    bool OnCheck(Player* source, Unit* /*target*/, uint32 /*criteria_id*/) override
-    {
-        if (source->HasItemOrGemWithIdEquipped(ITEM_PILGRIMS_DRESS, 1) || source->HasItemOrGemWithIdEquipped(ITEM_PILGRIMS_ROBE, 1) || source->HasItemOrGemWithIdEquipped(ITEM_PILGRIMS_ATTIRE, 1))
-            return true;
-
-        return false;
-    }
-};
-
-class achievement_pb_terokkar_turkey_time : public AchievementCriteriaScript
-{
-public:
-    achievement_pb_terokkar_turkey_time() : AchievementCriteriaScript("achievement_pb_terokkar_turkey_time") { }
-
-    bool OnCheck(Player* source, Unit* /*target*/, uint32 /*criteria_id*/) override
-    {
-        if (source->HasItemOrGemWithIdEquipped(ITEM_PILGRIMS_HAT, 1) && (source->HasItemOrGemWithIdEquipped(ITEM_PILGRIMS_DRESS, 1) || source->HasItemOrGemWithIdEquipped(ITEM_PILGRIMS_ROBE, 1) || source->HasItemOrGemWithIdEquipped(ITEM_PILGRIMS_ATTIRE, 1)))
-            return true;
-
-        return false;
-    }
-};
-
-void AddSC_event_pilgrims_end_scripts()
-{
-    // Spells
-    RegisterSpellScript(spell_pilgrims_bounty_pass_generic);
-    RegisterSpellScript(spell_pilgrims_bounty_feast_on_generic);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_buff_food, "spell_gen_slow_roasted_turkey", SPELL_WELL_FED_AP_TRIGGER);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_buff_food, "spell_gen_cranberry_chutney", SPELL_WELL_FED_ZM_TRIGGER);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_buff_food, "spell_gen_spice_bread_stuffing", SPELL_WELL_FED_HIT_TRIGGER);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_buff_food, "spell_gen_pumpkin_pie", SPELL_WELL_FED_SPIRIT_TRIGGER);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_buff_food, "spell_gen_candied_sweet_potato", SPELL_WELL_FED_HASTE_TRIGGER);
+    RegisterSpellScript(spell_pilgrims_bounty_feast_on);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_well_fed, "spell_pilgrims_bounty_well_fed_turkey", SPELL_WELL_FED_AP_TRIGGER);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_well_fed, "spell_pilgrims_bounty_well_fed_cranberry", SPELL_WELL_FED_ZM_TRIGGER);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_well_fed, "spell_pilgrims_bounty_well_fed_stuffing", SPELL_WELL_FED_HIT_TRIGGER);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_well_fed, "spell_pilgrims_bounty_well_fed_sweet_potatoes", SPELL_WELL_FED_HASTE_TRIGGER);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_well_fed, "spell_pilgrims_bounty_well_fed_pie", SPELL_WELL_FED_SPIRIT_TRIGGER);
     RegisterSpellScript(spell_pilgrims_bounty_turkey_tracker);
-    RegisterSpellScript(spell_pilgrims_bounty_serve_generic);
-    RegisterSpellAndAuraScriptPair(spell_pilgrims_bounty_food, spell_pilgrims_bounty_food_aura);
-
-    // Npcs
-    RegisterCreatureAI(npc_pilgrims_bounty_chair);
-    RegisterCreatureAI(npc_pilgrims_bounty_plate);
-
-    // Achievements
-    new achievement_pb_pilgrims_peril();
-    new achievement_pb_terokkar_turkey_time();
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_on_plate, "spell_pilgrims_bounty_on_plate_turkey", SPELL_ON_PLATE_TURKEY, SPELL_PASS_THE_TURKEY, SPELL_ON_PLATE_VISUAL_TURKEY, SPELL_A_SERVING_OF_TURKEY_CHAIR);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_on_plate, "spell_pilgrims_bounty_on_plate_cranberries", SPELL_ON_PLATE_CRANBERRIES, SPELL_PASS_THE_CRANBERRIES, SPELL_ON_PLATE_VISUAL_CRANBERRIES, SPELL_A_SERVING_OF_CRANBERRIES_CHAIR);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_on_plate, "spell_pilgrims_bounty_on_plate_stuffing", SPELL_ON_PLATE_STUFFING, SPELL_PASS_THE_STUFFING, SPELL_ON_PLATE_VISUAL_STUFFING, SPELL_A_SERVING_OF_STUFFING_CHAIR);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_on_plate, "spell_pilgrims_bounty_on_plate_sweet_potatoes", SPELL_ON_PLATE_SWEET_POTATOES, SPELL_PASS_THE_SWEET_POTATOES, SPELL_ON_PLATE_VISUAL_POTATOES, SPELL_A_SERVING_OF_SWEET_POTATOES_CHAIR);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_on_plate, "spell_pilgrims_bounty_on_plate_pie", SPELL_ON_PLATE_PIE, SPELL_PASS_THE_PIE, SPELL_ON_PLATE_VISUAL_PIE, SPELL_A_SERVING_OF_PIE_CHAIR);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_a_serving_of, "spell_pilgrims_bounty_a_serving_of_cranberries", SPELL_A_SERVING_OF_CRANBERRIES_PLATE);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_a_serving_of, "spell_pilgrims_bounty_a_serving_of_turkey", SPELL_A_SERVING_OF_TURKEY_PLATE);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_a_serving_of, "spell_pilgrims_bounty_a_serving_of_stuffing", SPELL_A_SERVING_OF_STUFFING_PLATE);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_a_serving_of, "spell_pilgrims_bounty_a_serving_of_potatoes", SPELL_A_SERVING_OF_SWEET_POTATOES_PLATE);
+    RegisterSpellScriptWithArgs(spell_pilgrims_bounty_a_serving_of, "spell_pilgrims_bounty_a_serving_of_pie", SPELL_A_SERVING_OF_PIE_PLATE);
 }

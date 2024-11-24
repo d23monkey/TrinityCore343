@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,15 +20,13 @@
 #include "Log.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
-#include "QueryResult.h"
 #include "Timer.h"
+#include "WorldSession.h"
+#include <unordered_map>
 
-PetitionMgr::PetitionMgr()
+namespace
 {
-}
-
-PetitionMgr::~PetitionMgr()
-{
+    std::unordered_map<ObjectGuid, Petition> _petitionStore;
 }
 
 PetitionMgr* PetitionMgr::instance()
@@ -40,13 +38,12 @@ PetitionMgr* PetitionMgr::instance()
 void PetitionMgr::LoadPetitions()
 {
     uint32 oldMSTime = getMSTime();
-    PetitionStore.clear();
+    _petitionStore.clear();
 
-    QueryResult result = CharacterDatabase.Query("SELECT ownerguid, petitionguid, name, type FROM petition");
+    QueryResult result = CharacterDatabase.Query("SELECT petitionguid, ownerguid, name FROM petition");
     if (!result)
     {
-        LOG_WARN("server.loading", ">> Loaded 0 Petitions!");
-        LOG_INFO("server.loading", " ");
+        TC_LOG_INFO("server.loading", ">> Loaded 0 petitions.");
         return;
     }
 
@@ -54,24 +51,21 @@ void PetitionMgr::LoadPetitions()
     do
     {
         Field* fields = result->Fetch();
-        AddPetition(ObjectGuid::Create<HighGuid::Item>(fields[1].Get<uint32>()), ObjectGuid::Create<HighGuid::Player>(fields[0].Get<uint32>()), fields[2].Get<std::string>(), fields[3].Get<uint8>());
+        AddPetition(ObjectGuid::Create<HighGuid::Item>(fields[0].GetUInt64()), ObjectGuid::Create<HighGuid::Player>(fields[1].GetUInt64()), fields[2].GetString(), true);
         ++count;
     } while (result->NextRow());
 
-    LOG_INFO("server.loading", ">> Loaded {} Petitions in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
-    LOG_INFO("server.loading", " ");
+    TC_LOG_INFO("server.loading", ">> Loaded {} petitions in: {} ms.", count, GetMSTimeDiffToNow(oldMSTime));
 }
 
 void PetitionMgr::LoadSignatures()
 {
     uint32 oldMSTime = getMSTime();
-    SignatureStore.clear();
 
-    QueryResult result = CharacterDatabase.Query("SELECT petitionguid, playerguid, player_account FROM petition_sign");
+    QueryResult result = CharacterDatabase.Query("SELECT petitionguid, player_account, playerguid FROM petition_sign");
     if (!result)
     {
-        LOG_WARN("server.loading", ">> Loaded 0 Petition signs!");
-        LOG_INFO("server.loading", " ");
+        TC_LOG_INFO("server.loading", ">> Loaded 0 Petition signs!");
         return;
     }
 
@@ -79,113 +73,156 @@ void PetitionMgr::LoadSignatures()
     do
     {
         Field* fields = result->Fetch();
-        AddSignature(ObjectGuid::Create<HighGuid::Item>(fields[0].Get<uint32>()), fields[2].Get<uint32>(), ObjectGuid::Create<HighGuid::Player>(fields[1].Get<uint32>()));
+
+        Petition* petition = GetPetition(ObjectGuid::Create<HighGuid::Item>(fields[0].GetUInt64()));
+        if (!petition)
+            continue;
+
+        petition->AddSignature(fields[1].GetUInt32(), ObjectGuid::Create<HighGuid::Player>(fields[2].GetUInt64()), true);
         ++count;
     } while (result->NextRow());
 
-    LOG_INFO("server.loading", ">> Loaded {} Petition signs in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
-    LOG_INFO("server.loading", " ");
+    TC_LOG_INFO("server.loading", ">> Loaded {} Petition signs in {} ms.", count, GetMSTimeDiffToNow(oldMSTime));
 }
 
-void PetitionMgr::AddPetition(ObjectGuid petitionGUID, ObjectGuid ownerGuid, std::string const& name, uint8 type)
+void PetitionMgr::AddPetition(ObjectGuid petitionGuid, ObjectGuid ownerGuid, std::string const& name, bool isLoading)
 {
-    Petition& p = PetitionStore[petitionGUID];
-    p.petitionGuid = petitionGUID;
-    p.ownerGuid = ownerGuid;
-    p.petitionName = name;
-    p.petitionType = type;
+    Petition& p = _petitionStore[petitionGuid];
+    p.PetitionGuid = petitionGuid;
+    p.OwnerGuid = ownerGuid;
+    p.PetitionName = name;
+    p.Signatures.clear();
 
-    Signatures& s = SignatureStore[petitionGUID];
-    s.petitionGuid = petitionGUID;
-    s.signatureMap.clear();
+    if (isLoading)
+        return;
+
+    CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_INS_PETITION);
+    stmt->setUInt64(0, ownerGuid.GetCounter());
+    stmt->setUInt64(1, petitionGuid.GetCounter());
+    stmt->setString(2, name);
+    CharacterDatabase.Execute(stmt);
 }
 
-void PetitionMgr::RemovePetition(ObjectGuid petitionGUID)
+void PetitionMgr::RemovePetition(ObjectGuid petitionGuid)
 {
-    PetitionStore.erase(petitionGUID);
+    _petitionStore.erase(petitionGuid);
 
-    // remove signatures
-    SignatureStore.erase(petitionGUID);
+    // Delete From DB
+    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+
+    CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_PETITION_BY_GUID);
+    stmt->setUInt64(0, petitionGuid.GetCounter());
+    trans->Append(stmt);
+
+    stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_PETITION_SIGNATURE_BY_GUID);
+    stmt->setUInt64(0, petitionGuid.GetCounter());
+    trans->Append(stmt);
+
+    CharacterDatabase.CommitTransaction(trans);
 }
 
-void PetitionMgr::RemovePetitionByOwnerAndType(ObjectGuid ownerGuid, uint8 type)
+Petition* PetitionMgr::GetPetition(ObjectGuid petitionGuid)
 {
-    for (PetitionContainer::iterator itr = PetitionStore.begin(); itr != PetitionStore.end();)
+    auto itr = _petitionStore.find(petitionGuid);
+    if (itr != _petitionStore.end())
+        return &itr->second;
+
+    return nullptr;
+}
+
+Petition* PetitionMgr::GetPetitionByOwner(ObjectGuid ownerGuid)
+{
+    for (auto& petitionPair : _petitionStore)
+        if (petitionPair.second.OwnerGuid == ownerGuid)
+            return &petitionPair.second;
+
+    return nullptr;
+}
+
+void PetitionMgr::RemovePetitionsByOwner(ObjectGuid ownerGuid)
+{
+    for (auto itr = _petitionStore.begin(); itr != _petitionStore.end();)
     {
-        if (itr->second.ownerGuid == ownerGuid && (!type || type == itr->second.petitionType))
+        if (itr->second.OwnerGuid == ownerGuid)
         {
-            // Remove invalid charter item
-            if (type == itr->second.petitionType)
-            {
-                if (Player* owner = ObjectAccessor::FindConnectedPlayer(ownerGuid))
-                {
-                    if (Item* item = owner->GetItemByGuid(itr->first))
-                    {
-                        owner->DestroyItem(item->GetBagSlot(), item->GetSlot(), true);
-                    }
-                }
-            }
-
-            // remove signatures
-            SignatureStore.erase(itr->first);
-            PetitionStore.erase(itr++);
+            _petitionStore.erase(itr);
+            break;
         }
         else
             ++itr;
     }
+
+    CharacterDatabasePreparedStatement* stmt;
+    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+    stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_PETITION_BY_OWNER);
+    stmt->setUInt32(0, ownerGuid.GetCounter());
+    trans->Append(stmt);
+
+    stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_PETITION_SIGNATURE_BY_OWNER);
+    stmt->setUInt32(0, ownerGuid.GetCounter());
+    trans->Append(stmt);
+    CharacterDatabase.CommitTransaction(trans);
 }
 
-Petition const* PetitionMgr::GetPetition(ObjectGuid petitionGUID) const
+void PetitionMgr::RemoveSignaturesBySigner(ObjectGuid signerGuid)
 {
-    PetitionContainer::const_iterator itr = PetitionStore.find(petitionGUID);
-    if (itr != PetitionStore.end())
-        return &itr->second;
-    return nullptr;
+    for (auto& petitionPair : _petitionStore)
+        petitionPair.second.RemoveSignatureBySigner(signerGuid);
+
+    CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_ALL_PETITION_SIGNATURES);
+    stmt->setUInt32(0, signerGuid.GetCounter());
+    CharacterDatabase.Execute(stmt);
 }
 
-Petition const* PetitionMgr::GetPetitionByOwnerWithType(ObjectGuid ownerGuid, uint8 type) const
+bool Petition::IsPetitionSignedByAccount(uint32 accountId) const
 {
-    for (PetitionContainer::const_iterator itr = PetitionStore.begin(); itr != PetitionStore.end(); ++itr)
-        if (itr->second.ownerGuid == ownerGuid && itr->second.petitionType == type)
-            return &itr->second;
+    for (Signature const& signature : Signatures)
+        if (signature.first == accountId)
+            return true;
 
-    return nullptr;
+    return false;
 }
 
-void PetitionMgr::AddSignature(ObjectGuid petitionGUID, uint32 accountId, ObjectGuid playerGuid)
+void Petition::AddSignature(uint32 accountId, ObjectGuid playerGuid, bool isLoading)
 {
-    Signatures& s = SignatureStore[petitionGUID];
-    s.signatureMap[playerGuid] = accountId;
+    Signatures.emplace_back(accountId, playerGuid);
+
+    if (isLoading)
+        return;
+
+    CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_INS_PETITION_SIGNATURE);
+
+    stmt->setUInt64(0, OwnerGuid.GetCounter());
+    stmt->setUInt64(1, PetitionGuid.GetCounter());
+    stmt->setUInt64(2, playerGuid.GetCounter());
+    stmt->setUInt32(3, accountId);
+
+    CharacterDatabase.Execute(stmt);
 }
 
-Signatures const* PetitionMgr::GetSignature(ObjectGuid petitionGUID) const
+void Petition::UpdateName(std::string const& newName)
 {
-    SignatureContainer::const_iterator itr = SignatureStore.find(petitionGUID);
-    if (itr != SignatureStore.end())
-        return &itr->second;
-    return nullptr;
+    PetitionName = newName;
+
+    CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_PETITION_NAME);
+    stmt->setString(0, newName);
+    stmt->setUInt64(1, PetitionGuid.GetCounter());
+    CharacterDatabase.Execute(stmt);
 }
 
-void PetitionMgr::RemoveSignaturesByPlayer(ObjectGuid playerGuid)
+void Petition::RemoveSignatureBySigner(ObjectGuid playerGuid)
 {
-    for (SignatureContainer::iterator itr = SignatureStore.begin(); itr != SignatureStore.end(); ++itr)
+    for (auto itr = Signatures.begin(); itr != Signatures.end(); ++itr)
     {
-        SignatureMap::iterator signItr = itr->second.signatureMap.find(playerGuid);
-        if (signItr != itr->second.signatureMap.end())
-            itr->second.signatureMap.erase(signItr);
-    }
-}
+        if (itr->second == playerGuid)
+        {
+            Signatures.erase(itr);
 
-void PetitionMgr::RemoveSignaturesByPlayerAndType(ObjectGuid playerGuid, uint8 type)
-{
-    for (SignatureContainer::iterator itr = SignatureStore.begin(); itr != SignatureStore.end(); ++itr)
-    {
-        Petition const* petition = sPetitionMgr->GetPetition(itr->first);
-        if (!petition || petition->petitionType != type)
-            continue;
+            // notify owner
+            if (Player* owner = ObjectAccessor::FindConnectedPlayer(OwnerGuid))
+                owner->GetSession()->SendPetitionQueryOpcode(PetitionGuid);
 
-        SignatureMap::iterator signItr = itr->second.signatureMap.find(playerGuid);
-        if (signItr != itr->second.signatureMap.end())
-            itr->second.signatureMap.erase(signItr);
+            break;
+        }
     }
 }

@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -16,34 +16,26 @@
  */
 
 #include "WardenCheckMgr.h"
-#include "Database/DatabaseEnv.h"
+
+#include "Common.h"
+#include "DatabaseEnv.h"
+#include "Errors.h"
 #include "Log.h"
-#include "QueryResult.h"
-#include "Util.h"
 #include "Warden.h"
-#include "WorldSession.h"
+#include "World.h"
 
 WardenCheckMgr::WardenCheckMgr()
 {
 }
 
-WardenCheckMgr::~WardenCheckMgr()
-{
-}
-
-WardenCheckMgr* WardenCheckMgr::instance()
-{
-    static WardenCheckMgr instance;
-    return &instance;
-}
-
 void WardenCheckMgr::LoadWardenChecks()
 {
+    uint32 oldMSTime = getMSTime();
+
     // Check if Warden is enabled by config before loading anything
     if (!sWorld->getBoolConfig(CONFIG_WARDEN_ENABLED))
     {
-        LOG_INFO("server.loading", ">> Warden disabled, loading checks skipped.");
-        LOG_INFO("server.loading", " ");
+        TC_LOG_INFO("warden", ">> Warden disabled, loading checks skipped.");
         return;
     }
 
@@ -51,16 +43,15 @@ void WardenCheckMgr::LoadWardenChecks()
 
     if (!result)
     {
-        LOG_WARN("server.loading", ">> Loaded 0 Warden checks. DB table `warden_checks` is empty!");
-        LOG_INFO("server.loading", " ");
+        TC_LOG_INFO("server.loading", ">> Loaded 0 Warden checks. DB table `warden_checks` is empty!");
         return;
     }
 
     Field* fields = result->Fetch();
 
-    uint16 maxCheckId = fields[0].Get<uint16>();
+    uint16 maxCheckId = fields[0].GetUInt16();
 
-    CheckStore.resize(maxCheckId + 1);
+    _checks.resize(maxCheckId+1);
 
     //                                    0    1     2     3        4       5      6      7
     result = WorldDatabase.Query("SELECT id, type, data, result, address, length, str, comment FROM warden_checks ORDER BY id ASC");
@@ -70,105 +61,78 @@ void WardenCheckMgr::LoadWardenChecks()
     {
         fields = result->Fetch();
 
-        uint16 id               = fields[0].Get<uint16>();
-        uint8 checkType         = fields[1].Get<uint8>();
+        uint16 const id  = fields[0].GetUInt16();
+        WardenCheckType const type = static_cast<WardenCheckType>(fields[1].GetUInt8());
+        WardenCheckCategory const category = GetWardenCheckCategory(type);
 
-        if (checkType == LUA_EVAL_CHECK && id > 9999)
+        if (category == NUM_CHECK_CATEGORIES)
         {
-            LOG_ERROR("warden", "sql.sql: Warden Lua check with id {} found in `warden_checks`. Lua checks may have four-digit IDs at most. Skipped.", id);
+            TC_LOG_ERROR("sql.sql", "Warden check with id {} lists check type {} in `warden_checks`, which is not supported. Skipped.", id, type);
             continue;
         }
 
-        std::string data        = fields[2].Get<std::string>();
-        std::string checkResult = fields[3].Get<std::string>();
-        uint32 address          = fields[4].Get<uint32>();
-        uint8 length            = fields[5].Get<uint8>();
-        std::string str         = fields[6].Get<std::string>();
-        std::string comment     = fields[7].Get<std::string>();
+        if ((type == LUA_EVAL_CHECK) && (id > 9999))
+        {
+            TC_LOG_ERROR("sql.sql", "Warden Lua check with id {} found in `warden_checks`. Lua checks may have four-digit IDs at most. Skipped.", id);
+            continue;
+        }
 
-        WardenCheck &wardenCheck = CheckStore.at(id);
-        wardenCheck.Type = checkType;
+        WardenCheck& wardenCheck = _checks[id];
         wardenCheck.CheckId = id;
+        wardenCheck.Type = type;
 
-        // Initialize action with default action from config
-        wardenCheck.Action = sWorld->getIntConfig(CONFIG_WARDEN_CLIENT_FAIL_ACTION);
-        if (wardenCheck.Action > MAX_WARDEN_ACTION)
-        {
-            wardenCheck.Action = WARDEN_ACTION_BAN;
-        }
+        if (type == PAGE_CHECK_A || type == PAGE_CHECK_B || type == DRIVER_CHECK)
+            wardenCheck.Data = fields[2].GetBinary();
 
-        if (checkType == MEM_CHECK || checkType == PAGE_CHECK_A || checkType == PAGE_CHECK_B || checkType == PROC_CHECK)
-        {
-            wardenCheck.Address = address;
-            wardenCheck.Length = length;
-        }
+        if (type == MPQ_CHECK || type == MEM_CHECK)
+            _checkResults.emplace(id, fields[3].GetBinary());
+
+        if (type == MEM_CHECK || type == PAGE_CHECK_A || type == PAGE_CHECK_B || type == PROC_CHECK)
+            wardenCheck.Address = fields[4].GetUInt32();
+
+        if (type == PAGE_CHECK_A || type == PAGE_CHECK_B || type == PROC_CHECK)
+            wardenCheck.Length = fields[5].GetUInt8();
 
         // PROC_CHECK support missing
-        if (checkType == MEM_CHECK || checkType == MPQ_CHECK || checkType == LUA_EVAL_CHECK || checkType == DRIVER_CHECK || checkType == MODULE_CHECK)
-        {
-            wardenCheck.Str = str;
-        }
+        if (type == MEM_CHECK || type == MPQ_CHECK || type == LUA_EVAL_CHECK || type == DRIVER_CHECK || type == MODULE_CHECK)
+            wardenCheck.Str = fields[6].GetString();
 
-        if (checkType == MPQ_CHECK || checkType == MEM_CHECK)
-        {
-            WardenCheckResult wr;
-            wr.Result.SetHexStr(checkResult.c_str());
-            CheckResultStore[id] = wr;
-        }
-
-        if (comment.empty())
+        wardenCheck.Comment = fields[7].GetString();
+        if (wardenCheck.Comment.empty())
             wardenCheck.Comment = "Undocumented Check";
-        else
-            wardenCheck.Comment = comment;
 
-        // Prepare check pools
-        switch (checkType)
+        if (type == LUA_EVAL_CHECK)
         {
-            case MEM_CHECK:
-            case MODULE_CHECK:
+            if (wardenCheck.Str.size() > WARDEN_MAX_LUA_CHECK_LENGTH)
             {
-                CheckIdPool[WARDEN_CHECK_MEM_TYPE].push_back(id);
-                break;
+                TC_LOG_ERROR("sql.sql", "Found over-long Lua check for Warden check with id {} in `warden_checks`. Max length is {}. Skipped.", id, WARDEN_MAX_LUA_CHECK_LENGTH);
+                continue;
             }
-            case LUA_EVAL_CHECK:
-            {
-                if (wardenCheck.Length > WARDEN_MAX_LUA_CHECK_LENGTH)
-                {
-                    LOG_ERROR("warden", "sql.sql: Found over-long Lua check for Warden check with id {} in `warden_checks`. Max length is {}. Skipped.", id, WARDEN_MAX_LUA_CHECK_LENGTH);
-                    continue;
-                }
 
-                std::string str2 = Acore::StringFormat("{:04}", id);
-                ASSERT(str2.size() == 4);
-                std::copy(str2.begin(), str2.end(), wardenCheck.IdStr.begin());
-
-                CheckIdPool[WARDEN_CHECK_LUA_TYPE].push_back(id);
-                break;
-            }
-            default:
-            {
-                if (checkType == PAGE_CHECK_A || checkType == PAGE_CHECK_B || checkType == DRIVER_CHECK)
-                    wardenCheck.Data.SetHexStr(data.c_str());
-
-                CheckIdPool[WARDEN_CHECK_OTHER_TYPE].push_back(id);
-                break;
-            }
+            std::string str = Trinity::StringFormat("{:04}", id);
+            ASSERT(str.size() == 4);
+            std::copy(str.begin(), str.end(), wardenCheck.IdStr.begin());
         }
 
-        ++count;
-    } while (result->NextRow());
+        // initialize action with default action from config, this may be overridden later
+        wardenCheck.Action = WardenActions(sWorld->getIntConfig(CONFIG_WARDEN_CLIENT_FAIL_ACTION));
 
-    LOG_INFO("server.loading", ">> Loaded {} warden checks.", count);
-    LOG_INFO("server.loading", " ");
+        _pools[category].push_back(id);
+        ++count;
+    }
+    while (result->NextRow());
+
+    TC_LOG_INFO("server.loading", ">> Loaded {} warden checks in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
 }
 
 void WardenCheckMgr::LoadWardenOverrides()
 {
+    uint32 oldMSTime = getMSTime();
+
     // Check if Warden is enabled by config before loading anything
     if (!sWorld->getBoolConfig(CONFIG_WARDEN_ENABLED))
     {
-        LOG_INFO("server.loading", ">> Warden disabled, loading check overrides skipped.");
-        LOG_INFO("server.loading", " ");
+        TC_LOG_INFO("warden", ">> Warden disabled, loading check overrides skipped.");
         return;
     }
 
@@ -177,8 +141,7 @@ void WardenCheckMgr::LoadWardenOverrides()
 
     if (!result)
     {
-        LOG_WARN("server.loading", ">> Loaded 0 Warden action overrides. DB table `warden_action` is empty!");
-        LOG_INFO("server.loading", " ");
+        TC_LOG_INFO("server.loading", ">> Loaded 0 Warden action overrides. DB table `warden_action` is empty!");
         return;
     }
 
@@ -188,41 +151,41 @@ void WardenCheckMgr::LoadWardenOverrides()
     {
         Field* fields = result->Fetch();
 
-        uint16 checkId = fields[0].Get<uint16>();
-        uint8  action  = fields[1].Get<uint8>();
+        uint16 checkId = fields[0].GetUInt16();
+        uint8  action  = fields[1].GetUInt8();
 
         // Check if action value is in range (0-2, see WardenActions enum)
         if (action > WARDEN_ACTION_BAN)
-            LOG_ERROR("warden", "Warden check override action out of range (ID: {}, action: {})", checkId, action);
-        // Check if check actually exists before accessing the CheckStore vector
-        else if (checkId > CheckStore.size())
-            LOG_ERROR("warden", "Warden check action override for non-existing check (ID: {}, action: {}), skipped", checkId, action);
+            TC_LOG_ERROR("warden", "Warden check override action out of range (ID: {}, action: {})", checkId, action);
+        // Check if check actually exists before accessing the _checks vector
+        else if (checkId >= _checks.size())
+            TC_LOG_ERROR("warden", "Warden check action override for non-existing check (ID: {}, action: {}), skipped", checkId, action);
         else
         {
-            CheckStore.at(checkId).Action = WardenActions(action);
+            _checks[checkId].Action = WardenActions(action);
             ++count;
         }
-    } while (result->NextRow());
-
-    LOG_INFO("server.loading", ">> Loaded {} warden action overrides.", count);
-    LOG_INFO("server.loading", " ");
-}
-
-WardenCheck const* WardenCheckMgr::GetWardenDataById(uint16 Id)
-{
-    if (Id < CheckStore.size())
-        return &CheckStore.at(Id);
-
-    return nullptr;
-}
-
-WardenCheckResult const* WardenCheckMgr::GetWardenResultById(uint16 Id)
-{
-    CheckResultContainer::const_iterator itr = CheckResultStore.find(Id);
-    if (itr != CheckResultStore.end())
-    {
-        return &itr->second;
     }
+    while (result->NextRow());
 
-    return nullptr;
+    TC_LOG_INFO("server.loading", ">> Loaded {} warden action overrides in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
+}
+
+WardenCheckMgr* WardenCheckMgr::instance()
+{
+    static WardenCheckMgr instance;
+    return &instance;
+}
+
+WardenCheck const& WardenCheckMgr::GetCheckData(uint16 Id) const
+{
+    ASSERT(Id < _checks.size(), "Requested Warden data for invalid check ID %u", uint32(Id));
+    return _checks[Id];
+}
+
+WardenCheckResult const& WardenCheckMgr::GetCheckResult(uint16 Id) const
+{
+    auto it = _checkResults.find(Id);
+    ASSERT(it != _checkResults.end(), "Requested Warden result for invalid check ID %u", uint32(Id));
+    return it->second;
 }

@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,70 +18,70 @@
 #ifndef _PETITIONMGR_H
 #define _PETITIONMGR_H
 
+#include "Define.h"
 #include "ObjectGuid.h"
+#include <string>
+#include <utility>
+#include <vector>
 
-#include <map>
-
-#define CHARTER_DISPLAY_ID 16161
-
-// Charters ID in item_template
-enum CharterItemIDs
+enum PetitionTurns
 {
-    GUILD_CHARTER           = 5863,
-    ARENA_TEAM_CHARTER_2v2  = 23560,
-    ARENA_TEAM_CHARTER_3v3  = 23561,
-    ARENA_TEAM_CHARTER_5v5  = 23562
+    PETITION_TURN_OK                    = 0,
+    PETITION_TURN_ALREADY_IN_GUILD      = 2,
+    PETITION_TURN_NEED_MORE_SIGNATURES  = 4,
+    PETITION_TURN_GUILD_PERMISSIONS     = 11,
+    PETITION_TURN_GUILD_NAME_INVALID    = 12,
+    PETITION_TURN_HAS_RESTRICTION       = 13
 };
 
-typedef std::map<ObjectGuid, uint32> SignatureMap;
+enum PetitionSigns
+{
+    PETITION_SIGN_OK                        = 0,
+    PETITION_SIGN_ALREADY_SIGNED            = 1,
+    PETITION_SIGN_ALREADY_IN_GUILD          = 2,
+    PETITION_SIGN_CANT_SIGN_OWN             = 3,
+    PETITION_SIGN_NOT_SERVER                = 5,
+    PETITION_SIGN_FULL                      = 8,
+    PETITION_SIGN_ALREADY_SIGNED_OTHER      = 10,
+    PETITION_SIGN_RESTRICTED_ACCOUNT_TRIAL  = 11,
+    PETITION_SIGN_HAS_RESTRICTION           = 13
+};
+
+typedef std::pair<uint32, ObjectGuid> Signature;
+typedef std::vector<Signature> SignaturesVector;
 
 struct Petition
 {
-    ObjectGuid petitionGuid;
-    ObjectGuid ownerGuid;
-    uint8  petitionType;
-    std::string petitionName;
+    ObjectGuid       PetitionGuid;
+    ObjectGuid       OwnerGuid;
+    std::string      PetitionName;
+    SignaturesVector Signatures;
+
+    bool IsPetitionSignedByAccount(uint32 accountId) const;
+    void AddSignature(uint32 accountId, ObjectGuid playerGuid, bool isLoading);
+    void UpdateName(std::string const& newName);
+    void RemoveSignatureBySigner(ObjectGuid playerGuid);
 };
 
-struct Signatures
+class TC_GAME_API PetitionMgr
 {
-    ObjectGuid petitionGuid;
-    SignatureMap signatureMap;
-};
+    public:
+        PetitionMgr() { }
+        ~PetitionMgr() { }
 
-typedef std::map<ObjectGuid, Signatures> SignatureContainer;
-typedef std::map<ObjectGuid, Petition> PetitionContainer;
+        static PetitionMgr* instance();
 
-class PetitionMgr
-{
-private:
-    PetitionMgr();
-    ~PetitionMgr();
+        // Load from DB
+        void LoadPetitions();
+        void LoadSignatures();
 
-public:
-    static PetitionMgr* instance();
-
-    void LoadPetitions();
-    void LoadSignatures();
-
-    // Petitions
-    void AddPetition(ObjectGuid petitionGUID, ObjectGuid ownerGuid, std::string const& name, uint8 type);
-    void RemovePetition(ObjectGuid petitionGUID);
-    void RemovePetitionByOwnerAndType(ObjectGuid ownerGuid, uint8 type);
-    Petition const* GetPetition(ObjectGuid petitionGUID) const;
-    Petition const* GetPetitionByOwnerWithType(ObjectGuid ownerGuid, uint8 type) const;
-    PetitionContainer* GetPetitionStore() { return &PetitionStore; }
-
-    // Signatures
-    void AddSignature(ObjectGuid petitionGUID, uint32 accountId, ObjectGuid playerGuid);
-    void RemoveSignaturesByPlayer(ObjectGuid playerGuid);
-    void RemoveSignaturesByPlayerAndType(ObjectGuid playerGuid, uint8 type);
-    Signatures const* GetSignature(ObjectGuid petitionGUID) const;
-    SignatureContainer* GetSignatureStore() { return &SignatureStore; }
-
-protected:
-    PetitionContainer PetitionStore;
-    SignatureContainer SignatureStore;
+        // Petitions
+        void AddPetition(ObjectGuid petitionGuid, ObjectGuid ownerGuid, std::string const& name, bool isLoading);
+        void RemovePetition(ObjectGuid petitionGuid);
+        Petition* GetPetition(ObjectGuid petitionGuid);
+        Petition* GetPetitionByOwner(ObjectGuid ownerGuid);
+        void RemovePetitionsByOwner(ObjectGuid ownerGuid);
+        void RemoveSignaturesBySigner(ObjectGuid signerGuid);
 };
 
 #define sPetitionMgr PetitionMgr::instance()

@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -21,16 +21,14 @@
 #include "DatabaseEnvFwd.h"
 #include "Define.h"
 #include <functional>
-#include <future>
 #include <list>
 #include <queue>
 
-class AC_DATABASE_API QueryCallback
+class TC_DATABASE_API QueryCallback
 {
 public:
     explicit QueryCallback(QueryResultFuture&& result);
     explicit QueryCallback(PreparedQueryResultFuture&& result);
-
     QueryCallback(QueryCallback&& right) noexcept;
     QueryCallback& operator=(QueryCallback&& right) noexcept;
     ~QueryCallback();
@@ -60,7 +58,6 @@ private:
         QueryResultFuture _string;
         PreparedQueryResultFuture _prepared;
     };
-
     bool _isPrepared;
 
     struct QueryCallbackData;

@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -19,61 +19,64 @@
 #define BATTLEFIELD_MGR_H_
 
 #include "Battlefield.h"
+#include "Hash.h"
+#include <memory>
+#include <unordered_map>
+#include <vector>
 
 class Player;
-class GameObject;
-class Creature;
 class ZoneScript;
-struct GossipMenuItems;
 
 // class to handle player enter / leave / areatrigger / GO use events
-class BattlefieldMgr
+class TC_GAME_API BattlefieldMgr
 {
-public:
-    // ctor
-    BattlefieldMgr();
-    // dtor
-    ~BattlefieldMgr();
+    public:
+        BattlefieldMgr(BattlefieldMgr const&) = delete;
+        BattlefieldMgr(BattlefieldMgr&&) = delete;
 
-    static BattlefieldMgr* instance();
+        BattlefieldMgr& operator=(BattlefieldMgr const&) = delete;
+        BattlefieldMgr& operator=(BattlefieldMgr&&) = delete;
 
-    // create battlefield events
-    void InitBattlefield();
-    // called when a player enters an battlefield area
-    void HandlePlayerEnterZone(Player* player, uint32 areaflag);
-    // called when player leaves an battlefield area
-    void HandlePlayerLeaveZone(Player* player, uint32 areaflag);
-    // called when player resurrects
-    void HandlePlayerResurrects(Player* player, uint32 areaflag);
-    // return assigned battlefield
-    Battlefield* GetBattlefieldToZoneId(uint32 zoneid);
-    Battlefield* GetBattlefieldByBattleId(uint32 battleid);
+        static BattlefieldMgr* instance();
 
-    ZoneScript* GetZoneScript(uint32 zoneId);
+        // create battlefield events
+        void InitBattlefield();
 
-    void AddZone(uint32 zoneid, Battlefield* handle);
+        void CreateBattlefieldsForMap(Map* map);
 
-    void Update(uint32 diff);
+        void DestroyBattlefieldsForMap(Map const* map);
 
-    void HandleGossipOption(Player* player, ObjectGuid guid, uint32 gossipid);
+        // called when a player enters an battlefield area
+        void HandlePlayerEnterZone(Player* player, uint32 zoneId);
+        // called when player leaves an battlefield area
+        void HandlePlayerLeaveZone(Player* player, uint32 zoneId);
 
-    bool CanTalkTo(Player* player, Creature* creature, GossipMenuItems gso);
+        bool IsWorldPvpArea(uint32 zoneId) const;
 
-    void HandleDropFlag(Player* player, uint32 spellId);
+        // return assigned battlefield
+        Battlefield* GetBattlefieldToZoneId(Map const* map, uint32 zoneId);
+        Battlefield* GetBattlefieldByBattleId(Map const* map, uint32 battleId);
 
-    typedef std::vector < Battlefield* >BattlefieldSet;
-    typedef std::map < uint32 /* zoneid */, Battlefield* >BattlefieldMap;
-private:
-    // contains all initiated battlefield events
-    // used when initing / cleaning up
-    BattlefieldSet m_BattlefieldSet;
-    // maps the zone ids to an battlefield event
-    // used in player event handling
-    BattlefieldMap m_BattlefieldMap;
-    // update interval
-    uint32 m_UpdateTimer;
+        void AddZone(uint32 zoneId, Battlefield* bf);
+
+        void Update(uint32 diff);
+
+    private:
+        BattlefieldMgr();
+        ~BattlefieldMgr();
+
+        typedef std::unordered_map<Map const*, std::vector<std::unique_ptr<Battlefield>>> BattlefieldsMapByMap;
+        typedef std::unordered_map<std::pair<Map const*, uint32 /*zoneid*/>, Battlefield*> BattlefieldMapByZone;
+        // contains all initiated battlefield events
+        // used when initing / cleaning up
+        BattlefieldsMapByMap _battlefieldsByMap;
+        // maps the zone ids to an battlefield event
+        // used in player event handling
+        BattlefieldMapByZone _battlefieldsByZone;
+        // update interval
+        uint32 _updateTimer;
 };
 
 #define sBattlefieldMgr BattlefieldMgr::instance()
 
-#endif
+#endif // BATTLEFIELD_MGR_H_

@@ -1,125 +1,150 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
 #include "ScriptedCreature.h"
+#include "SpellInfo.h"
 #include "the_botanica.h"
 
-enum Says
+enum Texts
 {
-    SAY_AGGRO                   = 0,
-    SAY_KILL                    = 1,
-    SAY_TREE                    = 2,
-    SAY_SUMMON                  = 3,
-    SAY_DEATH                   = 4,
-    SAY_OOC_RANDOM              = 5
+    SAY_AGGRO                  = 0,
+    SAY_SLAY                   = 1,
+    SAY_TREE                   = 2,
+    SAY_DEATH                  = 3,
+    SAY_OOC_RANDOM             = 4
 };
 
 enum Spells
 {
-    SPELL_TRANQUILITY           = 34550,
-    SPELL_TREE_FORM             = 34551,
-    SPELL_SUMMON_FRAYER         = 34557,
-    SPELL_PLANT_WHITE           = 34759,
-    SPELL_PLANT_GREEN           = 34761,
-    SPELL_PLANT_BLUE            = 34762,
-    SPELL_PLANT_RED             = 34763
+    SPELL_TRANQUILITY          = 34550,
+    SPELL_TREE_FORM            = 34551,
+    SPELL_SUMMON_FRAYER        = 34557,
+    SPELL_PLANT_WHITE          = 34759,
+    SPELL_PLANT_GREEN          = 34761,
+    SPELL_PLANT_BLUE           = 34762,
+    SPELL_PLANT_RED            = 34763,
+    SPELL_CANCEL_TRANQUILITY   = 34777
 };
 
-enum Npcs
+enum Events
 {
-    NPC_FRAYER                  = 19953
+    EVENT_PLANT_SEEDLING       = 1,
+    EVENT_TREE_FORM,
+    EVENT_TRANQUILITY
 };
 
 struct boss_high_botanist_freywinn : public BossAI
 {
-    boss_high_botanist_freywinn(Creature* creature) : BossAI(creature, DATA_HIGH_BOTANIST_FREYWINN) { }
+    boss_high_botanist_freywinn(Creature* creature) : BossAI(creature, DATA_HIGH_BOTANIST_FREYWINN), _frayersKilled(0) { }
 
-    void JustEngagedWith(Unit* /*who*/) override
+    void Reset() override
     {
-        scheduler.ClearValidator();
+        _Reset();
+        _frayersKilled = 0;
+    }
 
-        _JustEngagedWith();
+    void JustEngagedWith(Unit* who) override
+    {
+        BossAI::JustEngagedWith(who);
         Talk(SAY_AGGRO);
-
-        scheduler.Schedule(6s, [this](TaskContext context)
-        {
-            if (roll_chance_i(20))
-            {
-                Talk(SAY_OOC_RANDOM);
-            }
-
-            DoCastAOE(RAND(SPELL_PLANT_WHITE, SPELL_PLANT_GREEN, SPELL_PLANT_BLUE, SPELL_PLANT_RED));
-            context.Repeat();
-        }).Schedule(30s, [this](TaskContext context)
-        {
-            scheduler.CancelAll();
-
-            Talk(SAY_TREE);
-            me->RemoveAllAuras();
-            me->GetMotionMaster()->MoveIdle();
-            me->GetMotionMaster()->Clear(false);
-
-            DoCastSelf(SPELL_SUMMON_FRAYER, true);
-            DoCastSelf(SPELL_TRANQUILITY, true);
-            DoCastSelf(SPELL_TREE_FORM, true);
-
-            scheduler.Schedule(45s, [this](TaskContext)
-            {
-                ResumeEncounter();
-            });
-
-            context.Repeat(75s);
-        });
+        events.ScheduleEvent(EVENT_PLANT_SEEDLING, 6s);
+        events.ScheduleEvent(EVENT_TREE_FORM, 30s);
     }
 
-    void ResumeEncounter()
+    void KilledUnit(Unit* /*victim*/) override
     {
-        me->GetMotionMaster()->MoveChase(me->GetVictim());
-        me->RemoveAurasDueToSpell(SPELL_TREE_FORM);
-        me->InterruptNonMeleeSpells(false);
-    }
-
-    void KilledUnit(Unit* victim) override
-    {
-        if (victim->IsPlayer())
-        {
-            Talk(SAY_KILL);
-        }
+        Talk(SAY_SLAY);
     }
 
     void JustDied(Unit* /*killer*/) override
     {
-        Talk(SAY_DEATH);
         _JustDied();
+        Talk(SAY_DEATH);
     }
 
-    void SummonedCreatureDies(Creature* summon, Unit*) override
+    // Do not despawn them
+    void JustSummoned(Creature* summon) override
     {
-        summons.Despawn(summon);
+        if (me->IsEngaged())
+            DoZoneInCombat(summon);
+    }
 
-        if (!summons.HasEntry(NPC_FRAYER))
+    void SpellHit(WorldObject* /*caster*/, SpellInfo const* spellInfo) override
+    {
+        // Completely guessed, may be actually not used
+        if (spellInfo->Id == SPELL_CANCEL_TRANQUILITY)
         {
-            ResumeEncounter();
+            ++_frayersKilled;
+
+            if (_frayersKilled >= 3)
+            {
+                _frayersKilled = 0;
+                me->InterruptSpell(CURRENT_CHANNELED_SPELL);
+                me->RemoveAurasDueToSpell(SPELL_TREE_FORM);
+            }
         }
     }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_PLANT_SEEDLING:
+                    DoCastSelf(RAND(SPELL_PLANT_WHITE, SPELL_PLANT_GREEN, SPELL_PLANT_BLUE, SPELL_PLANT_RED));
+                    events.Repeat(6s);
+                    break;
+                case EVENT_TREE_FORM:
+                    // Reset counter in case not all frayers were killed and tree phase was ended, otherwise next time it will be enough to
+                    // kill only 1 or 2 to stop phase. It's an edge case, quite possible it was not even supported
+                    _frayersKilled = 0;
+                    Talk(SAY_TREE);
+                    DoCastSelf(SPELL_SUMMON_FRAYER);
+                    DoCastSelf(SPELL_TREE_FORM);
+                    events.Repeat(60s);
+                    events.ScheduleEvent(EVENT_TRANQUILITY, 1s);
+                    break;
+                case EVENT_TRANQUILITY:
+                    DoCastSelf(SPELL_TRANQUILITY);
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+    }
+
+private:
+    uint8 _frayersKilled;
 };
 
 void AddSC_boss_high_botanist_freywinn()
 {
-    RegisterTheBotanicaCreatureAI(boss_high_botanist_freywinn);
+    RegisterBotanicaCreatureAI(boss_high_botanist_freywinn);
 }

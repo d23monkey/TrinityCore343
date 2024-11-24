@@ -1,5 +1,4 @@
-#
-# This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+# This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
 #
 # This file is free software; as a special exception the author gives
 # unlimited permission to copy and/or distribute it, with or without
@@ -8,9 +7,8 @@
 # This program is distributed in the hope that it will be useful, but
 # WITHOUT ANY WARRANTY, to the extent permitted by law; without even the
 # implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-#
 
-CU_RUN_HOOK(BEFORE_SCRIPTS_LIBRARY)
+message("")
 
 # Make the script module list available in the current scope
 GetScriptModuleList(SCRIPT_MODULE_LIST)
@@ -29,7 +27,6 @@ elseif(SCRIPTS MATCHES "static")
 else()
   set(SCRIPTS_DEFAULT_LINKAGE "disabled")
 endif()
-
 # Sets SCRIPTS_USE_WHITELIST
 # Sets SCRIPTS_WHITELIST
 if(SCRIPTS MATCHES "minimal")
@@ -42,7 +39,6 @@ endif()
 # variables set above
 foreach(SCRIPT_MODULE ${SCRIPT_MODULE_LIST})
   ScriptModuleNameToVariable(${SCRIPT_MODULE} SCRIPT_MODULE_VARIABLE)
-
   if(${SCRIPT_MODULE_VARIABLE} STREQUAL "default")
     if(SCRIPTS_USE_WHITELIST)
       list(FIND SCRIPTS_WHITELIST "${SCRIPT_MODULE}" INDEX)
@@ -55,46 +51,45 @@ foreach(SCRIPT_MODULE ${SCRIPT_MODULE_LIST})
       set(${SCRIPT_MODULE_VARIABLE} ${SCRIPTS_DEFAULT_LINKAGE})
     endif()
   endif()
-
   # Build the Graph values
   if(${SCRIPT_MODULE_VARIABLE} MATCHES "dynamic")
     GetProjectNameOfScriptModule(${SCRIPT_MODULE} SCRIPT_MODULE_PROJECT_NAME)
     GetNativeSharedLibraryName(${SCRIPT_MODULE_PROJECT_NAME} SCRIPT_PROJECT_LIBRARY)
-    list(APPEND SCRIPT_GRAPH_KEYS ${SCRIPT_MODULE_PROJECT_NAME})
-    set(SCRIPT_GRAPH_VALUE_DISPLAY_${SCRIPT_MODULE_PROJECT_NAME} ${SCRIPT_PROJECT_LIBRARY})
-    list(APPEND SCRIPT_GRAPH_VALUE_CONTAINS_MODULES_${SCRIPT_MODULE_PROJECT_NAME} ${SCRIPT_MODULE})
+    list(APPEND GRAPH_KEYS ${SCRIPT_MODULE_PROJECT_NAME})
+    set(GRAPH_VALUE_DISPLAY_${SCRIPT_MODULE_PROJECT_NAME} ${SCRIPT_PROJECT_LIBRARY})
+    list(APPEND GRAPH_VALUE_CONTAINS_MODULES_${SCRIPT_MODULE_PROJECT_NAME} ${SCRIPT_MODULE})
   elseif(${SCRIPT_MODULE_VARIABLE} MATCHES "static")
-    list(APPEND SCRIPT_GRAPH_KEYS worldserver)
-    set(SCRIPT_GRAPH_VALUE_DISPLAY_worldserver worldserver)
-    list(APPEND SCRIPT_GRAPH_VALUE_CONTAINS_MODULES_worldserver ${SCRIPT_MODULE})
+    list(APPEND GRAPH_KEYS worldserver)
+    set(GRAPH_VALUE_DISPLAY_worldserver worldserver)
+    list(APPEND GRAPH_VALUE_CONTAINS_MODULES_worldserver ${SCRIPT_MODULE})
   else()
-    list(APPEND SCRIPT_GRAPH_KEYS disabled)
-    set(SCRIPT_GRAPH_VALUE_DISPLAY_disabled disabled)
-    list(APPEND SCRIPT_GRAPH_VALUE_CONTAINS_MODULES_disabled ${SCRIPT_MODULE})
+    list(APPEND GRAPH_KEYS disabled)
+    set(GRAPH_VALUE_DISPLAY_disabled disabled)
+    list(APPEND GRAPH_VALUE_CONTAINS_MODULES_disabled ${SCRIPT_MODULE})
   endif()
 endforeach()
 
-list(SORT SCRIPT_GRAPH_KEYS)
-list(REMOVE_DUPLICATES SCRIPT_GRAPH_KEYS)
+list(SORT GRAPH_KEYS)
+list(REMOVE_DUPLICATES GRAPH_KEYS)
 
 # Display the script graph
-message("* Script configuration (${SCRIPTS}):")
-message("  |")
+message("* Script configuration (${SCRIPTS}):
+    |")
 
-foreach(SCRIPT_GRAPH_KEY ${SCRIPT_GRAPH_KEYS})
-  if(NOT SCRIPT_GRAPH_KEY STREQUAL "disabled")
-    message("  +- ${SCRIPT_GRAPH_VALUE_DISPLAY_${SCRIPT_GRAPH_KEY}}")
+foreach(GRAPH_KEY ${GRAPH_KEYS})
+  if(NOT GRAPH_KEY STREQUAL "disabled")
+    message("    +- ${GRAPH_VALUE_DISPLAY_${GRAPH_KEY}}")
   else()
-    message("  |  ${SCRIPT_GRAPH_VALUE_DISPLAY_${SCRIPT_GRAPH_KEY}}")
+    message("    |  ${GRAPH_VALUE_DISPLAY_${GRAPH_KEY}}")
   endif()
-  foreach(SCRIPT_GRAPH_PROJECT_ENTRY ${SCRIPT_GRAPH_VALUE_CONTAINS_MODULES_${SCRIPT_GRAPH_KEY}})
-    message("  |   +- ${SCRIPT_GRAPH_PROJECT_ENTRY}")
+  foreach(GRAPH_PROJECT_ENTRY ${GRAPH_VALUE_CONTAINS_MODULES_${GRAPH_KEY}})
+    message("    |   +- ${GRAPH_PROJECT_ENTRY}")
   endforeach()
-  message("  |")
+  message("    |")
 endforeach()
 
 # Base sources which are used by every script project
-if (USE_SCRIPTPCH)
+if(USE_SCRIPTPCH)
   set(PRIVATE_PCH_HEADER ScriptPCH.h)
 endif()
 
@@ -105,38 +100,28 @@ GroupSources(${CMAKE_CURRENT_SOURCE_DIR})
 # it to the variable arguments
 function(ConfigureScriptLoader SCRIPTLOADER_NAME LOADER_OUT IS_DYNAMIC_SCRIPTLOADER)
   # Deduces following variables which are referenced by thge template:
-  # ACORE_IS_DYNAMIC_SCRIPTLOADER
-  # ACORE_SCRIPTS_FORWARD_DECL
-  # ACORE_SCRIPTS_INVOKE
-  # ACORE_CURRENT_SCRIPT_PROJECT
+  # TRINITY_IS_DYNAMIC_SCRIPTLOADER
+  # TRINITY_SCRIPTS_FORWARD_DECL
+  # TRINITY_SCRIPTS_INVOKE
+  # TRINITY_CURRENT_SCRIPT_PROJECT
 
   # To generate export macros
-  set(ACORE_IS_DYNAMIC_SCRIPTLOADER ${IS_DYNAMIC_SCRIPTLOADER})
-
+  set(TRINITY_IS_DYNAMIC_SCRIPTLOADER ${IS_DYNAMIC_SCRIPTLOADER})
   # To generate forward declarations of the loading functions
-  unset(ACORE_SCRIPTS_FORWARD_DECL)
-  unset(ACORE_SCRIPTS_INVOKE)
-
+  unset(TRINITY_SCRIPTS_FORWARD_DECL)
+  unset(TRINITY_SCRIPTS_INVOKE)
   # The current script project which is built in
-  set(ACORE_CURRENT_SCRIPT_PROJECT ${SCRIPTLOADER_NAME})
-
+  set(TRINITY_CURRENT_SCRIPT_PROJECT ${SCRIPTLOADER_NAME})
   foreach(LOCALE_SCRIPT_MODULE ${ARGN})
-
-    # Replace bad words
-    string(REGEX REPLACE - "_" LOCALE_SCRIPT_MODULE ${LOCALE_SCRIPT_MODULE})
-
     # Determine the loader function ("Add##${NameOfDirectory}##Scripts()")
     set(LOADER_FUNCTION
       "Add${LOCALE_SCRIPT_MODULE}Scripts()")
-
     # Generate the funciton call and the forward declarations
-    set(ACORE_SCRIPTS_FORWARD_DECL
-      "${ACORE_SCRIPTS_FORWARD_DECL}void ${LOADER_FUNCTION};\n")
-
-    set(ACORE_SCRIPTS_INVOKE
-      "${ACORE_SCRIPTS_INVOKE}    ${LOADER_FUNCTION};\n")
+    set(TRINITY_SCRIPTS_FORWARD_DECL
+      "${TRINITY_SCRIPTS_FORWARD_DECL}void ${LOADER_FUNCTION};\n")
+    set(TRINITY_SCRIPTS_INVOKE
+      "${TRINITY_SCRIPTS_INVOKE}    ${LOADER_FUNCTION};\n")
   endforeach()
-
   set(GENERATED_LOADER ${CMAKE_CURRENT_BINARY_DIR}/gen_scriptloader/${SCRIPTLOADER_NAME}/ScriptLoader.cpp)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ScriptLoader.cpp.in.cmake ${GENERATED_LOADER})
   set(${LOADER_OUT} ${GENERATED_LOADER} PARENT_SCOPE)
@@ -145,7 +130,7 @@ endfunction()
 # Generates the actual script projects
 # Fills the STATIC_SCRIPT_MODULES and DYNAMIC_SCRIPT_MODULE_PROJECTS variables
 # which contain the names which scripts are linked statically/dynamically and
-# adds the sources of the static modules to the PRIVATE_SOURCES_SCRIPTS variable.
+# adds the sources of the static modules to the PRIVATE_SOURCES variable.
 foreach(SCRIPT_MODULE ${SCRIPT_MODULE_LIST})
   GetPathToScriptModule(${SCRIPT_MODULE} SCRIPT_MODULE_PATH)
   ScriptModuleNameToVariable(${SCRIPT_MODULE} SCRIPT_MODULE_VARIABLE)
@@ -160,30 +145,25 @@ foreach(SCRIPT_MODULE ${SCRIPT_MODULE_LIST})
       # Add the module name to STATIC_SCRIPT_MODULES
       list(APPEND STATIC_SCRIPT_MODULES ${SCRIPT_MODULE})
       # Add the module content to the whole static module
-      CollectSourceFiles(${SCRIPT_MODULE_PATH} PRIVATE_SOURCES_SCRIPTS)
+      CollectSourceFiles(${SCRIPT_MODULE_PATH} PRIVATE_SOURCES)
     endif()
   elseif(${SCRIPT_MODULE_VARIABLE} STREQUAL "dynamic")
-
     # Generate an own dynamic module which is loadable on runtime
     # Add the module content to the whole static module
     unset(SCRIPT_MODULE_PRIVATE_SOURCES)
     CollectSourceFiles(${SCRIPT_MODULE_PATH} SCRIPT_MODULE_PRIVATE_SOURCES)
-
     # Configure the scriptloader
     ConfigureScriptLoader(${SCRIPT_MODULE} SCRIPT_MODULE_PRIVATE_SCRIPTLOADER ON ${SCRIPT_MODULE})
     GetProjectNameOfScriptModule(${SCRIPT_MODULE} SCRIPT_MODULE_PROJECT_NAME)
-
     # Add the module name to DYNAMIC_SCRIPT_MODULES
     list(APPEND DYNAMIC_SCRIPT_MODULE_PROJECTS ${SCRIPT_MODULE_PROJECT_NAME})
-
     # Create the script module project
     add_library(${SCRIPT_MODULE_PROJECT_NAME} SHARED
       ${SCRIPT_MODULE_PRIVATE_SOURCES}
       ${SCRIPT_MODULE_PRIVATE_SCRIPTLOADER})
-
     target_link_libraries(${SCRIPT_MODULE_PROJECT_NAME}
       PRIVATE
-        acore-core-interface
+        trinity-core-interface
       PUBLIC
         game)
 
@@ -198,10 +178,12 @@ foreach(SCRIPT_MODULE ${SCRIPT_MODULE_LIST})
 
     if(UNIX)
       install(TARGETS ${SCRIPT_MODULE_PROJECT_NAME}
-        DESTINATION ${INSTALL_OFFSET} COMPONENT ${SCRIPT_MODULE_PROJECT_NAME})
+        DESTINATION ${INSTALL_OFFSET}
+        COMPONENT ${SCRIPT_MODULE_PROJECT_NAME})
     elseif(WIN32)
       install(TARGETS ${SCRIPT_MODULE_PROJECT_NAME}
-        RUNTIME DESTINATION ${INSTALL_OFFSET} COMPONENT ${SCRIPT_MODULE_PROJECT_NAME})
+        RUNTIME DESTINATION ${INSTALL_OFFSET}
+        COMPONENT ${SCRIPT_MODULE_PROJECT_NAME})
       if(MSVC)
         # Place the script modules in the script subdirectory
         set_target_properties(${SCRIPT_MODULE_PROJECT_NAME} PROPERTIES
@@ -221,23 +203,20 @@ set(WORLDSERVER_DYNAMIC_SCRIPT_MODULES_DEPENDENCIES ${DYNAMIC_SCRIPT_MODULE_PROJ
 
 ConfigureScriptLoader("static" SCRIPT_MODULE_PRIVATE_SCRIPTLOADER OFF ${STATIC_SCRIPT_MODULES})
 
-list(REMOVE_DUPLICATES SCRIPT_MODULE_PRIVATE_SCRIPTLOADER)
-
 add_library(scripts STATIC
   ScriptLoader.h
   ${SCRIPT_MODULE_PRIVATE_SCRIPTLOADER}
-  ${PRIVATE_SOURCES_SCRIPTS})
+  ${PRIVATE_SOURCES})
 
 target_link_libraries(scripts
   PRIVATE
-    acore-core-interface
+    trinity-core-interface
   PUBLIC
     game-interface)
 
 target_include_directories(scripts
   PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${PUBLIC_INCLUDES})
+    ${CMAKE_CURRENT_SOURCE_DIR})
 
 set_target_properties(scripts
   PROPERTIES

@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,22 +18,25 @@
 #ifndef _WARDEN_MODULE_WIN_H
 #define _WARDEN_MODULE_WIN_H
 
+#include "CryptoHash.h"
+#include <array>
+
 /*
 Seed: 4D808D2C77D905C41A6380EC08586AFE (0x05 packet)
 Hash: 568C054C781A972A6037A2290C22B52571A06F4E (0x04 packet)
 Module MD5: 79C0768D657977D697E10BAD956CCED1
 New Client Key: 7F 96 EE FD A5 B6 3D 20 A4 DF 8E 00 CB F4 83 04
-New Cerver Key: C2 B7 AD ED FC CC A9 C2 BF B3 F8 56 02 BA 80 9B
+New Server Key: C2 B7 AD ED FC CC A9 C2 BF B3 F8 56 02 BA 80 9B
 */
 
 struct Module_79C0768D657977D697E10BAD956CCED1
 {
-    uint8 Module[18756];
-    uint8 ModuleKey[16];
-    uint8 Seed[16];
-    uint8 ServerKeySeed[16];
-    uint8 ClientKeySeed[16];
-    uint8 ClientKeySeedHash[20];
+    std::array<uint8, 18756> Module;
+    std::array<uint8, 16> ModuleKey;
+    std::array<uint8, 16> Seed;
+    std::array<uint8, 16> ServerKeySeed;
+    std::array<uint8, 16> ClientKeySeed;
+    Trinity::Crypto::SHA1::Digest ClientKeySeedHash;
 } Module =
 {
     {

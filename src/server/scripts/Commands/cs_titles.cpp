@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -22,12 +22,15 @@ Comment: All titles related commands
 Category: commandscripts
 EndScriptData */
 
+#include "ScriptMgr.h"
 #include "Chat.h"
-#include "CommandScript.h"
-#include "DBCStores.h"
+#include "ChatCommand.h"
+#include "DB2Stores.h"
+#include "Language.h"
 #include "Player.h"
+#include "RBAC.h"
 
-using namespace Acore::ChatCommands;
+using namespace Trinity::ChatCommands;
 
 class titles_commandscript : public CommandScript
 {
@@ -38,13 +41,13 @@ public:
     {
         static ChatCommandTable titlesSetCommandTable =
         {
-            { "mask", HandleTitlesSetMaskCommand, SEC_GAMEMASTER, Console::No },
+            { "mask", HandleTitlesSetMaskCommand, rbac::RBAC_PERM_COMMAND_TITLES_SET_MASK, Console::No },
         };
         static ChatCommandTable titlesCommandTable =
         {
-            { "add",     HandleTitlesAddCommand,     SEC_GAMEMASTER, Console::No },
-            { "current", HandleTitlesCurrentCommand, SEC_GAMEMASTER, Console::No },
-            { "remove",  HandleTitlesRemoveCommand,  SEC_GAMEMASTER, Console::No },
+            { "add",     HandleTitlesAddCommand,     rbac::RBAC_PERM_COMMAND_TITLES_ADD,     Console::No },
+            { "current", HandleTitlesCurrentCommand, rbac::RBAC_PERM_COMMAND_TITLES_CURRENT, Console::No },
+            { "remove",  HandleTitlesRemoveCommand,  rbac::RBAC_PERM_COMMAND_TITLES_REMOVE,  Console::No },
             { "set",     titlesSetCommandTable },
         };
         static ChatCommandTable commandTable =
@@ -54,12 +57,13 @@ public:
         return commandTable;
     }
 
-    static bool HandleTitlesCurrentCommand(ChatHandler* handler, Variant<Hyperlink<title>, uint16> titleId)
+    static bool HandleTitlesCurrentCommand(ChatHandler* handler, Variant<Hyperlink<title>, uint32> titleId)
     {
         Player* target = handler->getSelectedPlayer();
         if (!target)
         {
-            handler->SendErrorMessage(LANG_NO_CHAR_SELECTED);
+            handler->SendSysMessage(LANG_NO_CHAR_SELECTED);
+            handler->SetSentErrorMessage(true);
             return false;
         }
 
@@ -70,27 +74,29 @@ public:
         CharTitlesEntry const* titleInfo = sCharTitlesStore.LookupEntry(titleId);
         if (!titleInfo)
         {
-            handler->SendErrorMessage(LANG_INVALID_TITLE_ID, uint32(titleId));
+            handler->PSendSysMessage(LANG_INVALID_TITLE_ID, titleId);
+            handler->SetSentErrorMessage(true);
             return false;
         }
 
         std::string tNameLink = handler->GetNameLink(target);
-        std::string titleNameStr = Acore::StringFormat(target->getGender() == GENDER_MALE ? titleInfo->nameMale[handler->GetSessionDbcLocale()] : titleInfo->nameFemale[handler->GetSessionDbcLocale()], target->GetName());
+        std::string titleNameStr = fmt::sprintf(target->GetNativeGender() == GENDER_MALE ? titleInfo->Name[handler->GetSessionDbcLocale()] : titleInfo->Name1[handler->GetSessionDbcLocale()], target->GetName());
 
         target->SetTitle(titleInfo);
-        target->SetUInt32Value(PLAYER_CHOSEN_TITLE, titleInfo->bit_index);
+        target->SetChosenTitle(titleInfo->MaskID);
 
-        handler->PSendSysMessage(LANG_TITLE_CURRENT_RES, uint32(titleId), titleNameStr, tNameLink);
+        handler->PSendSysMessage(LANG_TITLE_CURRENT_RES, titleId, titleNameStr.c_str(), tNameLink.c_str());
 
         return true;
     }
 
-    static bool HandleTitlesAddCommand(ChatHandler* handler, Variant<Hyperlink<title>, uint16> titleId)
+    static bool HandleTitlesAddCommand(ChatHandler* handler, Variant<Hyperlink<title>, uint32> titleId)
     {
         Player* target = handler->getSelectedPlayer();
         if (!target)
         {
-            handler->SendErrorMessage(LANG_NO_CHAR_SELECTED);
+            handler->SendSysMessage(LANG_NO_CHAR_SELECTED);
+            handler->SetSentErrorMessage(true);
             return false;
         }
 
@@ -101,15 +107,16 @@ public:
         CharTitlesEntry const* titleInfo = sCharTitlesStore.LookupEntry(titleId);
         if (!titleInfo)
         {
-            handler->SendErrorMessage(LANG_INVALID_TITLE_ID, uint32(titleId));
+            handler->PSendSysMessage(LANG_INVALID_TITLE_ID, titleId);
+            handler->SetSentErrorMessage(true);
             return false;
         }
 
         std::string tNameLink = handler->GetNameLink(target);
-        std::string titleNameStr = Acore::StringFormat(target->getGender() == GENDER_MALE ? titleInfo->nameMale[handler->GetSessionDbcLocale()] : titleInfo->nameFemale[handler->GetSessionDbcLocale()], target->GetName());
+        std::string titleNameStr = fmt::sprintf(target->GetNativeGender() == GENDER_MALE ? titleInfo->Name[handler->GetSessionDbcLocale()] : titleInfo->Name1[handler->GetSessionDbcLocale()], target->GetName());
 
         target->SetTitle(titleInfo);
-        handler->PSendSysMessage(LANG_TITLE_ADD_RES, uint32(titleId), titleNameStr, tNameLink);
+        handler->PSendSysMessage(LANG_TITLE_ADD_RES, titleId, titleNameStr.c_str(), tNameLink.c_str());
 
         return true;
     }
@@ -119,7 +126,8 @@ public:
         Player* target = handler->getSelectedPlayer();
         if (!target)
         {
-            handler->SendErrorMessage(LANG_NO_CHAR_SELECTED);
+            handler->SendSysMessage(LANG_NO_CHAR_SELECTED);
+            handler->SetSentErrorMessage(true);
             return false;
         }
 
@@ -130,21 +138,22 @@ public:
         CharTitlesEntry const* titleInfo = sCharTitlesStore.LookupEntry(titleId);
         if (!titleInfo)
         {
-            handler->SendErrorMessage(LANG_INVALID_TITLE_ID, uint32(titleId));
+            handler->PSendSysMessage(LANG_INVALID_TITLE_ID, titleId);
+            handler->SetSentErrorMessage(true);
             return false;
         }
 
         target->SetTitle(titleInfo, true);
 
         std::string tNameLink = handler->GetNameLink(target);
-        std::string titleNameStr = Acore::StringFormat(target->getGender() == GENDER_MALE ? titleInfo->nameMale[handler->GetSessionDbcLocale()] : titleInfo->nameFemale[handler->GetSessionDbcLocale()], target->GetName());
+        std::string titleNameStr = fmt::sprintf(target->GetNativeGender() == GENDER_MALE ? titleInfo->Name[handler->GetSessionDbcLocale()] : titleInfo->Name1[handler->GetSessionDbcLocale()], target->GetName());
 
-        handler->PSendSysMessage(LANG_TITLE_REMOVE_RES, uint32(titleId), titleNameStr, tNameLink);
+        handler->PSendSysMessage(LANG_TITLE_REMOVE_RES, titleId, titleNameStr.c_str(), tNameLink.c_str());
 
-        if (!target->HasTitle(target->GetInt32Value(PLAYER_CHOSEN_TITLE)))
+        if (!target->HasTitle(target->m_playerData->PlayerTitle))
         {
-            target->SetUInt32Value(PLAYER_CHOSEN_TITLE, 0);
-            handler->PSendSysMessage(LANG_CURRENT_TITLE_RESET, tNameLink);
+            target->SetChosenTitle(0);
+            handler->PSendSysMessage(LANG_CURRENT_TITLE_RESET, tNameLink.c_str());
         }
 
         return true;
@@ -156,7 +165,8 @@ public:
         Player* target = handler->getSelectedPlayer();
         if (!target)
         {
-            handler->SendErrorMessage(LANG_NO_CHAR_SELECTED);
+            handler->SendSysMessage(LANG_NO_CHAR_SELECTED);
+            handler->SetSentErrorMessage(true);
             return false;
         }
 
@@ -166,19 +176,19 @@ public:
 
         uint64 titles2 = mask;
 
-        for (uint32 i = 1; i < sCharTitlesStore.GetNumRows(); ++i)
+        for (uint32 i = 1; i < sCharTitlesStore.GetNumRows() && i < 64; ++i)
             if (CharTitlesEntry const* tEntry = sCharTitlesStore.LookupEntry(i))
-                titles2 &= ~(uint64(1) << tEntry->bit_index);
+                titles2 &= ~(uint64(1) << tEntry->MaskID);
 
         mask &= ~titles2;                                     // remove non-existing titles
 
-        target->SetUInt64Value(PLAYER__FIELD_KNOWN_TITLES, mask);
+        target->SetKnownTitles(0, mask);
         handler->SendSysMessage(LANG_DONE);
 
-        if (!target->HasTitle(target->GetInt32Value(PLAYER_CHOSEN_TITLE)))
+        if (!target->HasTitle(target->m_playerData->PlayerTitle))
         {
-            target->SetUInt32Value(PLAYER_CHOSEN_TITLE, 0);
-            handler->PSendSysMessage(LANG_CURRENT_TITLE_RESET, handler->GetNameLink(target));
+            target->SetChosenTitle(0);
+            handler->PSendSysMessage(LANG_CURRENT_TITLE_RESET, handler->GetNameLink(target).c_str());
         }
 
         return true;

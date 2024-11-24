@@ -1,119 +1,214 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+/* ScriptData
+SDName: Boss_Fankriss
+SD%Complete: 100
+SDComment: sound not implemented
+SDCategory: Temple of Ahn'Qiraj
+EndScriptData */
+
+#include "ScriptMgr.h"
 #include "ScriptedCreature.h"
 #include "temple_of_ahnqiraj.h"
+#include "TemporarySummon.h"
+
+#define SOUND_SENTENCE_YOU 8588
+#define SOUND_SERVE_TO     8589
+#define SOUND_LAWS         8590
+#define SOUND_TRESPASS     8591
+#define SOUND_WILL_BE      8592
 
 enum Spells
 {
-    SPELL_MORTAL_WOUND      = 25646,
-    SPELL_ENTANGLE_RIGHT    = 720,
-    SPELL_ENTANGLE_CENTER   = 731,
-    SPELL_ENTANGLE_LEFT     = 1121,
+    SPELL_MORTAL_WOUND      = 28467,
+    SPELL_ROOT              = 28858,
 
-    SPELL_SUMMON_WORM_1     = 518,
-    SPELL_SUMMON_WORM_2     = 25831,
-    SPELL_SUMMON_WORM_3     = 25832
+    // Enrage for his spawns
+    SPELL_ENRAGE            = 28798
 };
 
-enum Misc
+class boss_fankriss : public CreatureScript
 {
-    MAX_HATCHLING_SPAWN     = 4,
-    NPC_VEKNISS_HATCHLING   = 15962
-};
+public:
+    boss_fankriss() : CreatureScript("boss_fankriss") { }
 
-const std::array<Position, 3> hatchlingsSpawnPoints
-{
+    CreatureAI* GetAI(Creature* creature) const override
     {
-        { -8043.6f, 1254.1f, -84.3f }, // Right
-        { -8003.0f, 1222.9f, -82.1f }, // Center
-        { -8022.3f, 1149.0f, -89.1f }  // Left
-    }
-};
-
-const std::array<uint32, 3> entangleSpells = { SPELL_ENTANGLE_RIGHT, SPELL_ENTANGLE_CENTER, SPELL_ENTANGLE_LEFT };
-
-struct boss_fankriss : public BossAI
-{
-    boss_fankriss(Creature* creature) : BossAI(creature, DATA_FANKRISS)
-    {
-        me->m_CombatDistance = 80.f;
+        return GetAQ40AI<boss_fankrissAI>(creature);
     }
 
-    void Reset() override
+    struct boss_fankrissAI : public BossAI
     {
-        summonWormSpells = { SPELL_SUMMON_WORM_1, SPELL_SUMMON_WORM_2, SPELL_SUMMON_WORM_3};
-        BossAI::Reset();
-    }
-
-    void SummonWorms()
-    {
-        uint32 amount = urand(1, 3);
-        Acore::Containers::RandomResize(summonWormSpells, amount);
-        for (uint32 summonSpell : summonWormSpells)
-            DoCastAOE(summonSpell, true);
-        summonWormSpells = { SPELL_SUMMON_WORM_1, SPELL_SUMMON_WORM_2, SPELL_SUMMON_WORM_3 };
-    }
-
-    void SummonHatchlingWaves()
-    {
-        for (Position spawnPos : hatchlingsSpawnPoints)
+        boss_fankrissAI(Creature* creature) : BossAI(creature, DATA_FRANKRIS)
         {
-            for (uint8 i = 0; i < MAX_HATCHLING_SPAWN; i++)
-            {
-                Position randSpawn = me->GetRandomPoint(spawnPos, 10.f);
-                me->SummonCreature(NPC_VEKNISS_HATCHLING, randSpawn, TEMPSUMMON_CORPSE_DESPAWN);
-            }
+            Initialize();
         }
-    }
 
-    void JustEngagedWith(Unit* who) override
-    {
-        BossAI::JustEngagedWith(who);
+        void Initialize()
+        {
+            MortalWound_Timer = urand(10000, 15000);
+            SpawnHatchlings_Timer = urand(6000, 12000);
+            SpawnSpawns_Timer = urand(15000, 45000);
+        }
 
-        scheduler.Schedule(7s, 14s, [this](TaskContext context)
+        uint32 MortalWound_Timer;
+        uint32 SpawnHatchlings_Timer;
+        uint32 SpawnSpawns_Timer;
+
+        void Reset() override
+        {
+            Initialize();
+            _Reset();
+        }
+
+        void SummonSpawn(Unit* victim)
+        {
+            if (!victim)
+                return;
+
+            int Rand = 10 + (rand32() % 10);
+            float RandX = 0.f;
+            float RandY = 0.f;
+
+            switch (rand32() % 2)
+            {
+                case 0: RandX = 0.0f - Rand; break;
+                case 1: RandX = 0.0f + Rand; break;
+            }
+
+            Rand = 10 + (rand32() % 10);
+            switch (rand32() % 2)
+            {
+                case 0: RandY = 0.0f - Rand; break;
+                case 1: RandY = 0.0f + Rand; break;
+            }
+            Rand = 0;
+            Creature* Spawn = DoSpawnCreature(15630, RandX, RandY, 0, 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 30s);
+            if (Spawn)
+                Spawn->AI()->AttackStart(victim);
+        }
+
+        void UpdateAI(uint32 diff) override
+        {
+            //Return since we have no target
+            if (!UpdateVictim())
+                return;
+
+            //MortalWound_Timer
+            if (MortalWound_Timer <= diff)
             {
                 DoCastVictim(SPELL_MORTAL_WOUND);
-                context.Repeat();
-            })
-            .Schedule(30s, 50s, [this](TaskContext context)
+                MortalWound_Timer = urand(10000, 20000);
+            } else MortalWound_Timer -= diff;
+
+            //Summon 1-3 Spawns of Fankriss at random time.
+            if (SpawnSpawns_Timer <= diff)
             {
-                SummonWorms();
-                context.Repeat(22s, 70s);
-            })
-            .Schedule(15s, 20s, [this](TaskContext context)
-            {
-                if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1, 0.0f, true))
+                switch (urand(0, 2))
                 {
-                    uint32 spellId = Acore::Containers::SelectRandomContainerElement(entangleSpells);
-                    DoCast(target, spellId);
+                    case 0:
+                        SummonSpawn(SelectTarget(SelectTargetMethod::Random, 0));
+                        break;
+                    case 1:
+                        SummonSpawn(SelectTarget(SelectTargetMethod::Random, 0));
+                        SummonSpawn(SelectTarget(SelectTargetMethod::Random, 0));
+                        break;
+                    case 2:
+                        SummonSpawn(SelectTarget(SelectTargetMethod::Random, 0));
+                        SummonSpawn(SelectTarget(SelectTargetMethod::Random, 0));
+                        SummonSpawn(SelectTarget(SelectTargetMethod::Random, 0));
+                        break;
                 }
+                SpawnSpawns_Timer = urand(30000, 60000);
+            } else SpawnSpawns_Timer -= diff;
 
-                SummonHatchlingWaves();
-                context.Repeat(25s, 55s);
-            });
-    }
+            // Teleporting Random Target to one of the three tunnels and spawn 4 hatchlings near the gamer.
+            //We will only telport if fankriss has more than 3% of hp so teleported gamers can always loot.
+            if (HealthAbovePct(3))
+            {
+                if (SpawnHatchlings_Timer <= diff)
+                {
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 0.0f, true))
+                    {
+                        DoCast(target, SPELL_ROOT);
 
-private:
-    std::vector<uint32> summonWormSpells;
+                        if (GetThreat(target))
+                            ModifyThreatByPercent(target, -100);
+
+                        Creature* Hatchling = nullptr;
+                        switch (urand(0, 2))
+                        {
+                            case 0:
+                                DoTeleportPlayer(target, -8106.0142f, 1289.2900f, -74.419533f, 5.112f);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX()-3, target->GetPositionY()-3, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX()-3, target->GetPositionY()+3, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX()-5, target->GetPositionY()-5, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX()-5, target->GetPositionY()+5, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                break;
+                            case 1:
+                                DoTeleportPlayer(target, -7990.135354f, 1155.1907f, -78.849319f, 2.608f);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX() - 3, target->GetPositionY() - 3, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX()-3, target->GetPositionY()+3, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX()-5, target->GetPositionY()-5, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX()-5, target->GetPositionY()+5, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                break;
+                            case 2:
+                                DoTeleportPlayer(target, -8159.7753f, 1127.9064f, -76.868660f, 0.675f);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX() - 3, target->GetPositionY() - 3, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX()-3, target->GetPositionY()+3, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX()-5, target->GetPositionY()-5, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                Hatchling = me->SummonCreature(15962, target->GetPositionX()-5, target->GetPositionY()+5, target->GetPositionZ(), 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s);
+                                if (Hatchling)
+                                    Hatchling->AI()->AttackStart(target);
+                                break;
+                        }
+                    }
+                    SpawnHatchlings_Timer = urand(45000, 60000);
+                } else SpawnHatchlings_Timer -= diff;
+            }
+        }
+    };
+
 };
 
 void AddSC_boss_fankriss()
 {
-    RegisterTempleOfAhnQirajCreatureAI(boss_fankriss);
+    new boss_fankriss();
 }

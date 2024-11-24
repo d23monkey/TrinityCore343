@@ -1,29 +1,31 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef AC_ARGON2_H
-#define AC_ARGON2_H
+#ifndef TRINITY_ARGON2_H
+#define TRINITY_ARGON2_H
 
 #include "BigNumber.h"
+#include "Define.h"
 #include "Optional.h"
+#include <string>
 
-namespace Acore::Crypto
+namespace Trinity::Crypto
 {
-    struct AC_COMMON_API Argon2
+    struct TC_COMMON_API Argon2
     {
         static constexpr uint32 HASH_LEN = 16;                    // 128 bits, in bytes
         static constexpr uint32 ENCODED_HASH_LEN = 100;           // in chars

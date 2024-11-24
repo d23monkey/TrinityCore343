@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -27,24 +27,33 @@ char const* localeNames[TOTAL_LOCALES] =
     "zhTW",
     "esES",
     "esMX",
-    "ruRU"
+    "ruRU",
+    "none",
+    "ptBR",
+    "itIT"
 };
 
-LocaleConstant GetLocaleByName(const std::string& name)
+LocaleConstant GetLocaleByName(std::string_view name)
 {
     for (uint32 i = 0; i < TOTAL_LOCALES; ++i)
         if (name == localeNames[i])
-        {
             return LocaleConstant(i);
-        }
 
-    return LOCALE_enUS;                                     // including enGB case
+    return TOTAL_LOCALES;
 }
 
-void CleanStringForMysqlQuery(std::string& str)
+CascLocaleBit WowLocaleToCascLocaleBit[TOTAL_LOCALES] =
 {
-    std::string::size_type n = 0;
-    while ((n = str.find('\\')) != str.npos) { str.erase(n, 1); }
-    while ((n = str.find('"')) != str.npos) { str.erase(n, 1); }
-    while ((n = str.find('\'')) != str.npos) { str.erase(n, 1); }
-}
+    CascLocaleBit::enUS,
+    CascLocaleBit::koKR,
+    CascLocaleBit::frFR,
+    CascLocaleBit::deDE,
+    CascLocaleBit::zhCN,
+    CascLocaleBit::zhTW,
+    CascLocaleBit::esES,
+    CascLocaleBit::esMX,
+    CascLocaleBit::ruRU,
+    CascLocaleBit::None,
+    CascLocaleBit::ptBR,
+    CascLocaleBit::itIT
+};

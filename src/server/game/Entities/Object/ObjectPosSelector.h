@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,22 +18,22 @@
 #ifndef _OBJECT_POS_SELECTOR_H
 #define _OBJECT_POS_SELECTOR_H
 
-#include "Define.h"
-#include <cmath>
+#include "Common.h"
 #include <map>
+#include <cmath>
 
 enum UsedPosType { USED_POS_PLUS, USED_POS_MINUS };
 
-inline UsedPosType operator ~(UsedPosType uptype)
+inline UsedPosType operator~(UsedPosType uptype)
 {
     return uptype == USED_POS_PLUS ? USED_POS_MINUS : USED_POS_PLUS;
 }
 
-struct ObjectPosSelector
+struct TC_GAME_API ObjectPosSelector
 {
     struct UsedPos
     {
-        UsedPos(float sign_, float size_, float dist_) : sign(sign_), size(size_), dist(dist_) {}
+        UsedPos(float sign_, float size_, float dist_) : sign(sign_), size(size_), dist(dist_) { }
 
         float sign;
 
@@ -41,7 +41,7 @@ struct ObjectPosSelector
         float dist;                                         // dist to central point (including central point size)
     };
 
-    typedef std::multimap<float, UsedPos> UsedPosList;      // std::abs(angle)->Node
+    typedef std::multimap<float, UsedPos> UsedPosList;       // abs(angle)->Node
 
     ObjectPosSelector(float x, float y, float size, float dist);
 
@@ -59,8 +59,8 @@ struct ObjectPosSelector
         float angle_step2  = GetAngle(nextUsedPos.second);
 
         float next_angle = nextUsedPos.first;
-        if (nextUsedPos.second.sign * sign < 0)             // last node from diff. list (-pi+alpha)
-            next_angle = 2 * M_PI - next_angle;             // move to positive
+        if (nextUsedPos.second.sign * sign < 0)                       // last node from diff. list (-pi+alpha)
+            next_angle = 2 * float(M_PI) - next_angle;   // move to positive
 
         return std::fabs(angle) + angle_step2 <= next_angle;
     }
@@ -68,12 +68,12 @@ struct ObjectPosSelector
     bool CheckOriginal() const
     {
         return (m_UsedPosLists[USED_POS_PLUS].empty() || CheckAngle(*m_UsedPosLists[USED_POS_PLUS].begin(), 1.0f, 0)) &&
-               (m_UsedPosLists[USED_POS_MINUS].empty() || CheckAngle(*m_UsedPosLists[USED_POS_MINUS].begin(), -1.0f, 0));
+            (m_UsedPosLists[USED_POS_MINUS].empty() || CheckAngle(*m_UsedPosLists[USED_POS_MINUS].begin(), -1.0f, 0));
     }
 
     bool IsNonBalanced() const { return m_UsedPosLists[USED_POS_PLUS].empty() != m_UsedPosLists[USED_POS_MINUS].empty(); }
 
-    bool NextAngleFor(UsedPosList::value_type const& usedPos, float sign, UsedPosType uptype, float& angle)
+    bool NextAngleFor(UsedPosList::value_type const& usedPos, float sign, UsedPosType uptype, float &angle)
     {
         float angle_step  = GetAngle(usedPos.second);
 
@@ -99,12 +99,12 @@ struct ObjectPosSelector
         return true;
     }
 
-    bool NextSmallStepAngle(float sign, UsedPosType uptype, float& angle)
+    bool NextSmallStepAngle(float sign, UsedPosType uptype, float &angle)
     {
         // next possible angle
         angle  = m_smallStepAngle[uptype] + m_anglestep * sign;
 
-        if (std::fabs(angle) > M_PI)
+        if (std::fabs(angle) > float(M_PI))
         {
             m_smallStepOk[uptype] = false;
             return false;
@@ -135,7 +135,7 @@ struct ObjectPosSelector
     UsedPosList::value_type const* nextUsedPos(UsedPosType uptype);
 
     // angle from used pos to next possible free pos
-    float GetAngle(UsedPos const& usedPos) const { return acos(m_dist / (usedPos.dist + usedPos.size + m_size)); }
+    float GetAngle(UsedPos const& usedPos) const { return std::acos(m_dist/(usedPos.dist+usedPos.size+m_size)); }
 
     float m_center_x;
     float m_center_y;

@@ -1,76 +1,58 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _ARENA_SCORE_H
-#define _ARENA_SCORE_H
+#ifndef TRINITY_ARENA_SCORE_H
+#define TRINITY_ARENA_SCORE_H
 
 #include "BattlegroundScore.h"
-#include "SharedDefines.h"
-#include "StringFormat.h"
 
-struct AC_GAME_API ArenaScore : public BattlegroundScore
+struct TC_GAME_API ArenaScore : public BattlegroundScore
 {
     friend class Arena;
 
-protected:
-    ArenaScore(ObjectGuid playerGuid, TeamId team) :
-        BattlegroundScore(playerGuid), PvPTeamId(team == TEAM_ALLIANCE ? PVP_TEAM_ALLIANCE : PVP_TEAM_HORDE) { }
+    protected:
+        ArenaScore(ObjectGuid playerGuid, uint32 team);
 
-    void AppendToPacket(WorldPacket& data) final;
-    void BuildObjectivesBlock(WorldPacket& data) final;
+        void BuildPvPLogPlayerDataPacket(WorldPackets::Battleground::PVPMatchStatistics::PVPMatchPlayerStatistics& playerData) const override;
 
-    // For Logging purpose
-    std::string ToString() const override
-    {
-        return Acore::StringFormat("Damage done: {}, Healing done: {}, Killing blows: {}", DamageDone, HealingDone, KillingBlows);
-    }
+        // For Logging purpose
+        std::string ToString() const override;
 
-    uint8 PvPTeamId;
+        uint32 PreMatchRating = 0;
+        uint32 PreMatchMMR = 0;
+        uint32 PostMatchRating = 0;
+        uint32 PostMatchMMR = 0;
 };
 
-struct AC_GAME_API ArenaTeamScore
+struct TC_GAME_API ArenaTeamScore
 {
     friend class Arena;
     friend class Battleground;
 
-protected:
-    ArenaTeamScore() = default;
-    virtual ~ArenaTeamScore() = default;
+    protected:
+        ArenaTeamScore();
+        virtual ~ArenaTeamScore();
 
-    void Reset()
-    {
-        RatingChange = 0;
-        MatchmakerRating = 0;
-        TeamName = {};
-    }
+        void Assign(uint32 preMatchRating, uint32 postMatchRating, uint32 preMatchMMR, uint32 postMatchMMR);
 
-    void Assign(int32 ratingChange, uint32 matchMakerRating, std::string_view teamName)
-    {
-        RatingChange = ratingChange;
-        MatchmakerRating = matchMakerRating;
-        TeamName = std::string(teamName);
-    }
-
-    void BuildRatingInfoBlock(WorldPacket& data);
-    void BuildTeamInfoBlock(WorldPacket& data);
-
-    int32 RatingChange = 0;
-    uint32 MatchmakerRating = 0;
-    std::string TeamName{};
+        uint32 PreMatchRating = 0;
+        uint32 PostMatchRating = 0;
+        uint32 PreMatchMMR = 0;
+        uint32 PostMatchMMR = 0;
 };
 
-#endif // ACORE_ARENA_SCORE_H
+#endif // TRINITY_ARENA_SCORE_H

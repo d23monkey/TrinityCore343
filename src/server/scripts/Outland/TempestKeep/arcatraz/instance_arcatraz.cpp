@@ -1,140 +1,218 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "InstanceMapScript.h"
-#include "InstanceScript.h"
+#include "ScriptMgr.h"
 #include "arcatraz.h"
+#include "Creature.h"
+#include "GameObject.h"
+#include "InstanceScript.h"
+#include "Map.h"
 
 DoorData const doorData[] =
 {
-    { GO_CONTAINMENT_CORE_SECURITY_FIELD_ALPHA, DATA_SOCCOTHRATES,  DOOR_TYPE_PASSAGE },
-    { GO_CONTAINMENT_CORE_SECURITY_FIELD_BETA,  DATA_DALLIAH,       DOOR_TYPE_PASSAGE },
-    { 0,                                        0,                  DOOR_TYPE_ROOM } // END
+    { GO_CONTAINMENT_CORE_SECURITY_FIELD_ALPHA, DATA_SOCCOTHRATES,  EncounterDoorBehavior::OpenWhenDone },
+    { GO_CONTAINMENT_CORE_SECURITY_FIELD_BETA,  DATA_DALLIAH,       EncounterDoorBehavior::OpenWhenDone },
+    { 0,                                        0,                  EncounterDoorBehavior::OpenWhenNotInProgress } // END
 };
 
-ObjectData const creatureData[] =
+DungeonEncounterData const encounters[] =
 {
-    { NPC_DALLIAH,      DATA_DALLIAH          },
-    { NPC_SOCCOTHRATES, DATA_SOCCOTHRATES     },
-    { NPC_MELLICHAR,    DATA_WARDEN_MELLICHAR },
-    { 0,                0                     }
+    { DATA_ZEREKETH, {{ 1916 }} },
+    { DATA_DALLIAH, {{ 1913 }} },
+    { DATA_SOCCOTHRATES, {{ 1915 }} },
+    { DATA_HARBINGER_SKYRISS, {{ 1914 }} }
 };
 
 class instance_arcatraz : public InstanceMapScript
 {
-public:
-    instance_arcatraz() : InstanceMapScript("instance_arcatraz", 552) { }
+    public:
+        instance_arcatraz() : InstanceMapScript(ArcatrazScriptName, 552) { }
 
-    struct instance_arcatraz_InstanceMapScript : public InstanceScript
-    {
-        instance_arcatraz_InstanceMapScript(Map* map) : InstanceScript(map)
+        struct instance_arcatraz_InstanceMapScript : public InstanceScript
         {
-            SetHeaders(DataHeader);
-            SetBossNumber(MAX_ENCOUTER);
-            LoadDoorData(doorData);
-            LoadObjectData(creatureData, nullptr);
-        }
-
-        void OnGameObjectCreate(GameObject* go) override
-        {
-            switch (go->GetEntry())
+            instance_arcatraz_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
             {
-                case GO_CONTAINMENT_CORE_SECURITY_FIELD_ALPHA:
-                case GO_CONTAINMENT_CORE_SECURITY_FIELD_BETA:
-                    AddDoor(go);
-                    break;
-                case GO_STASIS_POD_ALPHA:
-                    StasisPodGUIDs[0] = go->GetGUID();
-                    break;
-                case GO_STASIS_POD_BETA:
-                    StasisPodGUIDs[1] = go->GetGUID();
-                    break;
-                case GO_STASIS_POD_DELTA:
-                    StasisPodGUIDs[2] = go->GetGUID();
-                    break;
-                case GO_STASIS_POD_GAMMA:
-                    StasisPodGUIDs[3] = go->GetGUID();
-                    break;
-                case GO_STASIS_POD_OMEGA:
-                    StasisPodGUIDs[4] = go->GetGUID();
-                    break;
-                case GO_WARDENS_SHIELD:
-                    WardensShieldGUID = go->GetGUID();
-                    break;
-                default:
-                    break;
-            }
-        }
+                SetHeaders(DataHeader);
+                SetBossNumber(EncounterCount);
+                LoadDoorData(doorData);
+                LoadDungeonEncounterData(encounters);
 
-        void SetData(uint32 type, uint32 data) override
-        {
-            switch (type)
-            {
-                case DATA_WARDEN_1:
-                case DATA_WARDEN_2:
-                case DATA_WARDEN_3:
-                case DATA_WARDEN_4:
-                case DATA_WARDEN_5:
-                    if (data < FAIL)
-                        HandleGameObject(StasisPodGUIDs[type - DATA_WARDEN_1], data == IN_PROGRESS);
-                    if (Creature* warden = GetCreature(DATA_WARDEN_MELLICHAR))
-                        warden->AI()->SetData(type, data);
-                    break;
-            }
-        }
+                ConversationState = NOT_STARTED;
 
-        ObjectGuid GetGuidData(uint32 data) const override
-        {
-            switch (data)
-            {
-                case DATA_WARDENS_SHIELD:
-                    return WardensShieldGUID;
+                memset(StasisPodStates, NOT_STARTED, 5 * sizeof(uint8));
             }
 
-            return ObjectGuid::Empty;
-        }
-
-        bool SetBossState(uint32 type, EncounterState state) override
-        {
-            if (!InstanceScript::SetBossState(type, state))
-                return false;
-
-            if (type == DATA_WARDEN_MELLICHAR && state == NOT_STARTED)
+            void OnCreatureCreate(Creature* creature) override
             {
-                SetData(DATA_WARDEN_1, NOT_STARTED);
-                SetData(DATA_WARDEN_2, NOT_STARTED);
-                SetData(DATA_WARDEN_3, NOT_STARTED);
-                SetData(DATA_WARDEN_4, NOT_STARTED);
-                SetData(DATA_WARDEN_5, NOT_STARTED);
-                HandleGameObject(WardensShieldGUID, true);
+                InstanceScript::OnCreatureCreate(creature);
+
+                switch (creature->GetEntry())
+                {
+                    case NPC_DALLIAH:
+                        DalliahGUID = creature->GetGUID();
+                        break;
+                    case NPC_SOCCOTHRATES:
+                        SoccothratesGUID = creature->GetGUID();
+                        break;
+                    case NPC_MELLICHAR:
+                        MellicharGUID = creature->GetGUID();
+                        break;
+                    case NPC_MILLHOUSE:
+                        MillhouseGUID = creature->GetGUID();
+                        break;
+                    default:
+                        break;
+                }
             }
 
-            return true;
+            void OnGameObjectCreate(GameObject* go) override
+            {
+                InstanceScript::OnGameObjectCreate(go);
+
+                switch (go->GetEntry())
+                {
+                    case GO_STASIS_POD_ALPHA:
+                        StasisPodGUIDs[0] = go->GetGUID();
+                        break;
+                    case GO_STASIS_POD_BETA:
+                        StasisPodGUIDs[1] = go->GetGUID();
+                        break;
+                    case GO_STASIS_POD_DELTA:
+                        StasisPodGUIDs[2] = go->GetGUID();
+                        break;
+                    case GO_STASIS_POD_GAMMA:
+                        StasisPodGUIDs[3] = go->GetGUID();
+                        break;
+                    case GO_STASIS_POD_OMEGA:
+                        StasisPodGUIDs[4] = go->GetGUID();
+                        break;
+                    case GO_WARDENS_SHIELD:
+                        WardensShieldGUID = go->GetGUID();
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            void SetData(uint32 type, uint32 data) override
+            {
+                switch (type)
+                {
+                    case DATA_WARDEN_1:
+                    case DATA_WARDEN_2:
+                    case DATA_WARDEN_3:
+                    case DATA_WARDEN_4:
+                    case DATA_WARDEN_5:
+                        if (data == IN_PROGRESS)
+                            HandleGameObject(StasisPodGUIDs[type - DATA_WARDEN_1], true);
+                        StasisPodStates[type - DATA_WARDEN_1] = uint8(data);
+                        break;
+                    case DATA_CONVERSATION:
+                        ConversationState = uint8(data);
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            uint32 GetData(uint32 type) const override
+            {
+                switch (type)
+                {
+                    case DATA_WARDEN_1:
+                    case DATA_WARDEN_2:
+                    case DATA_WARDEN_3:
+                    case DATA_WARDEN_4:
+                    case DATA_WARDEN_5:
+                        return StasisPodStates[type - DATA_WARDEN_1];
+                    case DATA_CONVERSATION:
+                        return ConversationState;
+                    default:
+                        break;
+                }
+                return 0;
+            }
+
+            ObjectGuid GetGuidData(uint32 data) const override
+            {
+                switch (data)
+                {
+                    case DATA_DALLIAH:
+                        return DalliahGUID;
+                    case DATA_SOCCOTHRATES:
+                        return SoccothratesGUID;
+                    case DATA_MELLICHAR:
+                        return MellicharGUID;
+                    case DATA_WARDENS_SHIELD:
+                        return WardensShieldGUID;
+                    default:
+                        break;
+                }
+                return ObjectGuid::Empty;
+            }
+
+            bool SetBossState(uint32 type, EncounterState state) override
+            {
+                if (!InstanceScript::SetBossState(type, state))
+                    return false;
+
+                switch (type)
+                {
+                    case DATA_HARBINGER_SKYRISS:
+                        if (state == NOT_STARTED || state == FAIL)
+                        {
+                            SetData(DATA_WARDEN_1, NOT_STARTED);
+                            SetData(DATA_WARDEN_2, NOT_STARTED);
+                            SetData(DATA_WARDEN_3, NOT_STARTED);
+                            SetData(DATA_WARDEN_4, NOT_STARTED);
+                            SetData(DATA_WARDEN_5, NOT_STARTED);
+                        }
+                        else if (state == DONE)
+                        {
+                            if (!instance->IsHeroic())
+                                break;
+
+                            if (Creature* millhouse = instance->GetCreature(MillhouseGUID))
+                                if (millhouse->IsAlive())
+                                    DoCastSpellOnPlayers(SPELL_QID_10886);
+                        }
+                        break;
+                    default:
+                        break;
+                }
+                return true;
+            }
+
+        protected:
+            ObjectGuid DalliahGUID;
+            ObjectGuid SoccothratesGUID;
+            ObjectGuid StasisPodGUIDs[5];
+            ObjectGuid MellicharGUID;
+            ObjectGuid WardensShieldGUID;
+            ObjectGuid MillhouseGUID;
+
+            uint8 ConversationState;
+            uint8 StasisPodStates[5];
+        };
+
+        InstanceScript* GetInstanceScript(InstanceMap* map) const override
+        {
+            return new instance_arcatraz_InstanceMapScript(map);
         }
-
-    protected:
-        ObjectGuid StasisPodGUIDs[5];
-        ObjectGuid WardensShieldGUID;
-    };
-
-    InstanceScript* GetInstanceScript(InstanceMap* map) const override
-    {
-        return new instance_arcatraz_InstanceMapScript(map);
-    }
 };
 
 void AddSC_instance_arcatraz()

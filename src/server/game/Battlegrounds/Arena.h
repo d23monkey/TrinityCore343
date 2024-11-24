@@ -1,23 +1,24 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _ARENA_H
-#define _ARENA_H
+#ifndef TRINITY_ARENA_H
+#define TRINITY_ARENA_H
 
+#include "ArenaScore.h"
 #include "Battleground.h"
 
 enum ArenaBroadcastTexts
@@ -40,27 +41,38 @@ enum ArenaSpellIds
 
 enum ArenaWorldStates
 {
-    ARENA_WORLD_STATE_ALIVE_PLAYERS_GREEN   = 3600,
-    ARENA_WORLD_STATE_ALIVE_PLAYERS_GOLD    = 3601
+    ARENA_WORLD_STATE_ALIVE_PLAYERS_GREEN       = 3600,
+    ARENA_WORLD_STATE_ALIVE_PLAYERS_GOLD        = 3601,
+    ARENA_WORLD_STATE_SHOW_ALIVE_PLAYERS        = 3610,
+    ARENA_WORLD_STATE_TIME_REMAINING            = 8529,
+    ARENA_WORLD_STATE_SHOW_TIME_REMAINING       = 8524,
+    ARENA_WORLD_STATE_GREEN_TEAM_EXTRA_LIVES    = 15480,
+    ARENA_WORLD_STATE_GOLD_TEAM_EXTRA_LIVES     = 15481,
+    ARENA_WORLD_STATE_SHOW_EXTRA_LIVES          = 13401,
+    ARENA_WORLD_STATE_SOLO_SHUFFLE_ROUND        = 21427,
+    ARENA_WORLD_STATE_SHOW_SOLO_SHUFFLE_ROUND   = 21322,
 };
 
-class AC_GAME_API Arena : public Battleground
+class TC_GAME_API Arena : public Battleground
 {
-protected:
-    Arena();
+    protected:
+        Arena(BattlegroundTemplate const* battlegroundTemplate);
 
-    void AddPlayer(Player* player) override;
-    void RemovePlayer(Player* /*player*/) override;
+        void AddPlayer(Player* player, BattlegroundQueueTypeId queueId) override;
+        void RemovePlayer(Player* /*player*/, ObjectGuid /*guid*/, uint32 /*team*/) override;
 
-    void FillInitialWorldStates(WorldPacket& data) override;
-    void UpdateArenaWorldState();
+        void UpdateArenaWorldState();
 
-    void HandleKillPlayer(Player* player, Player* killer) override;
+        void HandleKillPlayer(Player* player, Player* killer) override;
 
-private:
-    void RemovePlayerAtLeave(Player* player) override;
-    void CheckWinConditions() override;
-    void EndBattleground(TeamId winnerTeamId) override;
+        void BuildPvPLogDataPacket(WorldPackets::Battleground::PVPMatchStatistics& pvpLogData) const override;
+
+    private:
+        void RemovePlayerAtLeave(ObjectGuid guid, bool transport, bool sendPacket) override;
+        void CheckWinConditions() override;
+        void EndBattleground(Team winner) override;
+
+        ArenaTeamScore _arenaTeamScores[PVP_TEAMS_COUNT];
 };
 
-#endif // ACORE_ARENA_H
+#endif // TRINITY_ARENA_H

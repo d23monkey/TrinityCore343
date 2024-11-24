@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -21,13 +21,12 @@
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "SpellMgr.h"
-#include <map>
 
 // some type definitions
 // no use putting them in the header file, they're only used in this .cpp
 
-// struct to store information about extra item creation
-// one entry for every spell that is able to create an extra item
+// struct to store information about perfection procs
+// one entry per spell
 struct SkillPerfectItemEntry
 {
     // the spell id of the spell required - it's named "specialization" to conform with SkillExtraItemEntry
@@ -60,8 +59,7 @@ void LoadSkillPerfectItemTable()
 
     if (!result)
     {
-        LOG_WARN("server.loading", ">> Loaded 0 spell perfection definitions. DB table `skill_perfect_item_template` is empty.");
-        LOG_INFO("server.loading", " ");
+        TC_LOG_INFO("server.loading", ">> Loaded 0 spell perfection definitions. DB table `skill_perfect_item_template` is empty.");
         return;
     }
 
@@ -71,32 +69,32 @@ void LoadSkillPerfectItemTable()
     {
         Field* fields = result->Fetch();
 
-        uint32 spellId = fields[0].Get<uint32>();
+        uint32 spellId = fields[0].GetUInt32();
 
-        if (!sSpellMgr->GetSpellInfo(spellId))
+        if (!sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE))
         {
-            LOG_ERROR("sql.sql", "Skill perfection data for spell {} has non-existent spell id in `skill_perfect_item_template`!", spellId);
+            TC_LOG_ERROR("sql.sql", "Skill perfection data for spell {} has a non-existing spell id in the `skill_perfect_item_template`!", spellId);
             continue;
         }
 
-        uint32 requiredSpecialization = fields[1].Get<uint32>();
-        if (!sSpellMgr->GetSpellInfo(requiredSpecialization))
+        uint32 requiredSpecialization = fields[1].GetUInt32();
+        if (!sSpellMgr->GetSpellInfo(requiredSpecialization, DIFFICULTY_NONE))
         {
-            LOG_ERROR("sql.sql", "Skill perfection data for spell {} has non-existent required specialization spell id {} in `skill_perfect_item_template`!", spellId, requiredSpecialization);
+            TC_LOG_ERROR("sql.sql", "Skill perfection data for spell {} has a non-existing required specialization spell id {} in the `skill_perfect_item_template`!", spellId, requiredSpecialization);
             continue;
         }
 
-        float perfectCreateChance = fields[2].Get<float>();
+        float perfectCreateChance = fields[2].GetFloat();
         if (perfectCreateChance <= 0.0f)
         {
-            LOG_ERROR("sql.sql", "Skill perfection data for spell {} has impossibly low proc chance in `skill_perfect_item_template`!", spellId);
+            TC_LOG_ERROR("sql.sql", "Skill perfection data for spell {} has impossibly low proc chance in the `skill_perfect_item_template`!", spellId);
             continue;
         }
 
-        uint32 perfectItemType = fields[3].Get<uint32>();
+        uint32 perfectItemType = fields[3].GetUInt32();
         if (!sObjectMgr->GetItemTemplate(perfectItemType))
         {
-            LOG_ERROR("sql.sql", "Skill perfection data for spell {} references non-existent perfect item id {} in `skill_perfect_item_template`!", spellId, perfectItemType);
+            TC_LOG_ERROR("sql.sql", "Skill perfection data for spell {} references a non-existing perfect item id {} in the `skill_perfect_item_template`!", spellId, perfectItemType);
             continue;
         }
 
@@ -107,12 +105,14 @@ void LoadSkillPerfectItemTable()
         skillPerfectItemEntry.perfectItemType = perfectItemType;
 
         ++count;
-    } while (result->NextRow());
+    }
+    while (result->NextRow());
 
-    LOG_INFO("server.loading", ">> Loaded {} spell perfection definitions in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
-    LOG_INFO("server.loading", " ");
+    TC_LOG_INFO("server.loading", ">> Loaded {} spell perfection definitions in {} ms.", count, GetMSTimeDiffToNow(oldMSTime));
 }
 
+// struct to store information about extra item creation
+// one entry for every spell that is able to create an extra item
 struct SkillExtraItemEntry
 {
     // the spell id of the specialization required to create extra items
@@ -120,13 +120,13 @@ struct SkillExtraItemEntry
     // the chance to create one additional item
     float additionalCreateChance;
     // maximum number of extra items created per crafting
-    int32 newMaxOrEntry;
+    uint8 additionalMaxNum;
 
     SkillExtraItemEntry()
-        : requiredSpecialization(0), additionalCreateChance(0.0f), newMaxOrEntry(0) {}
+        : requiredSpecialization(0), additionalCreateChance(0.0f), additionalMaxNum(0) { }
 
-    SkillExtraItemEntry(uint32 rS, float aCC, int32 nMOE)
-        : requiredSpecialization(rS), additionalCreateChance(aCC), newMaxOrEntry(nMOE) {}
+    SkillExtraItemEntry(uint32 rS, float aCC, uint8 aMN)
+        : requiredSpecialization(rS), additionalCreateChance(aCC), additionalMaxNum(aMN) { }
 };
 
 // map to store the extra item creation info, the key is the spellId of the creation spell, the mapped value is the assigned SkillExtraItemEntry
@@ -146,8 +146,7 @@ void LoadSkillExtraItemTable()
 
     if (!result)
     {
-        LOG_WARN("server.loading", ">> Loaded 0 spell specialization definitions. DB table `skill_extra_item_template` is empty.");
-        LOG_INFO("server.loading", " ");
+        TC_LOG_INFO("server.loading", ">> Loaded 0 spell specialization definitions. DB table `skill_extra_item_template` is empty.");
         return;
     }
 
@@ -157,32 +156,32 @@ void LoadSkillExtraItemTable()
     {
         Field* fields = result->Fetch();
 
-        uint32 spellId = fields[0].Get<uint32>();
+        uint32 spellId = fields[0].GetUInt32();
 
-        if (!sSpellMgr->GetSpellInfo(spellId))
+        if (!sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE))
         {
-            LOG_ERROR("sql.sql", "Skill specialization {} has non-existent spell id in `skill_extra_item_template`!", spellId);
+            TC_LOG_ERROR("sql.sql", "Skill specialization {} has a non-existing spell id in the `skill_extra_item_template`!", spellId);
             continue;
         }
 
-        uint32 requiredSpecialization = fields[1].Get<uint32>();
-        if (!sSpellMgr->GetSpellInfo(requiredSpecialization))
+        uint32 requiredSpecialization = fields[1].GetUInt32();
+        if (!sSpellMgr->GetSpellInfo(requiredSpecialization, DIFFICULTY_NONE))
         {
-            LOG_ERROR("sql.sql", "Skill specialization {} have not existed required specialization spell id {} in `skill_extra_item_template`!", spellId, requiredSpecialization);
+            TC_LOG_ERROR("sql.sql", "Skill specialization {} has a non-existing required specialization spell id {} in the `skill_extra_item_template`!", spellId, requiredSpecialization);
             continue;
         }
 
-        float additionalCreateChance = fields[2].Get<float>();
+        float additionalCreateChance = fields[2].GetFloat();
         if (additionalCreateChance <= 0.0f)
         {
-            LOG_ERROR("sql.sql", "Skill specialization {} has too low additional create chance in `skill_extra_item_template`!", spellId);
+            TC_LOG_ERROR("sql.sql", "Skill specialization {} has too low additional create chance in the `skill_extra_item_template`!", spellId);
             continue;
         }
 
-        int32 newMaxOrEntry = fields[3].Get<int32>();
-        if (!newMaxOrEntry)
+        uint8 additionalMaxNum = fields[3].GetUInt8();
+        if (!additionalMaxNum)
         {
-            LOG_ERROR("sql.sql", "Skill specialization {} has 0 max number of extra items in `skill_extra_item_template`!", spellId);
+            TC_LOG_ERROR("sql.sql", "Skill specialization {} has 0 max number of extra items in the `skill_extra_item_template`!", spellId);
             continue;
         }
 
@@ -190,16 +189,16 @@ void LoadSkillExtraItemTable()
 
         skillExtraItemEntry.requiredSpecialization = requiredSpecialization;
         skillExtraItemEntry.additionalCreateChance = additionalCreateChance;
-        skillExtraItemEntry.newMaxOrEntry          = newMaxOrEntry;
+        skillExtraItemEntry.additionalMaxNum       = additionalMaxNum;
 
         ++count;
-    } while (result->NextRow());
+    }
+    while (result->NextRow());
 
-    LOG_INFO("server.loading", ">> Loaded {} spell specialization definitions in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
-    LOG_INFO("server.loading", " ");
+    TC_LOG_INFO("server.loading", ">> Loaded {} spell specialization definitions in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
 }
 
-bool CanCreatePerfectItem(Player* player, uint32 spellId, float& perfectCreateChance, uint32& perfectItemType)
+bool CanCreatePerfectItem(Player* player, uint32 spellId, float &perfectCreateChance, uint32 &perfectItemType)
 {
     SkillPerfectItemMap::const_iterator ret = SkillPerfectItemStore.find(spellId);
     // no entry in DB means no perfection proc possible
@@ -207,9 +206,6 @@ bool CanCreatePerfectItem(Player* player, uint32 spellId, float& perfectCreateCh
         return false;
 
     SkillPerfectItemEntry const* thisEntry = &ret->second;
-    // lack of entry means no perfection proc possible
-    if (!thisEntry)
-        return false;
 
     // if you don't have the spell needed, then no procs for you
     if (!player->HasSpell(thisEntry->requiredSpecialization))
@@ -223,7 +219,7 @@ bool CanCreatePerfectItem(Player* player, uint32 spellId, float& perfectCreateCh
     return true;
 }
 
-bool canCreateExtraItems(Player* player, uint32 spellId, float& additionalChance, int32& newMaxOrEntry)
+bool CanCreateExtraItems(Player* player, uint32 spellId, float &additionalChance, uint8 &additionalMax)
 {
     // get the info for the specified spell
     SkillExtraItemMap::const_iterator ret = SkillExtraItemStore.find(spellId);
@@ -232,17 +228,13 @@ bool canCreateExtraItems(Player* player, uint32 spellId, float& additionalChance
 
     SkillExtraItemEntry const* specEntry = &ret->second;
 
-    // if no entry, then no extra items can be created
-    if (!specEntry)
-        return false;
-
     // the player doesn't have the required specialization, return false
     if (!player->HasSpell(specEntry->requiredSpecialization))
         return false;
 
     // set the arguments to the appropriate values
     additionalChance = specEntry->additionalCreateChance;
-    newMaxOrEntry = specEntry->newMaxOrEntry;
+    additionalMax = specEntry->additionalMaxNum;
 
     // enable extra item creation
     return true;

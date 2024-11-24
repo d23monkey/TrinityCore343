@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -16,16 +16,21 @@
  */
 
 #include "CinematicMgr.h"
+#include "Containers.h"
+#include "DB2Structure.h"
 #include "M2Stores.h"
+#include "Map.h"
 #include "MotionMaster.h"
 #include "Player.h"
+#include "TemporarySummon.h"
 
 CinematicMgr::CinematicMgr(Player* playerref)
 {
     player = playerref;
     m_cinematicDiff = 0;
     m_lastCinematicCheck = 0;
-    m_activeCinematicCameraId = 0;
+    m_activeCinematic = nullptr;
+    m_activeCinematicCameraIndex = -1;
     m_cinematicLength = 0;
     m_cinematicCamera = nullptr;
     m_remoteSightPosition = Position(0.0f, 0.0f, 0.0f);
@@ -34,31 +39,35 @@ CinematicMgr::CinematicMgr(Player* playerref)
 
 CinematicMgr::~CinematicMgr()
 {
-    if (m_cinematicCamera && m_activeCinematicCameraId)
+    if (m_cinematicCamera && m_activeCinematic)
         EndCinematic();
 }
 
-void CinematicMgr::BeginCinematic()
+void CinematicMgr::NextCinematicCamera()
 {
     // Sanity check for active camera set
-    if (m_activeCinematicCameraId == 0)
+    if (!m_activeCinematic || m_activeCinematicCameraIndex >= int32(std::size(m_activeCinematic->Camera)))
         return;
 
-    if (std::vector<FlyByCamera> const* flyByCameras = GetFlyByCameras(m_activeCinematicCameraId))
+    uint32 cinematicCameraId = m_activeCinematic->Camera[++m_activeCinematicCameraIndex];
+    if (!cinematicCameraId)
+        return;
+
+    if (std::vector<FlyByCamera> const* flyByCameras = GetFlyByCameras(cinematicCameraId))
     {
         // Initialize diff, and set camera
         m_cinematicDiff = 0;
         m_cinematicCamera = flyByCameras;
 
-        auto camitr = m_cinematicCamera->begin();
-        if (camitr != m_cinematicCamera->end())
+        if (!m_cinematicCamera->empty())
         {
-            Position const& pos = camitr->locations;
+            FlyByCamera const& firstCamera = m_cinematicCamera->front();
+            Position const& pos = firstCamera.locations;
             if (!pos.IsPositionValid())
                 return;
 
-            player->GetMap()->LoadGrid(pos.GetPositionX(), pos.GetPositionY());
-            m_CinematicObject = player->SummonCreature(VISUAL_WAYPOINT, pos.m_positionX, pos.m_positionY, pos.m_positionZ, 0.0f, TEMPSUMMON_TIMED_DESPAWN, 120000);
+            player->GetMap()->LoadGridForActiveObject(pos.GetPositionX(), pos.GetPositionY(), player);
+            m_CinematicObject = player->SummonCreature(VISUAL_WAYPOINT, pos.m_positionX, pos.m_positionY, pos.m_positionZ, 0.0f, TEMPSUMMON_TIMED_DESPAWN, 5min);
             if (m_CinematicObject)
             {
                 m_CinematicObject->setActive(true);
@@ -66,19 +75,20 @@ void CinematicMgr::BeginCinematic()
             }
 
             // Get cinematic length
-            m_cinematicLength = flyByCameras->back().timeStamp;
+            m_cinematicLength = m_cinematicCamera->back().timeStamp;
         }
     }
 }
 
 void CinematicMgr::EndCinematic()
 {
-    if (m_activeCinematicCameraId == 0)
+    if (!m_activeCinematic)
         return;
 
     m_cinematicDiff = 0;
     m_cinematicCamera = nullptr;
-    m_activeCinematicCameraId = 0;
+    m_activeCinematic = nullptr;
+    m_activeCinematicCameraIndex = -1;
     if (m_CinematicObject)
     {
         if (WorldObject* vpObject = player->GetViewpoint())
@@ -91,7 +101,7 @@ void CinematicMgr::EndCinematic()
 
 void CinematicMgr::UpdateCinematicLocation(uint32 /*diff*/)
 {
-    if (m_activeCinematicCameraId == 0 || !m_cinematicCamera || m_cinematicCamera->size() == 0)
+    if (!m_activeCinematic || m_activeCinematicCameraIndex == -1 || !m_cinematicCamera || m_cinematicCamera->size() == 0)
         return;
 
     Position lastPosition;
@@ -100,7 +110,7 @@ void CinematicMgr::UpdateCinematicLocation(uint32 /*diff*/)
     uint32 nextTimestamp = 0;
 
     // Obtain direction of travel
-    for (FlyByCamera cam : *m_cinematicCamera)
+    for (FlyByCamera const& cam : *m_cinematicCamera)
     {
         if (cam.timeStamp > m_cinematicDiff)
         {
@@ -132,7 +142,7 @@ void CinematicMgr::UpdateCinematicLocation(uint32 /*diff*/)
         workDiff = m_cinematicDiff;
 
     // Obtain the previous and next waypoint based on timestamp
-    for (FlyByCamera cam : *m_cinematicCamera)
+    for (FlyByCamera const& cam : *m_cinematicCamera)
     {
         if (static_cast<int32>(cam.timeStamp) >= workDiff)
         {
@@ -160,7 +170,7 @@ void CinematicMgr::UpdateCinematicLocation(uint32 /*diff*/)
     // Advance (at speed) to this position. The remote sight object is used
     // to send update information to player in cinematic
     if (m_CinematicObject && interPosition.IsPositionValid())
-        m_CinematicObject->MonsterMoveWithSpeed(interPosition.m_positionX, interPosition.m_positionY, interPosition.m_positionZ, 500.0f);
+        m_CinematicObject->MonsterMoveWithSpeed(interPosition.m_positionX, interPosition.m_positionY, interPosition.m_positionZ, 500.0f, false, true);
 
     // If we never received an end packet 10 seconds after the final timestamp then force an end
     if (m_cinematicDiff > m_cinematicLength + 10 * IN_MILLISECONDS)

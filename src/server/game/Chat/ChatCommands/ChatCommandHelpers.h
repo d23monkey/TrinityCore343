@@ -1,34 +1,36 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _CHATCOMMAND_HELPERS_H_
-#define _CHATCOMMAND_HELPERS_H_
+#ifndef TRINITY_CHATCOMMANDHELPERS_H
+#define TRINITY_CHATCOMMANDHELPERS_H
 
 #include "Define.h"
 #include "Language.h"
+#include "Optional.h"
 #include "StringFormat.h"
-#include <optional>
+#include <fmt/printf.h>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <variant>
 
 class ChatHandler;
 
-namespace Acore::Impl::ChatCommands
+namespace Trinity::Impl::ChatCommands
 {
     /***************** HELPERS *************************\
     |* These really aren't for outside use...          *|
@@ -54,10 +56,10 @@ namespace Acore::Impl::ChatCommands
     inline TokenizeResult tokenize(std::string_view args)
     {
         TokenizeResult result;
-        if (std::size_t delimPos = args.find(COMMAND_DELIMITER); delimPos != std::string_view::npos)
+        if (size_t delimPos = args.find(COMMAND_DELIMITER); delimPos != std::string_view::npos)
         {
             result.token = args.substr(0, delimPos);
-            if (std::size_t tailPos = args.find_first_not_of(COMMAND_DELIMITER, delimPos); tailPos != std::string_view::npos)
+            if (size_t tailPos = args.find_first_not_of(COMMAND_DELIMITER, delimPos); tailPos != std::string_view::npos)
                 result.tail = args.substr(tailPos);
         }
         else
@@ -119,12 +121,12 @@ namespace Acore::Impl::ChatCommands
             std::variant<std::monostate, std::string_view, std::string> _storage;
     };
 
-    AC_GAME_API void SendErrorMessageToHandler(ChatHandler* handler, std::string_view str);
-    AC_GAME_API char const* GetAcoreString(ChatHandler const* handler, AcoreStrings which);
+    TC_GAME_API void SendErrorMessageToHandler(ChatHandler* handler, std::string_view str);
+    TC_GAME_API char const* GetTrinityString(ChatHandler const* handler, TrinityStrings which);
     template <typename... Ts>
-    std::string FormatAcoreString(ChatHandler const* handler, AcoreStrings which, Ts&&... args)
+    std::string FormatTrinityString(ChatHandler const* handler, TrinityStrings which, Ts&&... args)
     {
-        return Acore::StringFormat(GetAcoreString(handler, which), std::forward<Ts>(args)...);
+        return fmt::sprintf(GetTrinityString(handler, which), std::forward<Ts>(args)...);
     }
 }
 

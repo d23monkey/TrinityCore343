@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -17,8 +17,6 @@
 
 #ifndef _WARDEN_MODULE_MAC_H
 #define _WARDEN_MODULE_MAC_H
-
-#include <array>
 
 std::array<uint8, 9318> Module_0DBBF209A27B1E279A9FEC5C168A15F7_Data =
 {
@@ -607,7 +605,7 @@ std::array<uint8, 9318> Module_0DBBF209A27B1E279A9FEC5C168A15F7_Data =
     0x43, 0x82, 0xAA, 0x0C, 0xEE, 0x1B
 };
 
-std::array<uint8, 16> Module_0DBBF209A27B1E279A9FEC5C168A15F7_Key =
+uint8 Module_0DBBF209A27B1E279A9FEC5C168A15F7_Key[16] =
 {
     0x5B, 0x27, 0x27, 0x01, 0x24, 0x56, 0xB4, 0xD4, 0x2D, 0xD0, 0x96, 0x77, 0x49, 0x51, 0xDC, 0x0A
 };

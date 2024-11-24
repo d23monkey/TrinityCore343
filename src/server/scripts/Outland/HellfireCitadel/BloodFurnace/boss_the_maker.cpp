@@ -1,105 +1,114 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
+#include "ScriptMgr.h"
 #include "blood_furnace.h"
+#include "ScriptedCreature.h"
 
-enum Says
+enum Yells
 {
-    SAY_AGGRO               = 0,
-    SAY_KILL                = 1,
-    SAY_DIE                 = 2
+    SAY_AGGRO                   = 0,
+    SAY_KILL                    = 1,
+    SAY_DIE                     = 2
 };
 
 enum Spells
 {
-    SPELL_EXPLODING_BEAKER  = 30925,
-    SPELL_DOMINATION        = 30923
+    SPELL_ACID_SPRAY            = 38153,
+    SPELL_EXPLODING_BREAKER     = 30925,
+    SPELL_KNOCKDOWN             = 20276,
+    SPELL_DOMINATION            = 25772
 };
 
-struct boss_the_maker : public BossAI
+enum Events
 {
-    boss_the_maker(Creature* creature) : BossAI(creature, DATA_THE_MAKER)
-    {
-        scheduler.SetValidator([this]
-        {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
-    }
+    EVENT_ACID_SPRAY            = 1,
+    EVENT_EXPLODING_BREAKER,
+    EVENT_DOMINATION,
+    EVENT_KNOCKDOWN
+};
 
-    void Reset() override
-    {
-        _Reset();
-        if (instance)
+class boss_the_maker : public CreatureScript
+{
+    public:
+        boss_the_maker() : CreatureScript("boss_the_maker") { }
+
+        struct boss_the_makerAI : public BossAI
         {
-            instance->SetData(DATA_THE_MAKER, NOT_STARTED);
-            instance->HandleGameObject(instance->GetGuidData(DATA_DOOR2), true);
+            boss_the_makerAI(Creature* creature) : BossAI(creature, DATA_THE_MAKER) { }
+
+            void JustEngagedWith(Unit* who) override
+            {
+                BossAI::JustEngagedWith(who);
+                Talk(SAY_AGGRO);
+
+                events.ScheduleEvent(EVENT_ACID_SPRAY, 15s);
+                events.ScheduleEvent(EVENT_EXPLODING_BREAKER, 6s);
+                events.ScheduleEvent(EVENT_DOMINATION, 120s);
+                events.ScheduleEvent(EVENT_KNOCKDOWN, 10s);
+            }
+
+            void KilledUnit(Unit* who) override
+            {
+                if (who->GetTypeId() == TYPEID_PLAYER)
+                    Talk(SAY_KILL);
+            }
+
+            void JustDied(Unit* /*killer*/) override
+            {
+                _JustDied();
+                Talk(SAY_DIE);
+            }
+
+            void ExecuteEvent(uint32 eventId) override
+            {
+                switch (eventId)
+                {
+                    case EVENT_ACID_SPRAY:
+                        DoCastVictim(SPELL_ACID_SPRAY);
+                        events.ScheduleEvent(EVENT_ACID_SPRAY, 15s, 23s);
+                        break;
+                    case EVENT_EXPLODING_BREAKER:
+                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 30.0f, true))
+                            DoCast(target, SPELL_EXPLODING_BREAKER);
+                        events.ScheduleEvent(EVENT_EXPLODING_BREAKER, 4s, 12s);
+                        break;
+                    case EVENT_DOMINATION:
+                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 0.0f, true))
+                            DoCast(target, SPELL_DOMINATION);
+                        events.ScheduleEvent(EVENT_DOMINATION, 120s);
+                        break;
+                    case EVENT_KNOCKDOWN:
+                        DoCastVictim(SPELL_KNOCKDOWN);
+                        events.ScheduleEvent(EVENT_KNOCKDOWN, 4s, 12s);
+                        break;
+                    default:
+                        break;
+                }
+            }
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
+        {
+            return GetBloodFurnaceAI<boss_the_makerAI>(creature);
         }
-    }
-
-    void JustEngagedWith(Unit* /*who*/) override
-    {
-        Talk(SAY_AGGRO);
-        _JustEngagedWith();
-        instance->SetData(DATA_THE_MAKER, IN_PROGRESS);
-        instance->HandleGameObject(instance->GetGuidData(DATA_DOOR2), false);
-        scheduler.Schedule(6s, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_EXPLODING_BEAKER);
-            context.Repeat(7s, 11s);
-        }).Schedule(2min, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_DOMINATION);
-            context.Repeat(2min);
-        });
-    }
-
-    void KilledUnit(Unit* victim) override
-    {
-        if (victim->IsPlayer() && urand(0, 1))
-        {
-            Talk(SAY_KILL);
-        }
-    }
-
-    void JustDied(Unit* /*killer*/) override
-    {
-        Talk(SAY_DIE);
-        _JustDied();
-        instance->SetData(DATA_THE_MAKER, DONE);
-        instance->HandleGameObject(instance->GetGuidData(DATA_DOOR2), true);
-        instance->HandleGameObject(instance->GetGuidData(DATA_DOOR3), true);
-    }
-
-    void UpdateAI(uint32 diff) override
-    {
-        if (!UpdateVictim())
-            return;
-
-        scheduler.Update(diff);
-        if (me->HasUnitState(UNIT_STATE_CASTING))
-            return;
-
-        DoMeleeAttackIfReady();
-    }
 };
 
 void AddSC_boss_the_maker()
 {
-    RegisterBloodFurnaceCreatureAI(boss_the_maker);
+    new boss_the_maker();
 }

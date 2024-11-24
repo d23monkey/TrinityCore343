@@ -1,22 +1,22 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _CHATCOMMANDARGS_H
-#define _CHATCOMMANDARGS_H
+#ifndef TRINITY_CHATCOMMANDARGS_H
+#define TRINITY_CHATCOMMANDARGS_H
 
 #include "ChatCommandHelpers.h"
 #include "ChatCommandTags.h"
@@ -24,13 +24,14 @@
 #include "StringConvert.h"
 #include "StringFormat.h"
 #include "Util.h"
+#include <charconv>
 #include <map>
 #include <string>
 #include <string_view>
 
 struct GameTele;
 
-namespace Acore::Impl::ChatCommands
+namespace Trinity::Impl::ChatCommands
 {
 
     /************************** ARGUMENT HANDLERS *******************************************\
@@ -46,7 +47,7 @@ namespace Acore::Impl::ChatCommands
     |*                                                                                      *|
     \****************************************************************************************/
     template <typename T, typename = void>
-    struct ArgInfo { static_assert(Acore::dependant_false_v<T>, "Invalid command parameter type - see ChatCommandArgs.h for possible types"); };
+    struct ArgInfo { static_assert(Trinity::dependant_false_v<T>, "Invalid command parameter type - see ChatCommandArgs.h for possible types"); };
 
     // catch-all for number types
     template <typename T>
@@ -61,12 +62,12 @@ namespace Acore::Impl::ChatCommands
             if (Optional<T> v = StringTo<T>(token, 0))
                 val = *v;
             else
-                return FormatAcoreString(handler, LANG_CMDPARSER_STRING_VALUE_INVALID, token, GetTypeName<T>());
+                return FormatTrinityString(handler, LANG_CMDPARSER_STRING_VALUE_INVALID, STRING_VIEW_FMT_ARG(token), Trinity::GetTypeName<T>().c_str());
 
             if constexpr (std::is_floating_point_v<T>)
             {
                 if (!std::isfinite(val))
-                    return FormatAcoreString(handler, LANG_CMDPARSER_STRING_VALUE_INVALID, token, GetTypeName<T>());
+                    return FormatTrinityString(handler, LANG_CMDPARSER_STRING_VALUE_INVALID, STRING_VIEW_FMT_ARG(token), Trinity::GetTypeName<T>().c_str());
             }
 
             return tail;
@@ -115,7 +116,7 @@ namespace Acore::Impl::ChatCommands
                 if (Utf8toWStr(utf8view, val))
                     return next;
                 else
-                    return GetAcoreString(handler, LANG_CMDPARSER_INVALID_UTF8);
+                    return GetTrinityString(handler, LANG_CMDPARSER_INVALID_UTF8);
             }
             else
                 return std::nullopt;
@@ -199,7 +200,7 @@ namespace Acore::Impl::ChatCommands
             }
 
             if (next1)
-                return FormatAcoreString(handler, LANG_CMDPARSER_STRING_VALUE_INVALID, strVal, GetTypeName<T>());
+                return FormatTrinityString(handler, LANG_CMDPARSER_STRING_VALUE_INVALID, STRING_VIEW_FMT_ARG(strVal), Trinity::GetTypeName<T>().c_str());
             else
                 return next1;
         }
@@ -236,7 +237,7 @@ namespace Acore::Impl::ChatCommands
     };
 
     // fixed-size array
-    template <typename T, std::size_t N>
+    template <typename T, size_t N>
     struct ArgInfo<std::array<T, N>, void>
     {
         static ChatCommandResult TryConsume(std::array<T, N>& val, ChatHandler const* handler, std::string_view args)
@@ -251,13 +252,13 @@ namespace Acore::Impl::ChatCommands
 
     // variant
     template <typename... Ts>
-    struct ArgInfo<Acore::ChatCommands::Variant<Ts...>>
+    struct ArgInfo<Trinity::ChatCommands::Variant<Ts...>>
     {
         using V = std::variant<Ts...>;
-        static constexpr std::size_t N = std::variant_size_v<V>;
+        static constexpr size_t N = std::variant_size_v<V>;
 
-        template <std::size_t I>
-        static ChatCommandResult TryAtIndex([[maybe_unused]] Acore::ChatCommands::Variant<Ts...>& val, [[maybe_unused]] ChatHandler const* handler, [[maybe_unused]] std::string_view args)
+        template <size_t I>
+        static ChatCommandResult TryAtIndex([[maybe_unused]] Trinity::ChatCommands::Variant<Ts...>& val, [[maybe_unused]] ChatHandler const* handler, [[maybe_unused]] std::string_view args)
         {
             if constexpr (I < N)
             {
@@ -272,58 +273,66 @@ namespace Acore::Impl::ChatCommands
                     if (!nestedResult.HasErrorMessage())
                         return thisResult;
                     if (StringStartsWith(nestedResult.GetErrorMessage(), "\""))
-                        return Acore::StringFormat("\"{}\"\n{} {}", thisResult.GetErrorMessage(), GetAcoreString(handler, LANG_CMDPARSER_OR), nestedResult.GetErrorMessage());
+                        return Trinity::StringFormat("\"{}\"\n{} {}", thisResult.GetErrorMessage(), GetTrinityString(handler, LANG_CMDPARSER_OR), nestedResult.GetErrorMessage());
                     else
-                        return Acore::StringFormat("\"{}\"\n{} \"{}\"", thisResult.GetErrorMessage(), GetAcoreString(handler, LANG_CMDPARSER_OR), nestedResult.GetErrorMessage());
+                        return Trinity::StringFormat("\"{}\"\n{} \"{}\"", thisResult.GetErrorMessage(), GetTrinityString(handler, LANG_CMDPARSER_OR), nestedResult.GetErrorMessage());
                 }
             }
             else
                 return std::nullopt;
         }
 
-        static ChatCommandResult TryConsume(Acore::ChatCommands::Variant<Ts...>& val, ChatHandler const* handler, std::string_view args)
+        static ChatCommandResult TryConsume(Trinity::ChatCommands::Variant<Ts...>& val, ChatHandler const* handler, std::string_view args)
         {
             ChatCommandResult result = TryAtIndex<0>(val, handler, args);
             if (result.HasErrorMessage() && (result.GetErrorMessage().find('\n') != std::string::npos))
-                return Acore::StringFormat("{} {}", GetAcoreString(handler, LANG_CMDPARSER_EITHER), result.GetErrorMessage());
+                return Trinity::StringFormat("{} {}", GetTrinityString(handler, LANG_CMDPARSER_EITHER), result.GetErrorMessage());
             return result;
         }
     };
 
     // AchievementEntry* from numeric id or link
     template <>
-    struct AC_GAME_API ArgInfo<AchievementEntry const*>
+    struct TC_GAME_API ArgInfo<AchievementEntry const*>
     {
         static ChatCommandResult TryConsume(AchievementEntry const*&, ChatHandler const*, std::string_view);
     };
 
+    // CurrencyTypesEntry* from numeric id or link
+    template <>
+    struct TC_GAME_API ArgInfo<CurrencyTypesEntry const*>
+    {
+        static ChatCommandResult TryConsume(CurrencyTypesEntry const*&, ChatHandler const*, std::string_view);
+    };
+
     // GameTele* from string name or link
     template <>
-    struct AC_GAME_API ArgInfo<GameTele const*>
+    struct TC_GAME_API ArgInfo<GameTele const*>
     {
         static ChatCommandResult TryConsume(GameTele const*&, ChatHandler const*, std::string_view);
     };
 
     // ItemTemplate* from numeric id or link
     template <>
-    struct AC_GAME_API ArgInfo<ItemTemplate const*>
+    struct TC_GAME_API ArgInfo<ItemTemplate const*>
     {
         static ChatCommandResult TryConsume(ItemTemplate const*&, ChatHandler const*, std::string_view);
     };
 
+    // Quest* from numeric id or link
+    template <>
+    struct TC_GAME_API ArgInfo<Quest const*>
+    {
+        static ChatCommandResult TryConsume(Quest const*&, ChatHandler const*, std::string_view);
+    };
+
     // SpellInfo const* from spell id or link
     template <>
-    struct AC_GAME_API ArgInfo<SpellInfo const*>
+    struct TC_GAME_API ArgInfo<SpellInfo const*>
     {
         static ChatCommandResult TryConsume(SpellInfo const*&, ChatHandler const*, std::string_view);
     };
 
-    // Quest const* from quest id or link
-    template <>
-    struct AC_GAME_API ArgInfo<Quest const*>
-    {
-        static ChatCommandResult TryConsume(Quest const*&, ChatHandler const*, std::string_view);
-    };
 }
 
 #endif

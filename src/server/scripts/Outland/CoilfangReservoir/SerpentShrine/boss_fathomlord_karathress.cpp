@@ -1,29 +1,37 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
-#include "SpellScriptLoader.h"
-#include "TaskScheduler.h"
-#include "serpent_shrine.h"
-#include "SpellAuraEffects.h"
-#include "SpellScript.h"
+/* ScriptData
+SDName: Boss_Fathomlord_Karathress
+SD%Complete: 70
+SDComment: Cyclone workaround
+SDCategory: Coilfang Resevoir, Serpent Shrine Cavern
+EndScriptData */
 
-enum Talk
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
+#include "ScriptedCreature.h"
+#include "SpellScript.h"
+#include "serpent_shrine.h"
+#include "TemporarySummon.h"
+
+enum FathomlordKarathress
 {
     SAY_AGGRO                       = 0,
     SAY_GAIN_BLESSING               = 1,
@@ -31,593 +39,639 @@ enum Talk
     SAY_GAIN_ABILITY2               = 3,
     SAY_GAIN_ABILITY3               = 4,
     SAY_SLAY                        = 5,
-    SAY_DEATH                       = 6
-};
+    SAY_DEATH                       = 6,
 
-enum Spells
-{
-    //Fathomlord Karathress
+    //Karathress spells
     SPELL_CATACLYSMIC_BOLT          = 38441,
-    SPELL_SEAR_NOVA                 = 38445,
-    SPELL_ENRAGE                    = 24318,
-    SPELL_BLESSING_OF_THE_TIDES     = 38449,
-    //Fathomguard Sharkkis
-    SPELL_HURL_TRIDENT              = 38374,
-    SPELL_LEECHING_THROW            = 29436,
-    SPELL_MULTI_TOSS                = 38366,
-    SPELL_SUMMON_FATHOM_SPOREBAT    = 38431,
-    SPELL_SUMMON_FATHOM_LURKER      = 38433,
-    SPELL_THE_BEAST_WITHIN          = 38373,
-    SPELL_BESTIAL_WRATH             = 38371,
     SPELL_POWER_OF_SHARKKIS         = 38455,
-    //Fathomguard Tidalvess
-    SPELL_FROST_SHOCK               = 38234,
-    SPELL_EARTHBIND_TOTEM           = 38304,
-    SPELL_POISON_CLEANSING_TOTEM    = 38306,
-    SPELL_SPITFIRE_TOTEM            = 38236,
     SPELL_POWER_OF_TIDALVESS        = 38452,
-    //Fathomguard Caribdis
-    SPELL_SUMMON_CYCLONE            = 38337,
+    SPELL_POWER_OF_CARIBDIS         = 38451,
+    SPELL_ENRAGE                    = 24318,
+    SPELL_SEAR_NOVA                 = 38445,
+    SPELL_BLESSING_OF_THE_TIDES     = 38449,
+
+    //Sharkkis spells
+    SPELL_LEECHING_THROW            = 29436,
+    SPELL_THE_BEAST_WITHIN          = 38373,
+    SPELL_MULTISHOT                 = 38366,
+    SPELL_SUMMON_FATHOM_LURKER      = 38433,
+    SPELL_SUMMON_FATHOM_SPOREBAT    = 38431,
+    SPELL_PET_ENRAGE                = 19574,
+
+    //Tidalvess spells
+    SPELL_FROST_SHOCK               = 38234,
+    SPELL_SPITFIRE_TOTEM            = 38236,
+    SPELL_POISON_CLEANSING_TOTEM    = 38306,
+    // Spell obsolete
+    SPELL_EARTHBIND_TOTEM           = 38304,
+    SPELL_EARTHBIND_TOTEM_EFFECT    = 6474,
+    SPELL_WINDFURY_WEAPON           = 38184,
+
+    //Caribdis Spells
     SPELL_WATER_BOLT_VOLLEY         = 38335,
     SPELL_TIDAL_SURGE               = 38358,
-    SPELL_HEALING_WAVE              = 38330,
-    SPELL_POWER_OF_CARIBDIS         = 38451,
-    //Spitfire Totem
-    SPELL_ATTACK                    = 38296
+    SPELL_TIDAL_SURGE_EFFECT        = 38353,
+    SPELL_HEAL                      = 38330,
+    SPELL_SUMMON_CYCLONE            = 38337,
+    SPELL_CYCLONE_CYCLONE           = 29538,
+
+    //Yells and Quotes
+    SOUND_MISC                      = 11283,
+
+    //Summoned Unit GUIDs
+    CREATURE_CYCLONE                = 22104,
+    CREATURE_FATHOM_SPOREBAT        = 22120,
+    CREATURE_FATHOM_LURKER          = 22119,
+    CREATURE_SPITFIRE_TOTEM         = 22091,
+    CREATURE_EARTHBIND_TOTEM        = 22486,
+    CREATURE_POISON_CLEANSING_TOTEM = 22487,
 };
 
-enum Misc
-{
-    GO_CAGE                         = 185474,
-    ACTION_RESET_ADDS               = 1
-};
+//entry and position for Seer Olum
+#define SEER_OLUM                  22820
+#define OLUM_X                     446.78f
+#define OLUM_Y                     -542.76f
+#define OLUM_Z                     -7.54773f
+#define OLUM_O                     0.401581f
 
-const Position olumWalk = { 456.17194f, -544.31866f, -7.5470476f, 0.00f };
+#define SAY_MISC                        "Alana be'lendor!" //don't know what use this
 
+#define MAX_ADVISORS 3
+//Fathom-Lord Karathress AI
 struct boss_fathomlord_karathress : public BossAI
 {
-    boss_fathomlord_karathress(Creature* creature) : BossAI(creature, DATA_FATHOM_LORD_KARATHRESS){ }
-
-    void JustReachedHome() override
+    boss_fathomlord_karathress(Creature* creature) : BossAI(creature, BOSS_FATHOM_LORD_KARATHRESS)
     {
-        instance->DoForAllMinions(DATA_FATHOM_LORD_KARATHRESS, [&](Creature* fathomguard)
-        {
-            if (!fathomguard->IsAlive())
-            {
-                fathomguard->Respawn(true);
-            }
-        });
+        Initialize();
     }
+
+    void Initialize()
+    {
+        CataclysmicBolt_Timer = 10000;
+        Enrage_Timer = 600000;                              //10 minutes
+        SearNova_Timer = 20000 + rand32() % 40000; // 20 - 60 seconds
+
+        BlessingOfTides = false;
+    }
+
+    uint32 CataclysmicBolt_Timer;
+    uint32 Enrage_Timer;
+    uint32 SearNova_Timer;
+
+    bool BlessingOfTides;
+
+    ObjectGuid Advisors[MAX_ADVISORS];
 
     void Reset() override
     {
-        BossAI::Reset();
-        _recentlySpoken = false;
+        Initialize();
 
-        ScheduleHealthCheckEvent(75, [&]{
-            instance->DoForAllMinions(DATA_FATHOM_LORD_KARATHRESS, [&](Creature* fathomguard) {
-                if (fathomguard->IsAlive())
-                {
-                    fathomguard->CastSpell(me, SPELL_BLESSING_OF_THE_TIDES, true);
-                }
-            });
-            if (me->HasAura(SPELL_BLESSING_OF_THE_TIDES))
+        ObjectGuid RAdvisors[MAX_ADVISORS];
+        RAdvisors[0] = instance->GetGuidData(DATA_SHARKKIS);
+        RAdvisors[1] = instance->GetGuidData(DATA_TIDALVESS);
+        RAdvisors[2] = instance->GetGuidData(DATA_CARIBDIS);
+        // Respawn of the 3 Advisors
+        for (uint8 i = 0; i < MAX_ADVISORS; ++i)
+            if (!RAdvisors[i].IsEmpty())
             {
-                Talk(SAY_GAIN_BLESSING);
+                Creature* advisor = ObjectAccessor::GetCreature(*me, RAdvisors[i]);
+                if (advisor && !advisor->IsAlive())
+                {
+                    advisor->Respawn();
+                    advisor->AI()->EnterEvadeMode();
+                    advisor->GetMotionMaster()->MoveTargetedHome();
+                }
             }
-        });
+
+        _Reset();
     }
 
-    void JustSummoned(Creature* summon) override
+    void EventSharkkisDeath()
     {
-        summons.Summon(summon);
-        summon->Attack(me->GetVictim(), false);
-        summon->SetInCombatWithZone();
+        Talk(SAY_GAIN_ABILITY1);
+        DoCast(me, SPELL_POWER_OF_SHARKKIS);
+    }
+
+    void EventTidalvessDeath()
+    {
+        Talk(SAY_GAIN_ABILITY2);
+        DoCast(me, SPELL_POWER_OF_TIDALVESS);
+    }
+
+    void EventCaribdisDeath()
+    {
+        Talk(SAY_GAIN_ABILITY3);
+        DoCast(me, SPELL_POWER_OF_CARIBDIS);
+    }
+
+    void GetAdvisors()
+    {
+        Advisors[0] = instance->GetGuidData(DATA_SHARKKIS);
+        Advisors[1] = instance->GetGuidData(DATA_TIDALVESS);
+        Advisors[2] = instance->GetGuidData(DATA_CARIBDIS);
+    }
+
+    void StartEvent(Unit* who)
+    {
+        GetAdvisors();
+
+        Talk(SAY_AGGRO);
+
+        instance->SetGuidData(DATA_KARATHRESSEVENT_STARTER, who->GetGUID());
     }
 
     void KilledUnit(Unit* /*victim*/) override
     {
-        if (!_recentlySpoken)
-        {
-            Talk(SAY_SLAY);
-            _recentlySpoken = true;
-        }
-        scheduler.Schedule(6s, [this](TaskContext)
-        {
-            _recentlySpoken = false;
-        });
+        Talk(SAY_SLAY);
     }
 
-    void JustDied(Unit* killer) override
+    void JustDied(Unit* /*killer*/) override
     {
         Talk(SAY_DEATH);
-        BossAI::JustDied(killer);
-        if (GameObject* cage = me->FindNearestGameObject(GO_CAGE, 100.0f))
-        {
-            cage->SetGoState(GO_STATE_ACTIVE);
-        }
-        if (Creature* olum = instance->GetCreature(DATA_SEER_OLUM))
-        {
-            olum->SetWalk(true);
-            olum->GetMotionMaster()->MovePoint(0, olumWalk, false);
-            olum->SetNpcFlag(UNIT_NPC_FLAG_GOSSIP);
-            olum->SetNpcFlag(UNIT_NPC_FLAG_QUESTGIVER);
-        }
+
+        instance->SetData(DATA_FATHOMLORDKARATHRESSEVENT, DONE);
+
+        //support for quest 10944
+        me->SummonCreature(SEER_OLUM, OLUM_X, OLUM_Y, OLUM_Z, OLUM_O, TEMPSUMMON_TIMED_DESPAWN, 1h);
     }
 
     void JustEngagedWith(Unit* who) override
     {
-        BossAI::JustEngagedWith(who);
-        Talk(SAY_AGGRO);
-
-        instance->DoForAllMinions(DATA_FATHOM_LORD_KARATHRESS, [&](Creature* fathomguard) {
-            fathomguard->SetInCombatWithZone();
-        });
-
-        scheduler.Schedule(10s, [this](TaskContext context)
-        {
-            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, PowerUsersSelector(me, POWER_MANA, 50.0f, true)))
-            {
-                me->CastSpell(target, SPELL_CATACLYSMIC_BOLT);
-            }
-            context.Repeat(6s);
-        }).Schedule(25s, [this](TaskContext context)
-        {
-            DoCastSelf(SPELL_SEAR_NOVA);
-            context.Repeat(20s, 40s);
-        }).Schedule(10min, [this](TaskContext)
-        {
-            DoCastSelf(SPELL_ENRAGE, true);
-        });
+        _JustEngagedWith(who);
+        StartEvent(who);
     }
 
-    void DoAction(int32 action) override
+    void UpdateAI(uint32 diff) override
     {
-        if (action == ACTION_RESET_ADDS)
+        //Only if not incombat check if the event is started
+        if (!me->IsInCombat() && instance->GetBossState(BOSS_FATHOM_LORD_KARATHRESS) == IN_PROGRESS)
+        {
+            if (Unit* target = ObjectAccessor::GetUnit(*me, instance->GetGuidData(DATA_KARATHRESSEVENT_STARTER)))
+            {
+                AttackStart(target);
+                GetAdvisors();
+            }
+        }
+
+        //Return since we have no target
+        if (!UpdateVictim())
+            return;
+
+        //someone evaded!
+        if (instance->GetBossState(BOSS_FATHOM_LORD_KARATHRESS) == NOT_STARTED)
         {
             EnterEvadeMode();
-            instance->DoForAllMinions(DATA_FATHOM_LORD_KARATHRESS, [&](Creature* fathomguard)
+            return;
+        }
+
+        //CataclysmicBolt_Timer
+        if (CataclysmicBolt_Timer <= diff)
+        {
+            //select a random unit other than the main tank
+            Unit* target = SelectTarget(SelectTargetMethod::Random, 1);
+
+            //if there aren't other units, cast on the tank
+            if (!target)
+                target = me->GetVictim();
+
+            if (target)
+                DoCast(target, SPELL_CATACLYSMIC_BOLT);
+            CataclysmicBolt_Timer = 10000;
+        } else CataclysmicBolt_Timer -= diff;
+
+        //SearNova_Timer
+        if (SearNova_Timer <= diff)
+        {
+            DoCastVictim(SPELL_SEAR_NOVA);
+            SearNova_Timer = 20000 + rand32() % 40000;
+        } else SearNova_Timer -= diff;
+
+        //Enrage_Timer
+        if (Enrage_Timer <= diff)
+        {
+            DoCast(me, SPELL_ENRAGE);
+            Enrage_Timer = 90000;
+        } else Enrage_Timer -= diff;
+
+        //Blessing of Tides Trigger
+        if (!HealthAbovePct(75) && !BlessingOfTides)
+        {
+            BlessingOfTides = true;
+            bool continueTriggering = false;
+            for (uint8 i = 0; i < MAX_ADVISORS; ++i)
+                if (!Advisors[i].IsEmpty())
+                {
+                    Creature* advisor = ObjectAccessor::GetCreature(*me, Advisors[i]);
+                    if (advisor && advisor->IsAlive())
+                    {
+                        continueTriggering = true;
+                        break;
+                    }
+                }
+            if (continueTriggering)
             {
-                fathomguard->DespawnOrUnsummon();
-            });
+                DoCast(me, SPELL_BLESSING_OF_THE_TIDES);
+                Talk(SAY_GAIN_BLESSING);
+            }
         }
     }
-private:
-    bool _recentlySpoken;
 };
 
-struct LeechingThrowSelector
-{
-public:
-    explicit LeechingThrowSelector(WorldObject const* source) : _source(source) { }
-
-    bool operator() (Unit* unit) const
-    {
-        return unit->getPowerType() == POWER_MANA && _source->GetDistance(unit) < 50.0f;
-    }
-private:
-    WorldObject const* _source;
-};
-
+//Fathom-Guard Sharkkis AI
 struct boss_fathomguard_sharkkis : public ScriptedAI
 {
-    boss_fathomguard_sharkkis(Creature* creature) : ScriptedAI(creature), _summons(creature)
+    boss_fathomguard_sharkkis(Creature* creature) : ScriptedAI(creature)
     {
-        _instance = creature->GetInstanceScript();
-        SetBoundary(_instance->GetBossBoundary(DATA_FATHOM_LORD_KARATHRESS));
-
-        scheduler.SetValidator([this]
-        {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
+        Initialize();
+        instance = creature->GetInstanceScript();
     }
+
+    void Initialize()
+    {
+        LeechingThrow_Timer = 20000;
+        TheBeastWithin_Timer = 30000;
+        Multishot_Timer = 15000;
+        Pet_Timer = 10000;
+
+        pet = false;
+    }
+
+    InstanceScript* instance;
+
+    uint32 LeechingThrow_Timer;
+    uint32 TheBeastWithin_Timer;
+    uint32 Multishot_Timer;
+    uint32 Pet_Timer;
+
+    bool pet;
+
+    ObjectGuid SummonedPet;
 
     void Reset() override
     {
-        scheduler.CancelAll();
+        Initialize();
 
-        _summons.DespawnAll();
-        _summons.clear();
-    }
+        Creature* Pet = ObjectAccessor::GetCreature(*me, SummonedPet);
+        if (Pet && Pet->IsAlive())
+            Pet->KillSelf();
 
-    void JustSummoned(Creature* summon) override
-    {
-        summon->SetInCombatWithZone();
-        _summons.Summon(summon);
-    }
+        SummonedPet.Clear();
 
-    void JustEngagedWith(Unit* who) override
-    {
-        if (Creature* karathress = _instance->GetCreature(DATA_FATHOM_LORD_KARATHRESS))
-        {
-            karathress->Attack(who, false);
-        }
-
-        scheduler.Schedule(2500ms, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_HURL_TRIDENT);
-            context.Repeat(5s);
-        }).Schedule(20650ms, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_MULTI_TOSS);
-            context.Repeat(12150ms, 26350ms);
-        }).Schedule(6050ms, [this](TaskContext context)
-        {
-            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, LeechingThrowSelector(me)))
-            {
-                me->CastSpell(target, SPELL_LEECHING_THROW);
-            }
-            context.Repeat(6050ms, 22250ms);
-        }).Schedule(41250ms, [this](TaskContext context)
-        {
-            DoCastSelf(SPELL_THE_BEAST_WITHIN);
-            _summons.DoForAllSummons([&](WorldObject* summon)
-            {
-                me->CastSpell(summon->ToCreature(), SPELL_BESTIAL_WRATH, true);
-            });
-            context.Repeat(39950ms, 46050ms);
-        }).Schedule(14550ms, [this](TaskContext context)
-        {
-            DoCastSelf(urand(0, 1) ? SPELL_SUMMON_FATHOM_LURKER : SPELL_SUMMON_FATHOM_SPOREBAT);
-            context.Repeat(30300ms);
-        });
+        instance->SetBossState(BOSS_FATHOM_LORD_KARATHRESS, NOT_STARTED);
     }
 
     void JustDied(Unit* /*killer*/) override
     {
-        if (Creature* karathress = _instance->GetCreature(DATA_FATHOM_LORD_KARATHRESS))
-        {
-            me->CastSpell(karathress, SPELL_POWER_OF_SHARKKIS, true);
-            karathress->AI()->Talk(SAY_GAIN_ABILITY2);
-            me->DespawnOrUnsummon(1000);
-        }
+        if (Creature* Karathress = ObjectAccessor::GetCreature(*me, instance->GetGuidData(DATA_KARATHRESS)))
+            ENSURE_AI(boss_fathomlord_karathress, Karathress->AI())->EventSharkkisDeath();
+    }
+
+    void JustEngagedWith(Unit* who) override
+    {
+        instance->SetGuidData(DATA_KARATHRESSEVENT_STARTER, who->GetGUID());
+        instance->SetBossState(BOSS_FATHOM_LORD_KARATHRESS, IN_PROGRESS);
     }
 
     void UpdateAI(uint32 diff) override
     {
-        if (!UpdateVictim())
+        //Only if not incombat check if the event is started
+        if (!me->IsInCombat() && instance->GetBossState(BOSS_FATHOM_LORD_KARATHRESS) == IN_PROGRESS)
         {
+            if (Unit* target = ObjectAccessor::GetUnit(*me, instance->GetGuidData(DATA_KARATHRESSEVENT_STARTER)))
+                AttackStart(target);
+        }
+
+        //Return since we have no target
+        if (!UpdateVictim())
+            return;
+
+        //someone evaded!
+        if (instance->GetBossState(BOSS_FATHOM_LORD_KARATHRESS) == NOT_STARTED)
+        {
+            EnterEvadeMode();
             return;
         }
 
-        scheduler.Update(diff);
-
-        DoMeleeAttackIfReady();
-    }
-
-    void EnterEvadeMode(EvadeReason why) override
-    {
-        if (Creature* karathress = _instance->GetCreature(DATA_FATHOM_LORD_KARATHRESS))
+        //LeechingThrow_Timer
+        if (LeechingThrow_Timer <= diff)
         {
-            karathress->AI()->DoAction(ACTION_RESET_ADDS);
-        }
-        ScriptedAI::EnterEvadeMode(why);
+            DoCastVictim(SPELL_LEECHING_THROW);
+            LeechingThrow_Timer = 20000;
+        } else LeechingThrow_Timer -= diff;
+
+        //Multishot_Timer
+        if (Multishot_Timer <= diff)
+        {
+            DoCastVictim(SPELL_MULTISHOT);
+            Multishot_Timer = 20000;
+        } else Multishot_Timer -= diff;
+
+        //TheBeastWithin_Timer
+        if (TheBeastWithin_Timer <= diff)
+        {
+            DoCast(me, SPELL_THE_BEAST_WITHIN);
+
+            Creature* Pet = ObjectAccessor::GetCreature(*me, SummonedPet);
+            if (Pet && Pet->IsAlive())
+                Pet->CastSpell(Pet, SPELL_PET_ENRAGE, true);
+
+            TheBeastWithin_Timer = 30000;
+        } else TheBeastWithin_Timer -= diff;
+
+        //Pet_Timer
+        if (Pet_Timer < diff && pet == false)
+        {
+            pet = true;
+            //uint32 spell_id;
+            uint32 pet_id;
+            if (!urand(0, 1))
+            {
+                //spell_id = SPELL_SUMMON_FATHOM_LURKER;
+                pet_id = CREATURE_FATHOM_LURKER;
+            }
+            else
+            {
+                //spell_id = SPELL_SUMMON_FATHOM_SPOREBAT;
+                pet_id = CREATURE_FATHOM_SPOREBAT;
+            }
+            //DoCast(me, spell_id, true);
+            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
+            {
+                if (Creature* Pet = DoSpawnCreature(pet_id, 0, 0, 0, 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 15s))
+                {
+                    Pet->AI()->AttackStart(target);
+                    SummonedPet = Pet->GetGUID();
+                }
+            }
+        } else Pet_Timer -= diff;
     }
-
-private:
-    InstanceScript* _instance;
-    SummonList _summons;
 };
 
-enum NPCTotems
-{
-    NPC_SPITFIRE_TOTEM                  = 22091,
-    NPC_GREATER_EARTHBIND_TOTEM         = 22486,
-    NPC_GREATER_POISON_CLEANSING_TOTEM  = 22487
-};
-
-enum TidalActions
-{
-    ACTION_REMOVE_SPITFIRE  = 1,
-    ACTION_REMOVE_EARTHBIND = 2,
-    ACTION_REMOVE_CLEANSING = 3
-};
-
-enum TotemChoice
-{
-    SPITFIRE  = 1,
-    EARTHBIND = 2,
-    CLEANSING = 3
-};
-
+//Fathom-Guard Tidalvess AI
 struct boss_fathomguard_tidalvess : public ScriptedAI
 {
-    boss_fathomguard_tidalvess(Creature* creature) : ScriptedAI(creature), _summons(creature)
+    boss_fathomguard_tidalvess(Creature* creature) : ScriptedAI(creature)
     {
-        _instance = creature->GetInstanceScript();
-        SetBoundary(_instance->GetBossBoundary(DATA_FATHOM_LORD_KARATHRESS));
-
-        _scheduler.SetValidator([this]
-        {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
+        Initialize();
+        instance = creature->GetInstanceScript();
     }
+
+    void Initialize()
+    {
+        FrostShock_Timer = 25000;
+        Spitfire_Timer = 60000;
+        PoisonCleansing_Timer = 30000;
+        Earthbind_Timer = 45000;
+    }
+
+    InstanceScript* instance;
+
+    uint32 FrostShock_Timer;
+    uint32 Spitfire_Timer;
+    uint32 PoisonCleansing_Timer;
+    uint32 Earthbind_Timer;
 
     void Reset() override
     {
-        _scheduler.CancelAll();
-        _choice = 0;
+        Initialize();
 
-        _summons.DespawnAll();
-
-        _entryList.clear();
-
-        _entryList = { NPC_SPITFIRE_TOTEM, NPC_GREATER_EARTHBIND_TOTEM, NPC_GREATER_POISON_CLEANSING_TOTEM };
+        instance->SetBossState(BOSS_FATHOM_LORD_KARATHRESS, NOT_STARTED);
     }
 
-    void JustSummoned(Creature* summon) override
+    void JustDied(Unit* /*killer*/) override
     {
-        _summons.Summon(summon);
-        summon->Attack(me->GetVictim(), false);
-        summon->SetInCombatWithZone();
-    }
-
-    void ScheduleRemoval(uint32 entry)
-    {
-        std::chrono::seconds timer = 0s;
-        int32 action = 0;
-        uint8 group = 0;
-
-        switch (entry)
-        {
-            case NPC_SPITFIRE_TOTEM:
-                timer = 59s;
-                action = ACTION_REMOVE_SPITFIRE;
-                group = SPITFIRE;
-                break;
-            case NPC_GREATER_EARTHBIND_TOTEM:
-                timer = 44s;
-                action = ACTION_REMOVE_EARTHBIND;
-                group = EARTHBIND;
-                break;
-            case NPC_GREATER_POISON_CLEANSING_TOTEM:
-                timer = 29s;
-                action = ACTION_REMOVE_CLEANSING;
-                group = CLEANSING;
-                break;
-            default:
-                timer = 29s;
-        }
-        _totemScheduler.Schedule(timer, group, [this, action](TaskContext)
-        {
-            me->AI()->DoAction(action);
-        });
-    }
-
-    void DoAction(int32 action) override
-    {
-        switch (action)
-        {
-            case ACTION_REMOVE_SPITFIRE:
-                _totemScheduler.CancelGroup(SPITFIRE);
-                _entryList.push_back(NPC_SPITFIRE_TOTEM);
-                break;
-            case ACTION_REMOVE_EARTHBIND:
-                _totemScheduler.CancelGroup(EARTHBIND);
-                _entryList.push_back(NPC_GREATER_EARTHBIND_TOTEM);
-                break;
-            case ACTION_REMOVE_CLEANSING:
-                _totemScheduler.CancelGroup(CLEANSING);
-                _entryList.push_back(NPC_GREATER_POISON_CLEANSING_TOTEM);
-                break;
-            default:
-                return;
-        }
-    }
-
-    void SummonTotem(uint32 entry)
-    {
-        switch (entry)
-        {
-            case NPC_SPITFIRE_TOTEM:
-                DoCastSelf(SPELL_SPITFIRE_TOTEM);
-                break;
-            case NPC_GREATER_EARTHBIND_TOTEM:
-                DoCastSelf(SPELL_EARTHBIND_TOTEM);
-                break;
-            case NPC_GREATER_POISON_CLEANSING_TOTEM:
-                DoCastSelf(SPELL_POISON_CLEANSING_TOTEM);
-                break;
-            default:
-                return;
-        }
+        if (Creature* Karathress = ObjectAccessor::GetCreature(*me, instance->GetGuidData(DATA_KARATHRESS)))
+            ENSURE_AI(boss_fathomlord_karathress, Karathress->AI())->EventTidalvessDeath();
     }
 
     void JustEngagedWith(Unit* who) override
     {
-        if (Creature* karathress = _instance->GetCreature(DATA_FATHOM_LORD_KARATHRESS))
+        instance->SetGuidData(DATA_KARATHRESSEVENT_STARTER, who->GetGUID());
+        instance->SetBossState(BOSS_FATHOM_LORD_KARATHRESS, IN_PROGRESS);
+        DoCast(me, SPELL_WINDFURY_WEAPON);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        //Only if not incombat check if the event is started
+        if (!me->IsInCombat() && instance->GetBossState(BOSS_FATHOM_LORD_KARATHRESS) == IN_PROGRESS)
         {
-            karathress->Attack(who, false);
+            if (Unit* target = ObjectAccessor::GetUnit(*me, instance->GetGuidData(DATA_KARATHRESSEVENT_STARTER)))
+                AttackStart(target);
         }
-        _scheduler.Schedule(10900ms, [this](TaskContext context)
+
+        //Return since we have no target
+        if (!UpdateVictim())
+            return;
+
+        //someone evaded!
+        if (instance->GetBossState(BOSS_FATHOM_LORD_KARATHRESS) == NOT_STARTED)
+        {
+            EnterEvadeMode();
+            return;
+        }
+
+        if (!me->HasAura(SPELL_WINDFURY_WEAPON))
+        {
+            DoCast(me, SPELL_WINDFURY_WEAPON);
+        }
+
+        //FrostShock_Timer
+        if (FrostShock_Timer <= diff)
         {
             DoCastVictim(SPELL_FROST_SHOCK);
-            context.Repeat(10900ms, 14700ms);
-        }).Schedule(15800ms, [this](TaskContext context)
+            FrostShock_Timer = 25000 + rand32() % 5000;
+        } else FrostShock_Timer -= diff;
+
+        //Spitfire_Timer
+        if (Spitfire_Timer <= diff)
         {
-            if (_entryList.size() != 0) //don't summon when all totems are up
-            {
-                uint32 totemEntry = _entryList.front();
-                _entryList.pop_front();
-                SummonTotem(totemEntry);
-                ScheduleRemoval(totemEntry);
-            }
-            context.Repeat(13350ms, 24250ms);
-        });
+            DoCast(me, SPELL_SPITFIRE_TOTEM);
+            if (Unit* SpitfireTotem = me->FindNearestCreature(CREATURE_SPITFIRE_TOTEM, 100.0f))
+                SpitfireTotem->ToCreature()->AI()->AttackStart(me->GetVictim());
+
+            Spitfire_Timer = 60000;
+        }
+        else
+            Spitfire_Timer -= diff;
+
+        //PoisonCleansing_Timer
+        if (PoisonCleansing_Timer <= diff)
+        {
+            DoCast(me, SPELL_POISON_CLEANSING_TOTEM);
+            PoisonCleansing_Timer = 30000;
+        }
+        else
+            PoisonCleansing_Timer -= diff;
+
+        //Earthbind_Timer
+        if (Earthbind_Timer <= diff)
+        {
+            DoCast(me, SPELL_EARTHBIND_TOTEM);
+            Earthbind_Timer = 45000;
+        }
+        else
+            Earthbind_Timer -= diff;
+    }
+};
+
+//Fathom-Guard Caribdis AI
+struct boss_fathomguard_caribdis : public ScriptedAI
+{
+    boss_fathomguard_caribdis(Creature* creature) : ScriptedAI(creature)
+    {
+        Initialize();
+        instance = creature->GetInstanceScript();
+    }
+
+    void Initialize()
+    {
+        WaterBoltVolley_Timer = 35000;
+        TidalSurge_Timer = 15000 + rand32() % 5000;
+        Heal_Timer = 55000;
+        Cyclone_Timer = 30000 + rand32() % 10000;
+    }
+
+    InstanceScript* instance;
+
+    uint32 WaterBoltVolley_Timer;
+    uint32 TidalSurge_Timer;
+    uint32 Heal_Timer;
+    uint32 Cyclone_Timer;
+
+    void Reset() override
+    {
+        Initialize();
+
+        instance->SetBossState(BOSS_FATHOM_LORD_KARATHRESS, NOT_STARTED);
     }
 
     void JustDied(Unit* /*killer*/) override
     {
-        if (Creature* karathress = _instance->GetCreature(DATA_FATHOM_LORD_KARATHRESS))
-        {
-            me->CastSpell(karathress, SPELL_POWER_OF_TIDALVESS, true);
-            karathress->AI()->Talk(SAY_GAIN_ABILITY1);
-            me->DespawnOrUnsummon(1000);
-        }
-    }
-
-    void UpdateAI(uint32 diff) override
-    {
-        if (!UpdateVictim())
-        {
-            return;
-        }
-
-        _scheduler.Update(diff);
-        _totemScheduler.Update(diff);
-
-        DoMeleeAttackIfReady();
-    }
-
-    void EnterEvadeMode(EvadeReason why) override
-    {
-        if (Creature* karathress = _instance->GetCreature(DATA_FATHOM_LORD_KARATHRESS))
-        {
-            karathress->AI()->DoAction(ACTION_RESET_ADDS);
-        }
-        ScriptedAI::EnterEvadeMode(why);
-    }
-
-private:
-    TaskScheduler _scheduler;
-    TaskScheduler _totemScheduler;
-    InstanceScript* _instance;
-    uint8 _choice;
-    SummonList _summons;
-    std::list<uint32> _entryList;
-};
-
-struct boss_fathomguard_caribdis : public ScriptedAI
-{
-    boss_fathomguard_caribdis(Creature* creature) : ScriptedAI(creature), _summons(creature)
-    {
-        _instance = creature->GetInstanceScript();
-        SetBoundary(_instance->GetBossBoundary(DATA_FATHOM_LORD_KARATHRESS));
-
-        _scheduler.SetValidator([this]
-        {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
-    }
-
-    void Reset() override
-    {
-        _scheduler.CancelAll();
-
-        _summons.DespawnAll();
-    }
-
-    void JustSummoned(Creature* summon) override
-    {
-        _summons.Summon(summon);
+        if (Creature* Karathress = ObjectAccessor::GetCreature(*me, instance->GetGuidData(DATA_KARATHRESS)))
+            ENSURE_AI(boss_fathomlord_karathress, Karathress->AI())->EventCaribdisDeath();
     }
 
     void JustEngagedWith(Unit* who) override
     {
-        if (Creature* karathress = _instance->GetCreature(DATA_FATHOM_LORD_KARATHRESS))
-        {
-            karathress->Attack(who, false);
-        }
-        _scheduler.Schedule(27900ms, [this](TaskContext context)
-        {
-            DoCastSelf(SPELL_WATER_BOLT_VOLLEY);
-            context.Repeat(6050ms, 19750ms);
-        }).Schedule(23050ms, [this](TaskContext context)
-        {
-            DoCastSelf(SPELL_TIDAL_SURGE);
-            context.Repeat(24250ms, 33250ms);
-        }).Schedule(15750ms, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_SUMMON_CYCLONE);
-            context.Repeat(47250ms, 51550ms);
-        }).Schedule(20s, [this](TaskContext context)
-        {
-            if (Unit* target = DoSelectLowestHpFriendly(60.0f, 150000))
-            {
-                DoCast(target, SPELL_HEALING_WAVE);
-            }
-            context.Repeat(20s);
-        });
-    }
-
-    void JustDied(Unit* /*killer*/) override
-    {
-        if (Creature* karathress = _instance->GetCreature(DATA_FATHOM_LORD_KARATHRESS))
-        {
-            me->CastSpell(karathress, SPELL_POWER_OF_CARIBDIS, true);
-            karathress->AI()->Talk(SAY_GAIN_ABILITY3);
-            me->DespawnOrUnsummon(1000);
-        }
+        instance->SetGuidData(DATA_KARATHRESSEVENT_STARTER, who->GetGUID());
+        instance->SetBossState(BOSS_FATHOM_LORD_KARATHRESS, IN_PROGRESS);
     }
 
     void UpdateAI(uint32 diff) override
     {
-        if (!UpdateVictim())
+        //Only if not incombat check if the event is started
+        if (!me->IsInCombat() && instance->GetBossState(BOSS_FATHOM_LORD_KARATHRESS) == IN_PROGRESS)
         {
+            if (Unit* target = ObjectAccessor::GetUnit(*me, instance->GetGuidData(DATA_KARATHRESSEVENT_STARTER)))
+                AttackStart(target);
+        }
+
+        //Return since we have no target
+        if (!UpdateVictim())
+            return;
+
+        //someone evaded!
+        if (instance->GetBossState(BOSS_FATHOM_LORD_KARATHRESS) == NOT_STARTED)
+        {
+            EnterEvadeMode();
             return;
         }
 
-        _scheduler.Update(diff);
-
-        DoMeleeAttackIfReady();
-    }
-
-    void EnterEvadeMode(EvadeReason why) override
-    {
-        if (Creature* karathress = _instance->GetCreature(DATA_FATHOM_LORD_KARATHRESS))
+        //WaterBoltVolley_Timer
+        if (WaterBoltVolley_Timer <= diff)
         {
-            karathress->AI()->DoAction(ACTION_RESET_ADDS);
+            DoCastVictim(SPELL_WATER_BOLT_VOLLEY);
+            WaterBoltVolley_Timer = 30000;
+        } else WaterBoltVolley_Timer -= diff;
+
+        //TidalSurge_Timer
+        if (TidalSurge_Timer <= diff)
+        {
+            DoCastSelf(SPELL_TIDAL_SURGE);
+            TidalSurge_Timer = 15000 + rand32() % 5000;
+        } else TidalSurge_Timer -= diff;
+
+        //Cyclone_Timer
+        if (Cyclone_Timer <= diff)
+        {
+            //DoCast(me, SPELL_SUMMON_CYCLONE); // Doesn't work
+            Cyclone_Timer = 30000 + rand32() % 10000;
+
+            if (Creature* Cyclone = me->SummonCreature(CREATURE_CYCLONE, me->GetPositionX(), me->GetPositionY(), me->GetPositionZ(), float(rand32() % 5), TEMPSUMMON_TIMED_DESPAWN, 15s))
+            {
+                Cyclone->SetObjectScale(3.0f);
+                Cyclone->SetFaction(me->GetFaction());
+                Cyclone->CastSpell(Cyclone, SPELL_CYCLONE_CYCLONE, true);
+                if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
+                    Cyclone->AI()->AttackStart(target);
+            }
         }
-        ScriptedAI::EnterEvadeMode(why);
+        else
+            Cyclone_Timer -= diff;
+
+        //Heal_Timer
+        if (Heal_Timer <= diff)
+        {
+            // It can be cast on any of the mobs
+            Unit* unit = nullptr;
+
+            while (unit == nullptr || !unit->IsAlive())
+                unit = selectAdvisorUnit();
+
+            DoCast(unit, SPELL_HEAL);
+            Heal_Timer = 60000;
+        }
+        else
+            Heal_Timer -= diff;
     }
 
-private:
-    TaskScheduler _scheduler;
-    InstanceScript* _instance;
-    SummonList _summons;
+    Unit* selectAdvisorUnit()
+    {
+        Unit* unit = nullptr;
+        switch (rand32() % 4)
+        {
+        case 0:
+            unit = ObjectAccessor::GetUnit(*me, instance->GetGuidData(DATA_KARATHRESS));
+            break;
+        case 1:
+            unit = ObjectAccessor::GetUnit(*me, instance->GetGuidData(DATA_SHARKKIS));
+            break;
+        case 2:
+            unit = ObjectAccessor::GetUnit(*me, instance->GetGuidData(DATA_TIDALVESS));
+            break;
+        case 3:
+            unit = me;
+            break;
+        }
+        return unit;
+    }
 };
 
-class spell_karathress_power_of_tidalvess : public AuraScript
+// 38358 - Tidal Surge
+class spell_fathomlord_karathress_tidal_surge : public SpellScript
 {
-    PrepareAuraScript(spell_karathress_power_of_tidalvess);
-
-    void OnPeriodic(AuraEffect const* aurEff)
+    bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        PreventDefaultAction();
-        GetUnitOwner()->CastSpell(GetUnitOwner(), GetSpellInfo()->Effects[aurEff->GetEffIndex()].TriggerSpell, true);
+        return ValidateSpellInfo({ SPELL_TIDAL_SURGE_EFFECT });
+    }
+
+    void HandleScript(SpellEffIndex /*effIndex*/)
+    {
+        GetHitUnit()->CastSpell(GetHitUnit(), SPELL_TIDAL_SURGE_EFFECT, true);
     }
 
     void Register() override
     {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_karathress_power_of_tidalvess::OnPeriodic, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
-    }
-};
-
-class spell_karathress_power_of_caribdis : public AuraScript
-{
-    PrepareAuraScript(spell_karathress_power_of_caribdis);
-
-    void OnPeriodic(AuraEffect const* aurEff)
-    {
-        PreventDefaultAction();
-        if (Unit* victim = GetUnitOwner()->GetVictim())
-        {
-            GetUnitOwner()->CastSpell(victim, GetSpellInfo()->Effects[aurEff->GetEffIndex()].TriggerSpell, true);
-        }
-    }
-
-    void Register() override
-    {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_karathress_power_of_caribdis::OnPeriodic, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
+        OnEffectHitTarget += SpellEffectFn(spell_fathomlord_karathress_tidal_surge::HandleScript, EFFECT_1, SPELL_EFFECT_SCRIPT_EFFECT);
     }
 };
 
 void AddSC_boss_fathomlord_karathress()
 {
-    RegisterSerpentShrineAI(boss_fathomlord_karathress);
-    RegisterSerpentShrineAI(boss_fathomguard_sharkkis);
-    RegisterSerpentShrineAI(boss_fathomguard_tidalvess);
-    RegisterSerpentShrineAI(boss_fathomguard_caribdis);
-    RegisterSpellScript(spell_karathress_power_of_tidalvess);
-    RegisterSpellScript(spell_karathress_power_of_caribdis);
+    RegisterSerpentshrineCavernCreatureAI(boss_fathomlord_karathress);
+    RegisterSerpentshrineCavernCreatureAI(boss_fathomguard_sharkkis);
+    RegisterSerpentshrineCavernCreatureAI(boss_fathomguard_tidalvess);
+    RegisterSerpentshrineCavernCreatureAI(boss_fathomguard_caribdis);
+    RegisterSpellScript(spell_fathomlord_karathress_tidal_surge);
 }

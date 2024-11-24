@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -16,7 +16,6 @@
  */
 
 #include "QueryCallback.h"
-#include "Duration.h"
 #include "Errors.h"
 
 template<typename T, typename... Args>
@@ -67,14 +66,12 @@ public:
 
     QueryCallbackData(std::function<void(QueryCallback&, QueryResult)>&& callback) : _string(std::move(callback)), _isPrepared(false) { }
     QueryCallbackData(std::function<void(QueryCallback&, PreparedQueryResult)>&& callback) : _prepared(std::move(callback)), _isPrepared(true) { }
-
     QueryCallbackData(QueryCallbackData&& right) noexcept
     {
         _isPrepared = right._isPrepared;
         ConstructActiveMember(this);
         MoveFrom(this, std::move(right));
     }
-
     QueryCallbackData& operator=(QueryCallbackData&& right) noexcept
     {
         if (this != &right)
@@ -85,13 +82,10 @@ public:
                 _isPrepared = right._isPrepared;
                 ConstructActiveMember(this);
             }
-
             MoveFrom(this, std::move(right));
         }
-
         return *this;
     }
-
     ~QueryCallbackData() { DestroyActiveMember(this); }
 
 private:
@@ -111,13 +105,13 @@ private:
 };
 
 // Not using initialization lists to work around segmentation faults when compiling with clang without precompiled headers
-QueryCallback::QueryCallback(QueryResultFuture&& result)
+QueryCallback::QueryCallback(std::future<QueryResult>&& result)
 {
     _isPrepared = false;
     Construct(_string, std::move(result));
 }
 
-QueryCallback::QueryCallback(PreparedQueryResultFuture&& result)
+QueryCallback::QueryCallback(std::future<PreparedQueryResult>&& result)
 {
     _isPrepared = true;
     Construct(_prepared, std::move(result));
@@ -141,11 +135,9 @@ QueryCallback& QueryCallback::operator=(QueryCallback&& right) noexcept
             _isPrepared = right._isPrepared;
             ConstructActiveMember(this);
         }
-
         MoveFrom(this, std::move(right));
         _callbacks = std::move(right._callbacks);
     }
-
     return *this;
 }
 
@@ -206,7 +198,7 @@ bool QueryCallback::InvokeIfReady()
 
     if (!_isPrepared)
     {
-        if (_string.valid() && _string.wait_for(0s) == std::future_status::ready)
+        if (_string.valid() && _string.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
         {
             QueryResultFuture f(std::move(_string));
             std::function<void(QueryCallback&, QueryResult)> cb(std::move(callback._string));
@@ -216,7 +208,7 @@ bool QueryCallback::InvokeIfReady()
     }
     else
     {
-        if (_prepared.valid() && _prepared.wait_for(0s) == std::future_status::ready)
+        if (_prepared.valid() && _prepared.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
         {
             PreparedQueryResultFuture f(std::move(_prepared));
             std::function<void(QueryCallback&, PreparedQueryResult)> cb(std::move(callback._prepared));

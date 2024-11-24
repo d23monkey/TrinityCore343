@@ -1,203 +1,179 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
 #include "naxxramas.h"
+#include "ScriptedCreature.h"
+#include "SpellAuras.h"
+#include "SpellScript.h"
 
 enum Spells
 {
-    SPELL_NECROTIC_AURA                         = 55593,
-    SPELL_SUMMON_SPORE                          = 29234,
-    SPELL_DEATHBLOOM_10                         = 29865,
-    SPELL_DEATHBLOOM_25                         = 55053,
-    SPELL_INEVITABLE_DOOM_10                    = 29204,
-    SPELL_INEVITABLE_DOOM_25                    = 55052,
-    SPELL_BERSERK                               = 26662
-};
+    SPELL_NECROTIC_AURA                     = 55593,
+    SPELL_SUMMON_SPORE                      = 29234,
+    SPELL_DEATHBLOOM                        = 29865,
+    SPELL_INEVITABLE_DOOM                   = 29204,
+    SPELL_FUNGAL_CREEP                      = 29232,
 
-enum Events
-{
-    EVENT_NECROTIC_AURA                         = 1,
-    EVENT_DEATHBLOOM                            = 2,
-    EVENT_INEVITABLE_DOOM                       = 3,
-    EVENT_BERSERK                               = 4,
-    EVENT_SUMMON_SPORE                          = 5,
-    EVENT_NECROTIC_AURA_FADING                  = 6,
-    EVENT_NECROTIC_AURA_REMOVED                 = 7
+    SPELL_DEATHBLOOM_FINAL_DAMAGE           = 55594,
 };
 
 enum Texts
 {
-    SAY_NECROTIC_AURA_APPLIED                   = 0,
-    SAY_NECROTIC_AURA_REMOVED                   = 1,
-    SAY_NECROTIC_AURA_FADING                    = 2
+    SAY_NECROTIC_AURA_APPLIED       = 0,
+    SAY_NECROTIC_AURA_REMOVED       = 1,
+    SAY_NECROTIC_AURA_FADING        = 2,
 };
 
-class boss_loatheb : public CreatureScript
+enum Events
 {
-public:
-    boss_loatheb() : CreatureScript("boss_loatheb") { }
+    EVENT_NECROTIC_AURA = 1,
+    EVENT_DEATHBLOOM,
+    EVENT_INEVITABLE_DOOM,
+    EVENT_SPORE,
+    EVENT_NECROTIC_AURA_FADING,
+    EVENT_NECROTIC_AURA_FADED
+};
 
-    CreatureAI* GetAI(Creature* pCreature) const override
+enum Achievement
+{
+    DATA_ACHIEVEMENT_SPORE_LOSER    = 21822183,
+};
+
+struct boss_loatheb : public BossAI
+{
+    boss_loatheb(Creature* creature) : BossAI(creature, BOSS_LOATHEB), _doomCounter(0), _sporeLoser(true) { }
+
+    void Reset() override
     {
-        return GetNaxxramasAI<boss_loathebAI>(pCreature);
+        _Reset();
+        instance->DoRemoveAurasDueToSpellOnPlayers(SPELL_FUNGAL_CREEP);
+        _doomCounter = 0;
+        _sporeLoser = true;
     }
 
-    struct boss_loathebAI : public BossAI
+    void JustEngagedWith(Unit* who) override
     {
-        explicit boss_loathebAI(Creature* c) : BossAI(c, BOSS_LOATHEB), summons(me)
-        {
-            pInstance = me->GetInstanceScript();
-            me->SetHomePosition(me->GetPositionX(), me->GetPositionY(), me->GetPositionZ(), me->GetOrientation());
-        }
+        BossAI::JustEngagedWith(who);
+        events.ScheduleEvent(EVENT_NECROTIC_AURA, 17s);
+        events.ScheduleEvent(EVENT_DEATHBLOOM, 5s);
+        events.ScheduleEvent(EVENT_SPORE, 18s);
+        events.ScheduleEvent(EVENT_INEVITABLE_DOOM, 2min);
+    }
 
-        InstanceScript* pInstance;
-        uint8 doomCounter;
-        EventMap events;
-        SummonList summons;
+    void SummonedCreatureDies(Creature* summon, Unit* /*killer*/) override
+    {
+        _sporeLoser = false;
+        summon->CastSpell(summon, SPELL_FUNGAL_CREEP, true);
+    }
 
-        void Reset() override
+    uint32 GetData(uint32 id) const override
+    {
+        return (_sporeLoser && id == DATA_ACHIEVEMENT_SPORE_LOSER) ? 1u : 0u;
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        while (uint32 eventId = events.ExecuteEvent())
         {
-            BossAI::Reset();
-            events.Reset();
-            summons.DespawnAll();
-            doomCounter = 0;
-            if (pInstance)
+            switch (eventId)
             {
-                pInstance->SetData(BOSS_LOATHEB, NOT_STARTED);
-                if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_LOATHEB_GATE)))
-                {
-                    go->SetGoState(GO_STATE_ACTIVE);
-                }
-            }
-        }
-
-        void JustSummoned(Creature* cr) override
-        {
-            cr->SetInCombatWithZone();
-            summons.Summon(cr);
-        }
-
-        void SummonedCreatureDies(Creature*  /*cr*/, Unit*) override
-        {
-            if (pInstance)
-            {
-                pInstance->SetData(DATA_SPORE_KILLED, 0);
-            }
-        }
-
-        void KilledUnit(Unit* who) override
-        {
-            if (who->IsPlayer() && pInstance)
-            {
-                pInstance->SetData(DATA_IMMORTAL_FAIL, 0);
-            }
-        }
-
-        void JustEngagedWith(Unit* who) override
-        {
-            BossAI::JustEngagedWith(who);
-            me->SetInCombatWithZone();
-            events.ScheduleEvent(EVENT_NECROTIC_AURA, 10s);
-            events.ScheduleEvent(EVENT_DEATHBLOOM, 5s);
-            events.ScheduleEvent(EVENT_INEVITABLE_DOOM, 2min);
-            events.ScheduleEvent(EVENT_SUMMON_SPORE, 15s);
-            events.ScheduleEvent(EVENT_BERSERK, 12min);
-            if (pInstance)
-            {
-                pInstance->SetData(BOSS_LOATHEB, IN_PROGRESS);
-                if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_LOATHEB_GATE)))
-                {
-                    go->SetGoState(GO_STATE_READY);
-                }
-            }
-        }
-
-        void JustDied(Unit* killer) override
-        {
-            BossAI::JustDied(killer);
-            summons.DespawnAll();
-            if (pInstance)
-            {
-                pInstance->SetData(BOSS_LOATHEB, DONE);
-            }
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (!UpdateVictim() || !IsInRoom())
-                return;
-
-            events.Update(diff);
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
-            {
-                case EVENT_SUMMON_SPORE:
-                    me->CastSpell(me, SPELL_SUMMON_SPORE, true);
-                    events.Repeat(35s);
-                    break;
                 case EVENT_NECROTIC_AURA:
-                    me->CastSpell(me, SPELL_NECROTIC_AURA, true);
+                    DoCastAOE(SPELL_NECROTIC_AURA);
                     Talk(SAY_NECROTIC_AURA_APPLIED);
                     events.ScheduleEvent(EVENT_NECROTIC_AURA_FADING, 14s);
-                    events.ScheduleEvent(EVENT_NECROTIC_AURA_REMOVED, 17s);
-                    events.Repeat(20s);
+                    events.ScheduleEvent(EVENT_NECROTIC_AURA_FADED, 17s);
+                    events.Repeat(Seconds(20));
                     break;
                 case EVENT_DEATHBLOOM:
-                    me->CastSpell(me, RAID_MODE(SPELL_DEATHBLOOM_10, SPELL_DEATHBLOOM_25), false);
-                    events.Repeat(30s);
+                    DoCastAOE(SPELL_DEATHBLOOM);
+                    events.Repeat(Seconds(30));
                     break;
                 case EVENT_INEVITABLE_DOOM:
-                    me->CastSpell(me, RAID_MODE(SPELL_INEVITABLE_DOOM_10, SPELL_INEVITABLE_DOOM_25), false);
-                    doomCounter++;
-                    events.Repeat(doomCounter < 6 ? 30s : 15s);
+                    ++_doomCounter;
+                    DoCastAOE(SPELL_INEVITABLE_DOOM);
+                    if (_doomCounter > 6)
+                        events.Repeat((_doomCounter & 1) ? Seconds(14) : Seconds(17));
+                    else
+                        events.Repeat(Seconds(30));
                     break;
-                case EVENT_BERSERK:
-                    me->CastSpell(me, SPELL_BERSERK, true);
+                case EVENT_SPORE:
+                    DoCast(me, SPELL_SUMMON_SPORE, false);
+                    events.Repeat(RAID_MODE(Seconds(36), Seconds(15)));
                     break;
                 case EVENT_NECROTIC_AURA_FADING:
                     Talk(SAY_NECROTIC_AURA_FADING);
                     break;
-                case EVENT_NECROTIC_AURA_REMOVED:
+                case EVENT_NECROTIC_AURA_FADED:
                     Talk(SAY_NECROTIC_AURA_REMOVED);
                     break;
+                default:
+                    break;
             }
-            DoMeleeAttackIfReady();
         }
+    }
 
-        bool IsInRoom()
+private:
+    uint8 _doomCounter;
+    bool _sporeLoser;
+};
+
+class achievement_spore_loser : public AchievementCriteriaScript
+{
+    public:
+        achievement_spore_loser() : AchievementCriteriaScript("achievement_spore_loser") { }
+
+        bool OnCheck(Player* /*source*/, Unit* target) override
         {
-            // Calculate the distance between his home position to the gate
-            if (me->GetExactDist(me->GetHomePosition().GetPositionX(),
-                                 me->GetHomePosition().GetPositionY(),
-                                 me->GetHomePosition().GetPositionZ()) > 50.0f)
-            {
-                EnterEvadeMode();
-                return false;
-            }
-            return true;
+            return target && target->GetAI()->GetData(DATA_ACHIEVEMENT_SPORE_LOSER);
         }
-    };
+};
+
+// 29865, 55053 - Deathbloom
+class spell_loatheb_deathbloom : public AuraScript
+{
+    bool Validate(SpellInfo const* /*spell*/) override
+    {
+        return ValidateSpellInfo({ SPELL_DEATHBLOOM_FINAL_DAMAGE });
+    }
+
+    void AfterRemove(AuraEffect const* eff, AuraEffectHandleModes /*mode*/)
+    {
+        if (GetTargetApplication()->GetRemoveMode() != AURA_REMOVE_BY_EXPIRE)
+            return;
+
+        GetTarget()->CastSpell(nullptr, SPELL_DEATHBLOOM_FINAL_DAMAGE, CastSpellExtraArgs(eff).SetOriginalCaster(GetCasterGUID()));
+    }
+
+    void Register() override
+    {
+        AfterEffectRemove += AuraEffectRemoveFn(spell_loatheb_deathbloom::AfterRemove, EFFECT_0, SPELL_AURA_PERIODIC_DAMAGE, AURA_EFFECT_HANDLE_REAL);
+    }
 };
 
 void AddSC_boss_loatheb()
 {
-    new boss_loatheb();
+    RegisterNaxxramasCreatureAI(boss_loatheb);
+    new achievement_spore_loser();
+    RegisterSpellScript(spell_loatheb_deathbloom);
 }

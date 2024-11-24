@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -22,7 +22,7 @@
 
 namespace WorldPackets
 {
-    class AC_GAME_API Packet
+    class TC_GAME_API Packet
     {
     public:
         Packet(WorldPacket&& worldPacket);
@@ -35,36 +35,45 @@ namespace WorldPackets
         virtual WorldPacket const* Write() = 0;
         virtual void Read() = 0;
 
-        [[nodiscard]] WorldPacket const* GetRawPacket() const { return &_worldPacket; }
-        [[nodiscard]] std::size_t GetSize() const { return _worldPacket.size(); }
+        WorldPacket const* GetRawPacket() const { return &_worldPacket; }
+        size_t GetSize() const { return _worldPacket.size(); }
+        ConnectionType GetConnection() const { return _worldPacket.GetConnection(); }
 
     protected:
         WorldPacket _worldPacket;
     };
 
-    class AC_GAME_API ServerPacket : public Packet
+    class TC_GAME_API ServerPacket : public Packet
     {
     public:
-        ServerPacket(OpcodeServer opcode, std::size_t initialSize = 200);
+        ServerPacket(OpcodeServer opcode, size_t initialSize = 200, ConnectionType connection = CONNECTION_TYPE_DEFAULT);
 
-        void Read() final;
+        void Read() override final;
 
         void Clear() { _worldPacket.clear(); }
         WorldPacket&& Move() { return std::move(_worldPacket); }
         void ShrinkToFit() { _worldPacket.shrink_to_fit(); }
 
-        [[nodiscard]] OpcodeServer GetOpcode() const { return OpcodeServer(_worldPacket.GetOpcode()); }
+        OpcodeServer GetOpcode() const { return OpcodeServer(_worldPacket.GetOpcode()); }
     };
 
-    class AC_GAME_API ClientPacket : public Packet
+    class TC_GAME_API ClientPacket : public Packet
     {
     public:
         ClientPacket(WorldPacket&& packet);
         ClientPacket(OpcodeClient expectedOpcode, WorldPacket&& packet);
 
-        WorldPacket const* Write() final;
+        WorldPacket const* Write() override final;
 
-        [[nodiscard]] OpcodeClient GetOpcode() const { return OpcodeClient(_worldPacket.GetOpcode()); }
+        OpcodeClient GetOpcode() const { return OpcodeClient(_worldPacket.GetOpcode()); }
+    };
+
+    class Null final : public ClientPacket
+    {
+    public:
+        Null(WorldPacket&& packet) : ClientPacket(std::move(packet)) { }
+
+        void Read() override { _worldPacket.rfinish(); }
     };
 }
 

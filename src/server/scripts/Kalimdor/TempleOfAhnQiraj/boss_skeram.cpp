@@ -1,24 +1,23 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
 #include "ScriptedCreature.h"
 #include "SpellScript.h"
-#include "SpellScriptLoader.h"
 #include "temple_of_ahnqiraj.h"
 
 enum Yells
@@ -34,9 +33,10 @@ enum Spells
     SPELL_ARCANE_EXPLOSION      = 26192,
     SPELL_EARTH_SHOCK           = 26194,
     SPELL_TRUE_FULFILLMENT      = 785,
+    SPELL_TRUE_FULFILLMENT_2    = 2313,
     SPELL_INITIALIZE_IMAGE      = 3730,
     SPELL_SUMMON_IMAGES         = 747,
-    SPELL_BIRTH                 = 34115
+    SPELL_GENERIC_DISMOUNT      = 61286
 };
 
 enum Events
@@ -44,220 +44,235 @@ enum Events
     EVENT_ARCANE_EXPLOSION      = 1,
     EVENT_FULLFILMENT           = 2,
     EVENT_BLINK                 = 3,
-    EVENT_EARTH_SHOCK           = 4,
-    EVENT_TELEPORT              = 5,
-    EVENT_INIT_IMAGE            = 6
+    EVENT_EARTH_SHOCK           = 4
 };
 
 uint32 const BlinkSpells[3] = { 4801, 8195, 20449 };
 
-struct boss_skeram : public BossAI
+class boss_skeram : public CreatureScript
 {
-    boss_skeram(Creature* creature) : BossAI(creature, DATA_SKERAM) { }
+    public:
+        boss_skeram() : CreatureScript("boss_skeram") { }
 
-    void Reset() override
-    {
-        _Reset();
-        _flag = 0;
-        _hpct = 75.0f;
-        me->SetReactState(REACT_AGGRESSIVE);
-        me->SetImmuneToAll(false);
-        me->SetControlled(false, UNIT_STATE_ROOT);
-    }
-
-    void KilledUnit(Unit* /*victim*/) override
-    {
-        Talk(SAY_SLAY);
-    }
-
-    void EnterEvadeMode(EvadeReason why) override
-    {
-        ScriptedAI::EnterEvadeMode(why);
-        if (me->IsSummon())
-            ((TempSummon*)me)->UnSummon();
-    }
-
-    void JustSummoned(Creature* creature) override
-    {
-        BossAI::JustSummoned(creature);
-
-        float ImageHealthPct = 0.f;
-        if (me->GetHealthPct() < 25.0f)
-            ImageHealthPct = 0.50f;
-        else if (me->GetHealthPct() < 50.0f)
-            ImageHealthPct = 0.20f;
-        else
-            ImageHealthPct = 0.10f;
-
-        creature->SetMaxHealth(me->GetMaxHealth() * ImageHealthPct);
-        creature->SetHealth(creature->GetMaxHealth() * (me->GetHealthPct() / 100.0f));
-
-        creature->CastSpell(creature, SPELL_BIRTH, true);
-        creature->SetControlled(true, UNIT_STATE_ROOT);
-        creature->SetReactState(REACT_PASSIVE);
-        creature->SetImmuneToAll(true);
-
-        _copiesGUIDs.push_back(creature->GetGUID());
-    }
-
-    void DoTeleport(Creature* creature)
-    {
-        // Shift the boss and images (Get it? *Shift*?)
-        uint8 rand = 0;
-        if (_flag != 0)
+        struct boss_skeramAI : public BossAI
         {
-            while (_flag & (1 << rand))
-                rand = urand(0, 2);
-            DoCast(me, BlinkSpells[rand]);
-            _flag |= (1 << rand);
-            _flag |= (1 << 7);
-        }
-
-        while (_flag & (1 << rand))
-            rand = urand(0, 2);
-
-        creature->SetReactState(REACT_AGGRESSIVE);
-        creature->SetImmuneToAll(false);
-        creature->SetControlled(false, UNIT_STATE_ROOT);
-        creature->CastSpell(creature, BlinkSpells[rand], true);
-
-        _flag |= (1 << rand);
-
-        if (_flag & (1 << 7))
-            _flag = 0;
-
-        events.ScheduleEvent(EVENT_INIT_IMAGE, 400ms);
-    }
-
-    void JustDied(Unit* /*killer*/) override
-    {
-        if (!me->IsSummon())
-        {
-            _JustDied();
-            Talk(SAY_DEATH);
-            if (me->GetMap() && me->GetMap()->ToInstanceMap())
-                me->GetMap()->ToInstanceMap()->PermBindAllPlayers();
-        }
-        else
-            me->RemoveCorpse();
-    }
-
-    void JustEngagedWith(Unit* /*who*/) override
-    {
-        _JustEngagedWith();
-        events.Reset();
-
-        events.ScheduleEvent(EVENT_ARCANE_EXPLOSION, 6s, 12s);
-        events.ScheduleEvent(EVENT_FULLFILMENT, 15s);
-        events.ScheduleEvent(EVENT_BLINK, 30s, 45s);
-        events.ScheduleEvent(EVENT_EARTH_SHOCK, 1200ms);
-
-        if (!me->IsSummon())
-        {
-            Talk(SAY_AGGRO);
-        }
-    }
-
-    void UpdateAI(uint32 diff) override
-    {
-        if (!UpdateVictim())
-            return;
-
-        events.Update(diff);
-
-        while (uint32 eventId = events.ExecuteEvent())
-        {
-            switch (eventId)
+            boss_skeramAI(Creature* creature) : BossAI(creature, DATA_SKERAM)
             {
-                case EVENT_ARCANE_EXPLOSION:
-                    DoCastAOE(SPELL_ARCANE_EXPLOSION, false);
-                    events.ScheduleEvent(EVENT_ARCANE_EXPLOSION, 8s, 18s);
-                    break;
-                case EVENT_FULLFILMENT:
-                    DoCast(SelectTarget(SelectTargetMethod::MinDistance, 1, 0.0f, true), SPELL_TRUE_FULFILLMENT, false);
-                    events.ScheduleEvent(EVENT_FULLFILMENT, 20s, 30s);
-                    break;
-                case EVENT_BLINK:
-                    DoCast(me, BlinkSpells[urand(0, 2)]);
-                    DoResetThreatList();
-                    events.ScheduleEvent(EVENT_BLINK, 10s, 30s);
-                    break;
-                case EVENT_EARTH_SHOCK:
-                    DoCastVictim(SPELL_EARTH_SHOCK);
-                    events.ScheduleEvent(EVENT_EARTH_SHOCK, 1200ms);
-                    break;
-                case EVENT_TELEPORT:
-                    me->SetReactState(REACT_AGGRESSIVE);
-                    me->SetImmuneToAll(false);
-                    me->SetControlled(false, UNIT_STATE_ROOT);
-                    for (ObjectGuid const& guid : _copiesGUIDs)
-                    {
-                        if (Creature* image = ObjectAccessor::GetCreature(*me, guid))
-                        {
-                            DoTeleport(image);
-                        }
-                    }
-                    DoResetThreatList();
-                    events.RescheduleEvent(EVENT_BLINK, 10s, 30s);
-                    break;
-                case EVENT_INIT_IMAGE:
-                    me->CastSpell(me, SPELL_INITIALIZE_IMAGE, true);
-                    break;
+                Initialize();
             }
-        }
 
-        if (!me->IsSummon() && me->GetHealthPct() < _hpct)
-        {
-            _copiesGUIDs.clear();
-            DoCast(me, SPELL_SUMMON_IMAGES, true);
-            me->SetReactState(REACT_PASSIVE);
-            me->SetImmuneToAll(true);
-            me->SetControlled(true, UNIT_STATE_ROOT);
-            Talk(SAY_SPLIT);
-            _hpct -= 25.0f;
-            events.ScheduleEvent(EVENT_TELEPORT, 2s);
-        }
-
-        if (Unit* myVictim = me->GetVictim())
-        {
-            if (me->IsWithinMeleeRange(myVictim))
+            void Initialize()
             {
-                DoMeleeAttackIfReady();
+                _flag = 0;
+                _hpct = 75.0f;
+            }
 
-                if (Unit* victimTarget = myVictim->GetVictim())
+            void Reset() override
+            {
+                Initialize();
+                me->SetVisible(true);
+            }
+
+            void KilledUnit(Unit* /*victim*/) override
+            {
+                Talk(SAY_SLAY);
+            }
+
+            void EnterEvadeMode(EvadeReason why) override
+            {
+                ScriptedAI::EnterEvadeMode(why);
+                if (me->IsSummon())
+                    me->DespawnOrUnsummon();
+            }
+
+            void JustSummoned(Creature* creature) override
+            {
+                // Shift the boss and images (Get it? *Shift*?)
+                uint8 rand = 0;
+                if (_flag != 0)
                 {
-                    if (victimTarget->GetGUID() == me->GetGUID())
+                    while (_flag & (1 << rand))
+                        rand = urand(0, 2);
+                    DoCast(me, BlinkSpells[rand]);
+                    _flag |= (1 << rand);
+                    _flag |= (1 << 7);
+                }
+
+                while (_flag & (1 << rand))
+                    rand = urand(0, 2);
+                creature->CastSpell(creature, BlinkSpells[rand]);
+                _flag |= (1 << rand);
+
+                if (_flag & (1 << 7))
+                    _flag = 0;
+
+                if (Unit* Target = SelectTarget(SelectTargetMethod::Random))
+                    creature->AI()->AttackStart(Target);
+
+                float ImageHealthPct;
+
+                if (me->GetHealthPct() < 25.0f)
+                    ImageHealthPct = 0.50f;
+                else if (me->GetHealthPct() < 50.0f)
+                    ImageHealthPct = 0.20f;
+                else
+                    ImageHealthPct = 0.10f;
+
+                creature->SetMaxHealth(me->GetMaxHealth() * ImageHealthPct);
+                creature->SetHealth(creature->GetMaxHealth() * (me->GetHealthPct() / 100.0f));
+
+                summons.Summon(creature);
+            }
+
+            void JustDied(Unit* killer) override
+            {
+                if (!me->IsSummon())
+                {
+                    Talk(SAY_DEATH);
+                    BossAI::JustDied(killer);
+                }
+                else
+                    me->DespawnOrUnsummon();
+            }
+
+            void JustEngagedWith(Unit* who) override
+            {
+                BossAI::JustEngagedWith(who);
+                events.Reset();
+
+                events.ScheduleEvent(EVENT_ARCANE_EXPLOSION, 6s, 12s);
+                events.ScheduleEvent(EVENT_FULLFILMENT, 15s);
+                events.ScheduleEvent(EVENT_BLINK, 30s, 45s);
+                events.ScheduleEvent(EVENT_EARTH_SHOCK, 2s);
+
+                Talk(SAY_AGGRO);
+            }
+
+            void UpdateAI(uint32 diff) override
+            {
+                if (!UpdateVictim())
+                    return;
+
+                events.Update(diff);
+
+                while (uint32 eventId = events.ExecuteEvent())
+                {
+                    switch (eventId)
                     {
-                        events.RescheduleEvent(EVENT_EARTH_SHOCK, 1200ms);
+                        case EVENT_ARCANE_EXPLOSION:
+                            DoCastAOE(SPELL_ARCANE_EXPLOSION, true);
+                            events.ScheduleEvent(EVENT_ARCANE_EXPLOSION, 8s, 18s);
+                            break;
+                        case EVENT_FULLFILMENT:
+                            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1, 45.0f, true))
+                                DoCast(target, SPELL_TRUE_FULFILLMENT);
+                            events.ScheduleEvent(EVENT_FULLFILMENT, 20s, 30s);
+                            break;
+                        case EVENT_BLINK:
+                            DoCast(me, BlinkSpells[urand(0, 2)]);
+                            ResetThreatList();
+                            me->SetVisible(true);
+                            events.ScheduleEvent(EVENT_BLINK, 10s, 30s);
+                            break;
+                        case EVENT_EARTH_SHOCK:
+                            DoCastVictim(SPELL_EARTH_SHOCK);
+                            events.ScheduleEvent(EVENT_EARTH_SHOCK, 2s);
+                            break;
                     }
                 }
-            }
-        }
-    }
 
-private:
-    float _hpct;
-    uint8 _flag;
-    GuidVector _copiesGUIDs;
+                if (!me->IsSummon() && me->GetHealthPct() < _hpct)
+                {
+                    DoCastAOE(SPELL_SUMMON_IMAGES, true);
+                    Talk(SAY_SPLIT);
+                    _hpct -= 25.0f;
+                    me->SetVisible(false);
+                    events.RescheduleEvent(EVENT_BLINK, 2s);
+                }
+
+                if (me->IsWithinMeleeRange(me->GetVictim()))
+                    events.RescheduleEvent(EVENT_EARTH_SHOCK, 2s);
+            }
+
+        private:
+            float _hpct;
+            uint8 _flag;
+        };
+
+    CreatureAI* GetAI(Creature* creature) const override
+    {
+        return GetAQ40AI<boss_skeramAI>(creature);
+    }
 };
 
-class spell_skeram_arcane_explosion : public SpellScript
+// 26192 - Arcane Explosion
+class spell_skeram_arcane_explosion : public SpellScriptLoader
 {
-    PrepareSpellScript(spell_skeram_arcane_explosion);
+    public:
+        spell_skeram_arcane_explosion() : SpellScriptLoader("spell_skeram_arcane_explosion") { }
 
-    void FilterTargets(std::list<WorldObject*>& targets)
-    {
-        targets.remove_if(PlayerOrPetCheck());
-    }
+        class spell_skeram_arcane_explosion_SpellScript : public SpellScript
+        {
+            void FilterTargets(std::list<WorldObject*>& targets)
+            {
+                targets.remove_if([](WorldObject* object) -> bool
+                {
+                    if (object->GetTypeId() == TYPEID_PLAYER)
+                        return false;
 
-    void Register() override
+                    if (Creature* creature = object->ToCreature())
+                        return !creature->IsPet();
+
+                    return true;
+                });
+            }
+
+            void Register() override
+            {
+                OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_skeram_arcane_explosion_SpellScript::FilterTargets, EFFECT_0, TARGET_UNIT_SRC_AREA_ENEMY);
+            }
+        };
+
+        SpellScript* GetSpellScript() const override
+        {
+            return new spell_skeram_arcane_explosion_SpellScript();
+        }
+};
+
+// 785 - True Fulfillment
+class spell_skeram_true_fulfillment : public SpellScriptLoader
+{
+public:
+    spell_skeram_true_fulfillment() : SpellScriptLoader("spell_skeram_true_fulfillment") { }
+
+    class spell_skeram_true_fulfillment_SpellScript : public SpellScript
     {
-        OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_skeram_arcane_explosion::FilterTargets, EFFECT_0, TARGET_UNIT_SRC_AREA_ENEMY);
+        bool Validate(SpellInfo const* /*spellInfo*/) override
+        {
+            return ValidateSpellInfo({ SPELL_TRUE_FULFILLMENT_2, SPELL_GENERIC_DISMOUNT });
+        }
+
+        void HandleEffect(SpellEffIndex /*effIndex*/)
+        {
+            GetCaster()->CastSpell(GetHitUnit(), SPELL_GENERIC_DISMOUNT, true);
+            GetCaster()->CastSpell(GetHitUnit(), SPELL_TRUE_FULFILLMENT_2, true);
+        }
+
+        void Register() override
+        {
+            OnEffectHitTarget += SpellEffectFn(spell_skeram_true_fulfillment_SpellScript::HandleEffect, EFFECT_0, SPELL_AURA_MOD_CHARM);
+        }
+    };
+
+    SpellScript* GetSpellScript() const override
+    {
+        return new spell_skeram_true_fulfillment_SpellScript();
     }
 };
 
 void AddSC_boss_skeram()
 {
-    RegisterTempleOfAhnQirajCreatureAI(boss_skeram);
-    RegisterSpellScript(spell_skeram_arcane_explosion);
+    new boss_skeram();
+    new spell_skeram_arcane_explosion();
+    new spell_skeram_true_fulfillment();
 }

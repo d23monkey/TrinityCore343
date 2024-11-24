@@ -1,90 +1,81 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "InstanceMapScript.h"
+#include "ScriptMgr.h"
 #include "InstanceScript.h"
 #include "mechanar.h"
 
 static DoorData const doorData[] =
 {
-    { GO_DOOR_MOARG_1,          DATA_GATEWATCHER_IRON_HAND,     DOOR_TYPE_PASSAGE },
-    { GO_DOOR_MOARG_2,          DATA_GATEWATCHER_GYROKILL,      DOOR_TYPE_PASSAGE },
-    { GO_DOOR_NETHERMANCER,     DATA_NETHERMANCER_SEPRETHREA,   DOOR_TYPE_ROOM },
-    { 0,                        0,                              DOOR_TYPE_ROOM }
+    { GO_DOOR_MOARG_1,          DATA_GATEWATCHER_IRON_HAND,     EncounterDoorBehavior::OpenWhenDone },
+    { GO_DOOR_MOARG_2,          DATA_GATEWATCHER_GYROKILL,      EncounterDoorBehavior::OpenWhenDone },
+    { GO_DOOR_NETHERMANCER,     DATA_NETHERMANCER_SEPRETHREA,   EncounterDoorBehavior::OpenWhenNotInProgress },
+    { 0,                        0,                              EncounterDoorBehavior::OpenWhenNotInProgress }
+};
+
+DungeonEncounterData const encounters[] =
+{
+    { DATA_GATEWATCHER_GYROKILL, {{ 1933 }} },
+    { DATA_GATEWATCHER_IRON_HAND, {{ 1934 }} },
+    { DATA_MECHANOLORD_CAPACITUS, {{ 1932 }} },
+    { DATA_NETHERMANCER_SEPRETHREA, {{ 1930 }} },
+    { DATA_PATHALEON_THE_CALCULATOR, {{ 1931 }} }
 };
 
 class instance_mechanar : public InstanceMapScript
 {
-public:
-    instance_mechanar(): InstanceMapScript("instance_mechanar", 554) { }
+    public:
+        instance_mechanar(): InstanceMapScript(MechanarScriptName, 554) { }
 
-    struct instance_mechanar_InstanceMapScript : public InstanceScript
-    {
-        instance_mechanar_InstanceMapScript(Map* map) : InstanceScript(map)
+        struct instance_mechanar_InstanceMapScript : public InstanceScript
         {
-            SetHeaders(DataHeader);
-            SetBossNumber(MAX_ENCOUNTER);
-            SetPersistentDataCount(MAX_DATA_INDEXES);
-            LoadDoorData(doorData);
-
-        }
-
-        void OnGameObjectCreate(GameObject* gameObject) override
-        {
-            switch (gameObject->GetEntry())
+            instance_mechanar_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
             {
-                case GO_DOOR_MOARG_1:
-                case GO_DOOR_MOARG_2:
-                case GO_DOOR_NETHERMANCER:
-                    AddDoor(gameObject);
-                    break;
-                default:
-                    break;
+                SetHeaders(DataHeader);
+                SetBossNumber(EncounterCount);
+                LoadDoorData(doorData);
+                LoadDungeonEncounterData(encounters);
             }
-        }
 
-        void OnGameObjectRemove(GameObject* gameObject) override
-        {
-            switch (gameObject->GetEntry())
+            bool SetBossState(uint32 type, EncounterState state) override
             {
-                case GO_DOOR_MOARG_1:
-                case GO_DOOR_MOARG_2:
-                case GO_DOOR_NETHERMANCER:
-                    RemoveDoor(gameObject);
-                    break;
-                default:
-                    break;
+                if (!InstanceScript::SetBossState(type, state))
+                    return false;
+
+                switch (type)
+                {
+                    case DATA_GATEWATCHER_GYROKILL:
+                    case DATA_GATEWATCHER_IRON_HAND:
+                    case DATA_MECHANOLORD_CAPACITUS:
+                    case DATA_NETHERMANCER_SEPRETHREA:
+                    case DATA_PATHALEON_THE_CALCULATOR:
+                        break;
+                    default:
+                        break;
+                }
+
+                return true;
             }
-        }
+        };
 
-        void OnCreatureCreate(Creature* creature) override
+        InstanceScript* GetInstanceScript(InstanceMap* map) const override
         {
-            if (creature->GetEntry() == NPC_PATHALEON_THE_CALCULATOR)
-                _pathaleonGUID = creature->GetGUID();
+            return new instance_mechanar_InstanceMapScript(map);
         }
-
-    private:
-        ObjectGuid _pathaleonGUID;
-    };
-
-    InstanceScript* GetInstanceScript(InstanceMap* map) const override
-    {
-        return new instance_mechanar_InstanceMapScript(map);
-    }
 };
 
 void AddSC_instance_mechanar()

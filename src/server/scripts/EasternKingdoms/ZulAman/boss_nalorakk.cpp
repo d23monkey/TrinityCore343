@@ -1,343 +1,110 @@
-/*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ /*
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CellImpl.h"
-#include "CreatureScript.h"
-#include "GridNotifiers.h"
-#include "GridNotifiersImpl.h"
+#include "ScriptMgr.h"
 #include "ScriptedCreature.h"
 #include "zulaman.h"
 
+enum Says
+{
+    SAY_WAVE_1              = 0,
+    SAY_WAVE_2              = 1,
+    SAY_WAVE_3              = 2,
+    SAY_WAVE_4              = 3,
+    SAY_AGGRO               = 4,
+    SAY_PLAYER_KILL         = 5,
+    SAY_SURGE               = 6,
+    EMOTE_SURGE             = 7,
+    EMOTE_BEAR              = 8,
+    SAY_BEAR                = 9,
+    SAY_TROLL               = 10,
+    SAY_DEATH               = 11
+};
+
 enum Spells
 {
-    SPELL_BERSERK           = 45078,
-
-    // Troll form
-    SPELL_BRUTALSWIPE       = 42384,
-    SPELL_MANGLE            = 42389,
-    SPELL_MANGLEEFFECT      = 44955,
-    SPELL_SURGE             = 42402,
-    SPELL_BEARFORM          = 42377,
-
-    // Bear form
-    SPELL_LACERATINGSLASH   = 42395,
-    SPELL_RENDFLESH         = 42397,
-    SPELL_DEAFENINGROAR     = 42398
 };
 
-enum Talks
+enum Events
 {
-    SAY_WAVE1 = 0,
-    SAY_WAVE2,
-    SAY_WAVE3,
-    SAY_WAVE4,
-    SAY_AGGRO,
-    SAY_SURGE,
-    SAY_SHIFTEDTOBEAR,
-    SAY_SHIFTEDTOTROLL,
-    SAY_BERSERK,
-    SAY_KILL_ONE,
-    SAY_KILL_TWO,
-    SAY_DEATH,
-    SAY_NALORAKK_EVENT1, // Not implemented
-    SAY_NALORAKK_EVENT2, // Not implemented
-    SAY_RUN_AWAY,
-    EMOTE_BEAR
 };
 
-enum Phases
+class boss_nalorakk : public CreatureScript
 {
-    PHASE_SEND_GUARDS_1         = 0,
-    PHASE_SEND_GUARDS_2         = 1,
-    PHASE_SEND_GUARDS_3         = 2,
-    PHASE_SEND_GUARDS_4         = 3,
-    PHASE_SEND_GUARDS_5         = 4,
-    PHASE_START_COMBAT          = 5
-};
+    public:
 
-enum NalorakkGroups
-{
-    GROUP_CHECK_DEAD            = 1,
-    GROUP_MOVE                  = 2,
-    GROUP_BERSERK               = 3,
-    GROUP_HUMAN                 = 4,
-    GROUP_BEAR                  = 5
-};
+        boss_nalorakk() : CreatureScript("boss_nalorakk") { }
 
-struct boss_nalorakk : public BossAI
-{
-    boss_nalorakk(Creature* creature) : BossAI(creature, DATA_NALORAKK)
-    {
-        _phase = PHASE_SEND_GUARDS_1;
-        _ranIntro = false;
-        _active = true;
-        creature->SetReactState(REACT_PASSIVE);
-        me->SetImmuneToAll(true);
-    }
-
-    void Reset() override
-    {
-        BossAI::Reset();
-        _waveList.clear();
-        _introScheduler.CancelAll();
-        if (_bearForm)
+        struct boss_nalorakkAI : public BossAI
         {
-            me->RemoveAurasDueToSpell(SPELL_BEARFORM);
-            _bearForm = false;
-        }
-        if (_ranIntro)
-        {
-            _phase = PHASE_START_COMBAT;
-            me->SetReactState(REACT_AGGRESSIVE);
-            _active = false;
-        }
-    }
+            boss_nalorakkAI(Creature* creature) : BossAI(creature, DATA_NALORAKK) { }
 
-    void MoveInLineOfSight(Unit* who) override
-    {
-        if (who->IsPlayer() && _phase < PHASE_START_COMBAT && _active)
-        {
-            _active = false;
-            switch (_phase)
+            void Reset() override
             {
-                case PHASE_SEND_GUARDS_1:
-                    me->GetCreaturesWithEntryInRange(_waveList, 10.0f, NPC_AMANISHI_AXE_THROWER);
-                    me->GetCreaturesWithEntryInRange(_waveList, 10.0f, NPC_AMANISHI_TRIBESMAN);
-                    GroupedAttack(_waveList);
-                    Talk(SAY_WAVE1);
-                    _introScheduler.Schedule(5s, GROUP_CHECK_DEAD, [this](TaskContext context)
-                    {
-                        if (CheckFullyDeadGroup(_waveList))
-                            if (_phase == PHASE_SEND_GUARDS_1)
-                            {
-                                _introScheduler.CancelGroup(GROUP_CHECK_DEAD);
-                                _waveList.clear();
-                                me->GetMotionMaster()->MovePath(me->GetEntry()*100+1, false);
-                                Talk(SAY_RUN_AWAY);
-                                _introScheduler.Schedule(5s, [this](TaskContext)
-                                {
-                                    me->SetFacingTo(6.25f);
-                                    _active = true;
-                                });
-                                _phase = PHASE_SEND_GUARDS_2;
-                            }
-                        context.Repeat(5s);
-                    });
-                    break;
-                case PHASE_SEND_GUARDS_2:
-                    me->GetCreaturesWithEntryInRange(_waveList, 10.0f, NPC_AMANISHI_AXE_THROWER);
-                    me->GetCreaturesWithEntryInRange(_waveList, 10.0f, NPC_AMANISHI_TRIBESMAN);
-                    me->GetCreaturesWithEntryInRange(_waveList, 10.0f, NPC_AMANISHI_MEDICINE_MAN);
-                    GroupedAttack(_waveList);
-                    Talk(SAY_WAVE2);
-                    _introScheduler.Schedule(5s, GROUP_CHECK_DEAD, [this](TaskContext context)
-                    {
-                        if (CheckFullyDeadGroup(_waveList))
-                            if (_phase == PHASE_SEND_GUARDS_2)
-                            {
-                                _introScheduler.CancelGroup(GROUP_CHECK_DEAD);
-                                _waveList.clear();
-                                Talk(SAY_RUN_AWAY);
-                                me->GetMotionMaster()->MovePath(me->GetEntry()*100+2, false);
-                                _introScheduler.Schedule(6s, [this](TaskContext)
-                                {
-                                    me->SetFacingTo(1.54f);
-                                    _active = true;
-                                });
-                                _phase = PHASE_SEND_GUARDS_3;
-                            }
-                        context.Repeat(5s);
-                    });
-                    break;
-                case PHASE_SEND_GUARDS_3:
-                    me->GetCreaturesWithEntryInRange(_waveList, 10.0f, NPC_AMANISHI_WARBRINGER);
-                    GroupedAttack(_waveList);
-                    Talk(SAY_WAVE3);
-                    _introScheduler.Schedule(5s, GROUP_CHECK_DEAD, [this](TaskContext context)
-                    {
-                        if (CheckFullyDeadGroup(_waveList))
-                            if (_phase == PHASE_SEND_GUARDS_3)
-                            {
-                                _introScheduler.CancelGroup(GROUP_CHECK_DEAD);
-                                _waveList.clear();
-                                Talk(SAY_RUN_AWAY);
-                                me->GetMotionMaster()->MovePath(me->GetEntry() * 100 + 3, false);
-                                _introScheduler.Schedule(6s, [this](TaskContext)
-                                {
-                                    me->SetFacingTo(1.54f);
-                                    _active = true;
-                                });
-                                _phase = PHASE_SEND_GUARDS_4;
-                            }
-                        context.Repeat(5s);
-                    });
-                    break;
-                case PHASE_SEND_GUARDS_4:
-                    me->GetCreaturesWithEntryInRange(_waveList, 25.0f, NPC_AMANISHI_WARBRINGER);
-                    me->GetCreaturesWithEntryInRange(_waveList, 25.0f, NPC_AMANISHI_MEDICINE_MAN);
-                    GroupedAttack(_waveList);
-                    Talk(SAY_WAVE4);
-                    _waveList.clear();
-                    _phase = PHASE_START_COMBAT;
-                    _ranIntro = true;
-                    me->SetImmuneToAll(false);
-                    me->SetReactState(REACT_AGGRESSIVE);
-                    me->SetHomePosition(me->GetPosition());
-                    break;
+                _Reset();
             }
-        }
-        BossAI::MoveInLineOfSight(who);
-    }
 
-    void JustEngagedWith(Unit* who) override
-    {
-        BossAI::JustEngagedWith(who);
-        Talk(SAY_AGGRO);
-        scheduler.Schedule(15s, 20s, GROUP_HUMAN, [this](TaskContext context)
-        {
-            Talk(SAY_SURGE);
-            DoCastRandomTarget(SPELL_SURGE, 0, 45.0f, false, false, false);
-            context.Repeat();
-        }).Schedule(7s, 12s, GROUP_HUMAN, [this](TaskContext context)
-        {
-            DoCastVictim(SPELL_BRUTALSWIPE);
-            context.Repeat();
-        }).Schedule(10s, 15s, GROUP_HUMAN, [this](TaskContext context)
-        {
-            if (me->GetVictim() && !me->GetVictim()->HasAura(SPELL_MANGLE))
+            void JustEngagedWith(Unit* who) override
             {
-                DoCastVictim(SPELL_MANGLE);
-                context.Repeat(1s);
+                Talk(SAY_AGGRO);
+                BossAI::JustEngagedWith(who);
             }
-            else
-                context.Repeat();
-        }).Schedule(10min, GROUP_BERSERK, [this](TaskContext)
-        {
-            Talk(SAY_BERSERK);
-            DoCastSelf(SPELL_BERSERK, true);
-        }).Schedule(45s, 50s, GROUP_HUMAN, [this](TaskContext)
-        {
-            ShapeShift(_bearForm);
-        });
-    }
 
-    void ShapeShift(bool currentlyInBearForm)
-    {
-        if (currentlyInBearForm)
-        {
-            Talk(SAY_SHIFTEDTOTROLL);
-            scheduler.CancelGroup(GROUP_BEAR);
-            _bearForm = false;
-
-            me->SetCanDualWield(true);
-
-            scheduler.Schedule(15s, 20s, GROUP_HUMAN, [this](TaskContext context)
+            void JustDied(Unit* /*killer*/) override
             {
-                Talk(SAY_SURGE);
-                DoCastRandomTarget(SPELL_SURGE, 0, 45.0f, false, false, false);
-                context.Repeat();
-            }).Schedule(7s, 12s, GROUP_HUMAN, [this](TaskContext context)
-            {
-                DoCastVictim(SPELL_BRUTALSWIPE);
-                context.Repeat();
-            }).Schedule(10s, 15s, GROUP_HUMAN, [this](TaskContext context)
-            {
-                DoCastVictim(SPELL_MANGLE);
-                context.Repeat();
-            }).Schedule(10min, GROUP_BERSERK, [this](TaskContext)
-            {
-                Talk(SAY_BERSERK);
-                DoCastSelf(SPELL_BERSERK, true);
-            }).Schedule(45s, 50s, GROUP_HUMAN, [this](TaskContext)
-            {
-                ShapeShift(_bearForm);
-            });
-        }
-        else
-        {
-            Talk(SAY_SHIFTEDTOBEAR);
-            Talk(EMOTE_BEAR);
-            DoCastSelf(SPELL_BEARFORM, true);
-            scheduler.CancelGroup(GROUP_HUMAN);
-            _bearForm = true;
-
-            me->SetCanDualWield(false);
-
-            scheduler.Schedule(2s, GROUP_BEAR, [this](TaskContext context)
-            {
-                DoCastVictim(SPELL_LACERATINGSLASH);
-                context.Repeat(18s, 23s);
-            }).Schedule(3s, GROUP_BEAR, [this](TaskContext context)
-            {
-                DoCastVictim(SPELL_RENDFLESH);
-                context.Repeat(5s, 10s);
-            }).Schedule(5s, 10s, GROUP_BEAR, [this](TaskContext context)
-            {
-                DoCastSelf(SPELL_DEAFENINGROAR);
-                context.Repeat(15s, 20s);
-            }).Schedule(30s, GROUP_BEAR, [this](TaskContext)
-            {
-                ShapeShift(_bearForm);
-            });
-        }
-    }
-
-    void GroupedAttack(std::list<Creature* > attackerList)
-    {
-        for (Creature* attacker : attackerList)
-        {
-            attacker->SetInCombatWithZone();
-        }
-    }
-
-    void UpdateAI(uint32 diff) override
-    {
-        _introScheduler.Update(diff);
-        BossAI::UpdateAI(diff);
-    }
-
-    bool CheckFullyDeadGroup(std::list<Creature* > groupToCheck)
-    {
-        for (Creature* member : groupToCheck)
-        {
-            if (member->IsAlive())
-            {
-                return false;
+                Talk(SAY_DEATH);
+                _JustDied();
             }
+
+            void KilledUnit(Unit* victim) override
+            {
+                if (victim->GetTypeId() == TYPEID_PLAYER)
+                    Talk(SAY_PLAYER_KILL);
+            }
+
+            void UpdateAI(uint32 diff) override
+            {
+                if (!UpdateVictim())
+                    return;
+
+                events.Update(diff);
+
+                if (me->HasUnitState(UNIT_STATE_CASTING))
+                    return;
+                /*
+                while (uint32 eventId = events.ExecuteEvent())
+                {
+                    switch (eventId)
+                    {
+                        default:
+                            break;
+                    }
+                }
+                */
+            }
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
+        {
+            return GetZulAmanAI<boss_nalorakkAI>(creature);
         }
-        return true;
-    }
-
-    void JustDied(Unit* killer) override
-    {
-        BossAI::JustDied(killer);
-        Talk(SAY_DEATH);
-    }
-
-private:
-    uint8 _phase;
-    bool _ranIntro;
-    bool _active;
-    bool _bearForm;
-    TaskScheduler _introScheduler;
-    std::list<Creature *> _waveList;
 };
 
 void AddSC_boss_nalorakk()
 {
-    RegisterZulAmanCreatureAI(boss_nalorakk);
+    new boss_nalorakk();
 }

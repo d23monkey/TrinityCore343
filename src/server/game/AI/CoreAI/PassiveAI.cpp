@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -17,10 +17,24 @@
 
 #include "PassiveAI.h"
 #include "Creature.h"
+#include "MovementDefines.h"
 
-PassiveAI::PassiveAI(Creature* c) : CreatureAI(c) { me->SetReactState(REACT_PASSIVE); }
-PossessedAI::PossessedAI(Creature* c) : CreatureAI(c) { me->SetReactState(REACT_PASSIVE); }
-NullCreatureAI::NullCreatureAI(Creature* c) : CreatureAI(c) { me->SetReactState(REACT_PASSIVE); }
+PassiveAI::PassiveAI(Creature* c, uint32 scriptId) : CreatureAI(c, scriptId)
+{
+    me->SetReactState(REACT_PASSIVE);
+    me->SetCanMelee(false);
+}
+
+PossessedAI::PossessedAI(Creature* c, uint32 scriptId) : CreatureAI(c, scriptId)
+{
+    me->SetReactState(REACT_PASSIVE);
+}
+
+NullCreatureAI::NullCreatureAI(Creature* c, uint32 scriptId) : CreatureAI(c, scriptId)
+{
+    me->SetReactState(REACT_PASSIVE);
+    me->SetCanMelee(false);
+}
 
 int32 NullCreatureAI::Permissible(Creature const* creature)
 {
@@ -35,8 +49,8 @@ int32 NullCreatureAI::Permissible(Creature const* creature)
 
 void PassiveAI::UpdateAI(uint32)
 {
-    if (me->IsInCombat() && me->getAttackers().empty())
-        EnterEvadeMode(EVADE_REASON_NO_HOSTILES);
+    if (me->IsEngaged() && !me->IsInCombat())
+        EnterEvadeMode(EvadeReason::NoHostiles);
 }
 
 void PossessedAI::AttackStart(Unit* target)
@@ -50,8 +64,6 @@ void PossessedAI::UpdateAI(uint32 /*diff*/)
     {
         if (!me->IsValidAttackTarget(me->GetVictim()))
             me->AttackStop();
-        else
-            DoMeleeAttackIfReady();
     }
 }
 
@@ -61,36 +73,22 @@ void PossessedAI::JustDied(Unit* /*u*/)
     me->RemoveDynamicFlag(UNIT_DYNFLAG_LOOTABLE);
 }
 
-void PossessedAI::KilledUnit(Unit*  /*victim*/)
-{
-    // We killed a creature, disable victim's loot
-    //if (victim->IsCreature())
-    //    victim->RemoveDynamicFlag(UNIT_DYNFLAG_LOOTABLE);
-}
-
-void CritterAI::JustEngagedWith(Unit* who)
+void CritterAI::JustEngagedWith(Unit* /*who*/)
 {
     if (!me->HasUnitState(UNIT_STATE_FLEEING))
-    {
-        me->SetControlled(true, UNIT_STATE_FLEEING, who);
-    }
+        me->SetControlled(true, UNIT_STATE_FLEEING);
 }
 
 void CritterAI::MovementInform(uint32 type, uint32 /*id*/)
 {
     if (type == TIMED_FLEEING_MOTION_TYPE)
-    {
-        EnterEvadeMode(EVADE_REASON_OTHER);
-    }
+        EnterEvadeMode(EvadeReason::Other);
 }
 
 void CritterAI::EnterEvadeMode(EvadeReason why)
 {
     if (me->HasUnitState(UNIT_STATE_FLEEING))
-    {
         me->SetControlled(false, UNIT_STATE_FLEEING);
-    }
-
     CreatureAI::EnterEvadeMode(why);
 }
 
@@ -105,7 +103,11 @@ int32 CritterAI::Permissible(Creature const* creature)
 void TriggerAI::IsSummonedBy(WorldObject* summoner)
 {
     if (me->m_spells[0])
-        me->CastSpell(me, me->m_spells[0], false, 0, 0, summoner ? summoner->GetGUID() : ObjectGuid::Empty);
+    {
+        CastSpellExtraArgs extra;
+        extra.OriginalCaster = summoner->GetGUID();
+        me->CastSpell(me, me->m_spells[0], extra);
+    }
 }
 
 int32 TriggerAI::Permissible(Creature const* creature)

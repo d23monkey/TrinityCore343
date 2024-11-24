@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -22,19 +22,19 @@ Comment: All gm related commands
 Category: commandscripts
 EndScriptData */
 
+#include "ScriptMgr.h"
 #include "AccountMgr.h"
 #include "Chat.h"
-#include "CommandScript.h"
+#include "ChatCommand.h"
 #include "DatabaseEnv.h"
 #include "Language.h"
 #include "ObjectAccessor.h"
-#include "Opcodes.h"
 #include "Player.h"
 #include "Realm.h"
 #include "World.h"
 #include "WorldSession.h"
 
-using namespace Acore::ChatCommands;
+using namespace Trinity::ChatCommands;
 
 class gm_commandscript : public CommandScript
 {
@@ -45,17 +45,17 @@ public:
     {
         static ChatCommandTable gmCommandTable =
         {
-            { "chat",    HandleGMChatCommand,       SEC_GAMEMASTER,     Console::No  },
-            { "fly",     HandleGMFlyCommand,        SEC_GAMEMASTER,     Console::No  },
-            { "ingame",  HandleGMListIngameCommand, SEC_PLAYER,         Console::Yes },
-            { "list",    HandleGMListFullCommand,   SEC_ADMINISTRATOR,  Console::Yes },
-            { "visible", HandleGMVisibleCommand,    SEC_GAMEMASTER,     Console::No  },
-            { "on",      HandleGMOnCommand,         SEC_MODERATOR,      Console::No  },
-            { "off",     HandleGMOffCommand,        SEC_MODERATOR,      Console::No  }
+            { "chat",       HandleGMChatCommand,        rbac::RBAC_PERM_COMMAND_GM_CHAT,        Console::No },
+            { "fly",        HandleGMFlyCommand,         rbac::RBAC_PERM_COMMAND_GM_FLY,         Console::No },
+            { "ingame",     HandleGMListIngameCommand,  rbac::RBAC_PERM_COMMAND_GM_INGAME,      Console::Yes },
+            { "list",       HandleGMListFullCommand,    rbac::RBAC_PERM_COMMAND_GM_LIST,        Console::Yes },
+            { "visible",    HandleGMVisibleCommand,     rbac::RBAC_PERM_COMMAND_GM_VISIBLE,     Console::No },
+            { "on",         HandleGMOnCommand,          rbac::RBAC_PERM_COMMAND_GM,             Console::No },
+            { "off",        HandleGMOffCommand,         rbac::RBAC_PERM_COMMAND_GM,             Console::No },
         };
         static ChatCommandTable commandTable =
         {
-            { "gm", gmCommandTable }
+            { "gm", gmCommandTable },
         };
         return commandTable;
     }
@@ -67,28 +67,29 @@ public:
         {
             if (!enableArg)
             {
-                if (!AccountMgr::IsPlayerAccount(session->GetSecurity()) && session->GetPlayer()->isGMChat())
-                    handler->SendNotification(LANG_GM_CHAT_ON);
+                if (session->HasPermission(rbac::RBAC_PERM_CHAT_USE_STAFF_BADGE) && session->GetPlayer()->isGMChat())
+                    session->SendNotification(LANG_GM_CHAT_ON);
                 else
-                    handler->SendNotification(LANG_GM_CHAT_OFF);
+                    session->SendNotification(LANG_GM_CHAT_OFF);
                 return true;
             }
 
             if (*enableArg)
             {
                 session->GetPlayer()->SetGMChat(true);
-                handler->SendNotification(LANG_GM_CHAT_ON);
+                session->SendNotification(LANG_GM_CHAT_ON);
                 return true;
             }
             else
             {
                 session->GetPlayer()->SetGMChat(false);
-                handler->SendNotification(LANG_GM_CHAT_OFF);
+                session->SendNotification(LANG_GM_CHAT_OFF);
                 return true;
             }
         }
 
-        handler->SendErrorMessage(LANG_USE_BOL);
+        handler->SendSysMessage(LANG_USE_BOL);
+        handler->SetSentErrorMessage(true);
         return false;
     }
 
@@ -98,16 +99,18 @@ public:
         if (!target)
             target = handler->GetSession()->GetPlayer();
 
-        WorldPacket data(12);
         if (enable)
-            data.SetOpcode(SMSG_MOVE_SET_CAN_FLY);
+        {
+            target->SetCanFly(true);
+            target->SetCanTransitionBetweenSwimAndFly(true);
+        }
         else
-            data.SetOpcode(SMSG_MOVE_UNSET_CAN_FLY);
+        {
+            target->SetCanFly(false);
+            target->SetCanTransitionBetweenSwimAndFly(false);
+        }
 
-        data << target->GetPackGUID();
-        data << uint32(0);                                      // unknown
-        target->SendMessageToSet(&data, true);
-        handler->PSendSysMessage(LANG_COMMAND_FLYMODE_STATUS, handler->GetNameLink(target), enable ? "on" : "off");
+        handler->PSendSysMessage(LANG_COMMAND_FLYMODE_STATUS, handler->GetNameLink(target).c_str(), enable ? "on" : "off");
         return true;
     }
 
@@ -117,11 +120,12 @@ public:
         bool footer = false;
 
         std::shared_lock<std::shared_mutex> lock(*HashMapHolder<Player>::GetLock());
-        for (auto const& [playerGuid, player] : ObjectAccessor::GetPlayers())
+        for (auto&& [playerGuid, player] : ObjectAccessor::GetPlayers())
         {
             AccountTypes playerSec = player->GetSession()->GetSecurity();
             if ((player->IsGameMaster() ||
-                 (!AccountMgr::IsPlayerAccount(playerSec) && playerSec <= AccountTypes(sWorld->getIntConfig(CONFIG_GM_LEVEL_IN_GM_LIST)))) &&
+                (player->GetSession()->HasPermission(rbac::RBAC_PERM_COMMANDS_APPEAR_IN_GM_LIST) &&
+                    playerSec <= AccountTypes(sWorld->getIntConfig(CONFIG_GM_LEVEL_IN_GM_LIST)))) &&
                 (!handler->GetSession() || player->IsVisibleGloballyFor(handler->GetSession()->GetPlayer())))
             {
                 if (first)
@@ -139,9 +143,9 @@ public:
                 if ((max + max2 + size) == 16)
                     max2 = max - 1;
                 if (handler->GetSession())
-                    handler->PSendSysMessage("|    {} GMLevel {}", name, security);
+                    handler->PSendSysMessage("|    %s GMLevel %u", name.c_str(), security);
                 else
-                    handler->PSendSysMessage("|{}{}{}|   {}  |", max, " ", name, max2, " ", security);
+                    handler->PSendSysMessage("|%*s%s%*s|   %u  |", max, " ", name.c_str(), max2, " ", security);
             }
         }
         if (footer)
@@ -156,8 +160,8 @@ public:
     {
         ///- Get the accounts with GM Level >0
         LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_GM_ACCOUNTS);
-        stmt->SetData(0, uint8(SEC_MODERATOR));
-        stmt->SetData(1, int32(realm.Id.Realm));
+        stmt->setUInt8(0, uint8(SEC_MODERATOR));
+        stmt->setInt32(1, int32(realm.Id.Realm));
         PreparedQueryResult result = LoginDatabase.Query(stmt);
 
         if (result)
@@ -168,16 +172,16 @@ public:
             do
             {
                 Field* fields = result->Fetch();
-                std::string name = fields[0].Get<std::string>();
-                uint8 security = fields[1].Get<uint8>();
-                uint8 max = (16 - name.length()) / 2;
+                char const* name = fields[0].GetCString();
+                uint8 security = fields[1].GetUInt8();
+                uint8 max = (16 - strlen(name)) / 2;
                 uint8 max2 = max;
-                if ((max + max2 + name.length()) == 16)
+                if ((max + max2 + strlen(name)) == 16)
                     max2 = max - 1;
                 if (handler->GetSession())
-                    handler->PSendSysMessage("|    {} GMLevel {}", name, security);
+                    handler->PSendSysMessage("|    %s GMLevel %u", name, security);
                 else
-                    handler->PSendSysMessage("|{}{}{}|   {}  |", max, " ", name, max2, " ", security);
+                    handler->PSendSysMessage("|%*s%s%*s|   %u  |", max, " ", name, max2, " ", security);
             } while (result->NextRow());
             handler->SendSysMessage("========================");
         }
@@ -193,7 +197,7 @@ public:
 
         if (!visibleArg)
         {
-            handler->PSendSysMessage(LANG_YOU_ARE, _player->isGMVisible() ? handler->GetAcoreString(LANG_VISIBLE) : handler->GetAcoreString(LANG_INVISIBLE));
+            handler->PSendSysMessage(LANG_YOU_ARE, _player->isGMVisible() ? handler->GetTrinityString(LANG_VISIBLE) : handler->GetTrinityString(LANG_INVISIBLE));
             return true;
         }
 
@@ -206,14 +210,14 @@ public:
 
             _player->SetGMVisible(true);
             _player->UpdateObjectVisibility();
-            handler->SendNotification(LANG_INVISIBLE_VISIBLE);
+            handler->GetSession()->SendNotification(LANG_INVISIBLE_VISIBLE);
         }
         else
         {
             _player->AddAura(VISUAL_AURA, _player);
             _player->SetGMVisible(false);
             _player->UpdateObjectVisibility();
-            handler->SendNotification(LANG_INVISIBLE_INVISIBLE);
+            handler->GetSession()->SendNotification(LANG_INVISIBLE_INVISIBLE);
         }
 
         return true;
@@ -223,7 +227,7 @@ public:
     {
         handler->GetPlayer()->SetGameMaster(true);
         handler->GetPlayer()->UpdateTriggerVisibility();
-        handler->SendNotification(LANG_GM_ON);
+        handler->GetSession()->SendNotification(LANG_GM_ON);
         return true;
     }
 
@@ -231,7 +235,7 @@ public:
     {
         handler->GetPlayer()->SetGameMaster(false);
         handler->GetPlayer()->UpdateTriggerVisibility();
-        handler->SendNotification(LANG_GM_OFF);
+        handler->GetSession()->SendNotification(LANG_GM_OFF);
         return true;
     }
 };

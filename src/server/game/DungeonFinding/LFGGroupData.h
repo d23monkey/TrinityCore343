@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -22,11 +22,17 @@
 
 namespace lfg
 {
-    /**
-        Stores all lfg data needed about a group.
-    */
-    class LfgGroupData
-    {
+
+enum LfgGroupEnum
+{
+    LFG_GROUP_MAX_KICKS                           = 3,
+};
+
+/**
+    Stores all lfg data needed about a group.
+*/
+class TC_GAME_API LfgGroupData
+{
     public:
         LfgGroupData();
         ~LfgGroupData();
@@ -48,30 +54,33 @@ namespace lfg
         void DecreaseKicksLeft();
 
         // General
-        [[nodiscard]] LfgState GetState() const;
-        [[nodiscard]] LfgState GetOldState() const;
-        [[nodiscard]] LfgGuidSet const& GetPlayers() const;
-        [[nodiscard]] uint8 GetPlayerCount() const;
-        [[nodiscard]] ObjectGuid GetLeader() const;
+        LfgState GetState() const;
+        LfgState GetOldState() const;
+        GuidSet const& GetPlayers() const;
+        uint8 GetPlayerCount() const;
+        ObjectGuid GetLeader() const;
 
         // Dungeon
-        [[nodiscard]] uint32 GetDungeon(bool asId = true) const;
+        uint32 GetDungeon(bool asId = true) const;
 
         // VoteKick
-        [[nodiscard]] uint8 GetKicksLeft() const;
+        uint8 GetKicksLeft() const;
+
+        void SetVoteKick(bool active);
+        bool IsVoteKickActive() const;
 
     private:
         // General
-        LfgState m_State;                   ///< State if group in LFG
-        LfgState m_OldState;                ///< Old State
-        ObjectGuid m_Leader;                ///< Leader GUID
-        LfgGuidSet m_Players;               ///< Players in group
+        LfgState m_State;                                  ///< State if group in LFG
+        LfgState m_OldState;                               ///< Old State
+        ObjectGuid m_Leader;                               ///< Leader GUID
+        GuidSet m_Players;                                 ///< Players in group
         // Dungeon
-        uint32 m_Dungeon;                   ///< Dungeon entry
-        bool _isLFGGroup;
+        uint32 m_Dungeon;                                  ///< Dungeon entry
         // Vote Kick
-        uint8 m_KicksLeft;                  ///< Number of kicks left
-    };
+        uint8 m_KicksLeft;                                 ///< Number of kicks left
+        bool m_VoteKickActive;
+};
 
 } // namespace lfg
 

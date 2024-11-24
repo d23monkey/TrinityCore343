@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,18 +18,18 @@
 #ifndef _MAP_BUILDER_H
 #define _MAP_BUILDER_H
 
-#include <atomic>
-#include <list>
-#include <set>
-#include <thread>
 #include <vector>
+#include <set>
+#include <list>
+#include <atomic>
+#include <thread>
 
-#include "Optional.h"
 #include "TerrainBuilder.h"
 
-#include "DetourNavMesh.h"
-#include "PCQueue.h"
 #include "Recast.h"
+#include "DetourNavMesh.h"
+#include "Optional.h"
+#include "ProducerConsumerQueue.h"
 
 using namespace VMAP;
 
@@ -37,15 +37,15 @@ namespace MMAP
 {
     struct MapTiles
     {
-        MapTiles() : m_mapId(uint32(-1)) {}
+        MapTiles() : m_mapId(uint32(-1)), m_tiles(nullptr) {}
 
         MapTiles(uint32 id, std::set<uint32>* tiles) : m_mapId(id), m_tiles(tiles) {}
-        ~MapTiles() = default;
+        ~MapTiles() {}
 
         uint32 m_mapId;
-        std::set<uint32>* m_tiles{nullptr};
+        std::set<uint32>* m_tiles;
 
-        bool operator==(uint32 id) const
+        bool operator==(uint32 id)
         {
             return m_mapId == id;
         }
@@ -55,7 +55,7 @@ namespace MMAP
 
     struct Tile
     {
-        Tile()  {}
+        Tile() : chf(nullptr), solid(nullptr), cset(nullptr), pmesh(nullptr), dmesh(nullptr) {}
         ~Tile()
         {
             rcFreeCompactHeightfield(chf);
@@ -64,11 +64,11 @@ namespace MMAP
             rcFreePolyMesh(pmesh);
             rcFreePolyMeshDetail(dmesh);
         }
-        rcCompactHeightfield* chf{nullptr};
-        rcHeightfield* solid{nullptr};
-        rcContourSet* cset{nullptr};
-        rcPolyMesh* pmesh{nullptr};
-        rcPolyMeshDetail* dmesh{nullptr};
+        rcCompactHeightfield* chf;
+        rcHeightfield* solid;
+        rcContourSet* cset;
+        rcPolyMesh* pmesh;
+        rcPolyMeshDetail* dmesh;
     };
 
     struct TileConfig
@@ -102,118 +102,126 @@ namespace MMAP
         dtNavMeshParams m_navMeshParams;
     };
 
-    /// @todo: move this to its own file. For now it will stay here to keep the changes to a minimum, especially in the cpp file
+    // ToDo: move this to its own file. For now it will stay here to keep the changes to a minimum, especially in the cpp file
     class MapBuilder;
     class TileBuilder
     {
-    public:
-        TileBuilder(MapBuilder* mapBuilder,
-                    bool skipLiquid,
-                    bool bigBaseUnit,
-                    bool debugOutput);
+        public:
+            TileBuilder(MapBuilder* mapBuilder,
+                bool skipLiquid,
+                bool bigBaseUnit,
+                bool debugOutput);
 
-        TileBuilder(TileBuilder&&) = default;
-        ~TileBuilder();
+            TileBuilder(TileBuilder&&) = default;
+            ~TileBuilder();
 
-        void WorkerThread();
-        void WaitCompletion();
+            void WorkerThread();
+            void WaitCompletion();
 
-        void buildTile(uint32 mapID, uint32 tileX, uint32 tileY, dtNavMesh* navMesh);
-        // move map building
-        void buildMoveMapTile(uint32 mapID,
-                              uint32 tileX,
-                              uint32 tileY,
-                              MeshData& meshData,
-                              float bmin[3],
-                              float bmax[3],
-                              dtNavMesh* navMesh);
+            void buildTile(uint32 mapID, uint32 tileX, uint32 tileY, dtNavMesh* navMesh);
+            // move map building
+            void buildMoveMapTile(uint32 mapID,
+                uint32 tileX,
+                uint32 tileY,
+                MeshData& meshData,
+                float bmin[3],
+                float bmax[3],
+                dtNavMesh* navMesh);
 
-        bool shouldSkipTile(uint32 mapID, uint32 tileX, uint32 tileY) const;
+            bool shouldSkipTile(uint32 mapID, uint32 tileX, uint32 tileY) const;
 
-    private:
-        bool m_bigBaseUnit;
-        bool m_debugOutput;
+        private:
+            bool m_bigBaseUnit;
+            bool m_debugOutput;
 
-        MapBuilder* m_mapBuilder;
-        TerrainBuilder* m_terrainBuilder;
-        std::thread m_workerThread;
-        // build performance - not really used for now
-        rcContext* m_rcContext;
+            MapBuilder* m_mapBuilder;
+            TerrainBuilder* m_terrainBuilder;
+            std::thread m_workerThread;
+            // build performance - not really used for now
+            rcContext* m_rcContext;
     };
 
     class MapBuilder
     {
         friend class TileBuilder;
-    public:
-        MapBuilder(float maxWalkableAngle,
-                   bool skipLiquid,
-                   bool skipContinents,
-                   bool skipJunkMaps,
-                   bool skipBattlegrounds,
-                   bool debugOutput,
-                   bool bigBaseUnit,
-                   int mapid,
-                   char const* offMeshFilePath,
-                   unsigned int threads);
 
-        ~MapBuilder();
+        public:
+            MapBuilder(Optional<float> maxWalkableAngle,
+                Optional<float> maxWalkableAngleNotSteep,
+                bool skipLiquid,
+                bool skipContinents,
+                bool skipJunkMaps,
+                bool skipBattlegrounds,
+                bool debugOutput,
+                bool bigBaseUnit,
+                int mapid,
+                char const* offMeshFilePath,
+                unsigned int threads);
 
-        void buildMeshFromFile(char* name);
+            ~MapBuilder();
 
-        // builds an mmap tile for the specified map and its mesh
-        void buildSingleTile(uint32 mapID, uint32 tileX, uint32 tileY);
+            void buildMeshFromFile(char* name);
 
-        // builds list of maps, then builds all of mmap tiles (based on the skip settings)
-        void buildMaps(Optional<uint32> mapID);
+            // builds an mmap tile for the specified map and its mesh
+            void buildSingleTile(uint32 mapID, uint32 tileX, uint32 tileY);
 
-    private:
-        // builds all mmap tiles for the specified map id (ignores skip settings)
-        void buildMap(uint32 mapID);
-        // detect maps and tiles
-        void discoverTiles();
-        std::set<uint32>* getTileList(uint32 mapID);
+            // builds list of maps, then builds all of mmap tiles (based on the skip settings)
+            void buildMaps(Optional<uint32> mapID);
 
-        void buildNavMesh(uint32 mapID, dtNavMesh*& navMesh);
+        private:
+            // builds all mmap tiles for the specified map id (ignores skip settings)
+            void buildMap(uint32 mapID);
+            // detect maps and tiles
+            void discoverTiles();
+            std::set<uint32>* getTileList(uint32 mapID);
 
-        void getTileBounds(uint32 tileX, uint32 tileY,
-                           float* verts, int vertCount,
-                           float* bmin, float* bmax) const;
-        void getGridBounds(uint32 mapID, uint32& minX, uint32& minY, uint32& maxX, uint32& maxY) const;
+            void buildNavMesh(uint32 mapID, dtNavMesh* &navMesh);
 
-        bool shouldSkipMap(uint32 mapID) const;
-        bool isTransportMap(uint32 mapID) const;
-        bool isContinentMap(uint32 mapID) const;
+            void getTileBounds(uint32 tileX, uint32 tileY,
+                float* verts, int vertCount,
+                float* bmin, float* bmax) const;
+            void getGridBounds(uint32 mapID, uint32 &minX, uint32 &minY, uint32 &maxX, uint32 &maxY);
 
-        rcConfig GetMapSpecificConfig(uint32 mapID, float bmin[3], float bmax[3], const TileConfig &tileConfig) const;
+            bool shouldSkipMap(uint32 mapID) const;
+            bool isTransportMap(uint32 mapID) const;
+            bool isDevMap(uint32 mapID) const;
+            bool isBattlegroundMap(uint32 mapID) const;
+            bool isContinentMap(uint32 mapID) const;
 
-        uint32 percentageDone(uint32 totalTiles, uint32 totalTilesDone) const;
-        uint32 currentPercentageDone() const;
+            rcConfig GetMapSpecificConfig(uint32 mapID, float bmin[3], float bmax[3], const TileConfig &tileConfig) const;
 
-        TerrainBuilder* m_terrainBuilder{nullptr};
-        TileList m_tiles;
+            uint32 percentageDone(uint32 totalTiles, uint32 totalTilesDone) const;
+            uint32 currentPercentageDone() const;
 
-        bool m_debugOutput;
+            void ParseOffMeshConnectionsFile(char const* offMeshFilePath);
 
-        const char* m_offMeshFilePath;
-        unsigned int m_threads;
-        bool m_skipContinents;
-        bool m_skipJunkMaps;
-        bool m_skipBattlegrounds;
-        bool m_skipLiquid;
+            TerrainBuilder* m_terrainBuilder;
+            TileList m_tiles;
 
-        float m_maxWalkableAngle;
-        bool m_bigBaseUnit;
-        int32 m_mapid;
+            bool m_debugOutput;
 
-        std::atomic<uint32> m_totalTiles;
-        std::atomic<uint32> m_totalTilesProcessed;
+            std::vector<OffMeshData> m_offMeshConnections;
+            unsigned int m_threads;
+            bool m_skipContinents;
+            bool m_skipJunkMaps;
+            bool m_skipBattlegrounds;
+            bool m_skipLiquid;
 
-        // build performance - not really used for now
-        rcContext* m_rcContext{nullptr};
+            Optional<float> m_maxWalkableAngle;
+            Optional<float> m_maxWalkableAngleNotSteep;
+            bool m_bigBaseUnit;
 
-        std::vector<TileBuilder*> m_tileBuilders;
-        ProducerConsumerQueue<TileInfo> _queue;
-        std::atomic<bool> _cancelationToken;
+            int32 m_mapid;
+
+            std::atomic<uint32> m_totalTiles;
+            std::atomic<uint32> m_totalTilesProcessed;
+
+            // build performance - not really used for now
+            rcContext* m_rcContext;
+
+            std::vector<TileBuilder*> m_tileBuilders;
+            ProducerConsumerQueue<TileInfo> _queue;
+            std::atomic<bool> _cancelationToken;
     };
 }
 

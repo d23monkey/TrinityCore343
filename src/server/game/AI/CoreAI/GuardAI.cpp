@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -16,6 +16,9 @@
  */
 
 #include "GuardAI.h"
+#include "Creature.h"
+#include "Log.h"
+#include "MotionMaster.h"
 #include "Player.h"
 
 int32 GuardAI::Permissible(Creature const* creature)
@@ -26,14 +29,17 @@ int32 GuardAI::Permissible(Creature const* creature)
     return PERMIT_BASE_NO;
 }
 
-GuardAI::GuardAI(Creature* creature) : ScriptedAI(creature)
+void GuardAI::UpdateAI(uint32 /*diff*/)
 {
+    UpdateVictim();
 }
 
-void GuardAI::Reset()
+bool GuardAI::CanSeeAlways(WorldObject const* obj)
 {
-    ScriptedAI::Reset();
-    me->CastSpell(me, 18950 /*SPELL_INVISIBILITY_AND_STEALTH_DETECTION*/, true);
+    if (Unit const* unit = obj->ToUnit())
+        if (unit->IsControlledByPlayer() && me->IsEngagedBy(unit))
+            return true;
+    return false;
 }
 
 void GuardAI::EnterEvadeMode(EvadeReason /*why*/)
@@ -42,26 +48,22 @@ void GuardAI::EnterEvadeMode(EvadeReason /*why*/)
     {
         me->GetMotionMaster()->MoveIdle();
         me->CombatStop(true);
-        me->GetThreatMgr().ClearAllThreat();
+        EngagementOver();
         return;
     }
 
-    LOG_DEBUG("entities.unit", "Guard entry: {} enters evade mode.", me->GetEntry());
+    TC_LOG_TRACE("scripts.ai", "GuardAI::EnterEvadeMode: {} enters evade mode.", me->GetGUID().ToString());
 
     me->RemoveAllAuras();
-    me->GetThreatMgr().ClearAllThreat();
     me->CombatStop(true);
+    EngagementOver();
 
-    // Remove ChaseMovementGenerator from MotionMaster stack list, and add HomeMovementGenerator instead
-    if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() == CHASE_MOTION_TYPE)
-        me->GetMotionMaster()->MoveTargetedHome();
+    me->GetMotionMaster()->MoveTargetedHome();
 }
 
 void GuardAI::JustDied(Unit* killer)
 {
-    if (!killer)
-        return;
-
-    if (Player* player = killer->GetCharmerOrOwnerPlayerOrPlayerItself())
-        me->SendZoneUnderAttackMessage(player);
+    if (killer)
+        if (Player* player = killer->GetCharmerOrOwnerPlayerOrPlayerItself())
+            me->SendZoneUnderAttackMessage(player);
 }

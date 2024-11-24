@@ -1,24 +1,25 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
+#include "MotionMaster.h"
 #include "PassiveAI.h"
 #include "Player.h"
-#include "ScriptedCreature.h"
+#include "TemporarySummon.h"
 
 /*####
 ## npc_valkyr_battle_maiden
@@ -46,7 +47,19 @@ public:
 
     struct npc_valkyr_battle_maidenAI : public PassiveAI
     {
-        npc_valkyr_battle_maidenAI(Creature* creature) : PassiveAI(creature) { }
+        npc_valkyr_battle_maidenAI(Creature* creature) : PassiveAI(creature)
+        {
+            Initialize();
+        }
+
+        void Initialize()
+        {
+            FlyBackTimer = 500;
+            phase = 0;
+            x = 0.f;
+            y = 0.f;
+            z = 0.f;
+        }
 
         uint32 FlyBackTimer;
         float x, y, z;
@@ -55,18 +68,16 @@ public:
         void Reset() override
         {
             me->setActive(true);
+            me->SetFarVisible(true);
             me->SetVisible(false);
-            me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
             me->SetCanFly(true);
-            FlyBackTimer = 500;
-            phase = 0;
 
             me->GetPosition(x, y, z);
             z += 4.0f;
             x -= 3.5f;
             y -= 5.0f;
-            me->GetMotionMaster()->Clear(false);
-            me->SetPosition(x, y, z, 0.0f);
+            me->GetMotionMaster()->Clear();
+            me->UpdatePosition(x, y, z, 0.0f);
         }
 
         void UpdateAI(uint32 diff) override
@@ -75,17 +86,11 @@ public:
             {
                 Player* player = nullptr;
                 if (me->IsSummon())
-                {
-                    if (Unit * summoner = me->ToTempSummon()->GetSummonerUnit())
-                    {
+                    if (Unit* summoner = me->ToTempSummon()->GetSummonerUnit())
                         player = summoner->ToPlayer();
-                    }
-                }
 
                 if (!player)
-                {
                     phase = 3;
-                }
 
                 switch (phase)
                 {
@@ -95,23 +100,17 @@ public:
                         FlyBackTimer = 500;
                         break;
                     case 1:
-                        if (player)
-                        {
-                            player->GetClosePoint(x, y, z, me->GetObjectSize());
-                        }
+                        player->GetClosePoint(x, y, z, me->GetCombatReach());
                         z += 2.5f;
                         x -= 2.0f;
                         y -= 1.5f;
                         me->GetMotionMaster()->MovePoint(0, x, y, z);
-                        if (player)
-                        {
-                            me->SetTarget(player->GetGUID());
-                        }
+                        me->SetTarget(player->GetGUID());
                         me->SetVisible(true);
                         FlyBackTimer = 4500;
                         break;
                     case 2:
-                        if (player && !player->isResurrectRequested())
+                        if (!player->IsResurrectRequested())
                         {
                             me->HandleEmoteCommand(EMOTE_ONESHOT_CUSTOM_SPELL_01);
                             DoCast(player, SPELL_REVIVE, true);
@@ -132,7 +131,8 @@ public:
                 }
                 ++phase;
             }
-            else FlyBackTimer -= diff;
+            else
+                FlyBackTimer -= diff;
         }
     };
 };

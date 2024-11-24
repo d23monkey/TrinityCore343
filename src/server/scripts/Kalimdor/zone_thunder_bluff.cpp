@@ -1,40 +1,57 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "Player.h"
+/* ScriptData
+SDName: Thunder_Bluff
+SD%Complete: 100
+SDComment: Quest support: 925
+SDCategory: Thunder Bluff
+EndScriptData */
+
+#include "ScriptMgr.h"
 #include "ScriptedCreature.h"
+#include "ScriptedGossip.h"
+#include "Player.h"
 
 /*#####
-# Support for Quest 925: Cairne's Hoofprint
+# npc_cairne_bloodhoof
 ######*/
 
-// NPC 3057: Cairne Bloodhoof <High Chieftain>
 enum CairneBloodhoof
 {
     SPELL_BERSERKER_CHARGE  = 16636,
     SPELL_CLEAVE            = 16044,
     SPELL_MORTAL_STRIKE     = 16856,
     SPELL_THUNDERCLAP       = 23931,
-    SPELL_UPPERCUT          = 22916,
-    SPELL_CAIRNES_HOOFPRINT = 23123
+    SPELL_UPPERCUT          = 22916
 };
 
-// @todo verify abilities/timers
+enum Sounds
+{
+    SOUND_AGGRO             = 5884
+};
+
+enum Gossips
+{
+    GOSSIP_MENU_HCB         = 5851,
+    GOSSIP_OPTION_HCB       = 0
+};
+
+/// @todo verify abilities/timers
 class npc_cairne_bloodhoof : public CreatureScript
 {
 public:
@@ -42,93 +59,98 @@ public:
 
     struct npc_cairne_bloodhoofAI : public ScriptedAI
     {
-        npc_cairne_bloodhoofAI(Creature* creature) : ScriptedAI(creature) { }
+        npc_cairne_bloodhoofAI(Creature* creature) : ScriptedAI(creature)
+        {
+            Initialize();
+        }
+
+        void Initialize()
+        {
+            BerserkerChargeTimer = 30000;
+            CleaveTimer = 5000;
+            MortalStrikeTimer = 10000;
+            ThunderclapTimer = 15000;
+            UppercutTimer = 10000;
+        }
+
+        uint32 BerserkerChargeTimer;
+        uint32 CleaveTimer;
+        uint32 MortalStrikeTimer;
+        uint32 ThunderclapTimer;
+        uint32 UppercutTimer;
 
         void Reset() override
         {
-            _berserkerChargeTimer = 30000;
-            _cleaveTimer          = 5000;
-            _mortalStrikeTimer    = 10000;
-            _thunderclapTimer     = 15000;
-            _uppercutTimer        = 10000;
+            Initialize();
         }
 
-        void sGossipSelect(Player* player, uint32 /*sender*/, uint32 action) override
+        void JustEngagedWith(Unit* /*who*/) override
         {
-            if (action == 0)
-            {
-                player->CastSpell(player, SPELL_CAIRNES_HOOFPRINT, false);
-            }
+            DoPlaySoundToSet(me, SOUND_AGGRO);
         }
 
         void UpdateAI(uint32 diff) override
         {
             if (!UpdateVictim())
-            {
                 return;
-            }
 
-            if (_berserkerChargeTimer <= diff)
+            if (BerserkerChargeTimer <= diff)
             {
                 if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
-                {
                     DoCast(target, SPELL_BERSERKER_CHARGE);
-                }
-                _berserkerChargeTimer = 25000;
-            }
-            else
-            {
-                _berserkerChargeTimer -= diff;
-            }
+                BerserkerChargeTimer = 25000;
+            } else BerserkerChargeTimer -= diff;
 
-            if (_uppercutTimer <= diff)
+            if (UppercutTimer <= diff)
             {
                 DoCastVictim(SPELL_UPPERCUT);
-                _uppercutTimer = 20000;
-            }
-            else
-            {
-                _uppercutTimer -= diff;
-            }
+                UppercutTimer = 20000;
+            } else UppercutTimer -= diff;
 
-            if (_thunderclapTimer <= diff)
+            if (ThunderclapTimer <= diff)
             {
                 DoCastVictim(SPELL_THUNDERCLAP);
-                _thunderclapTimer = 15000;
-            }
-            else
-            {
-                _thunderclapTimer -= diff;
-            }
+                ThunderclapTimer = 15000;
+            } else ThunderclapTimer -= diff;
 
-            if (_mortalStrikeTimer <= diff)
+            if (MortalStrikeTimer <= diff)
             {
                 DoCastVictim(SPELL_MORTAL_STRIKE);
-                _mortalStrikeTimer = 15000;
-            }
-            else
-            {
-                _mortalStrikeTimer -= diff;
-            }
+                MortalStrikeTimer = 15000;
+            } else MortalStrikeTimer -= diff;
 
-            if (_cleaveTimer <= diff)
+            if (CleaveTimer <= diff)
             {
                 DoCastVictim(SPELL_CLEAVE);
-                _cleaveTimer = 7000;
-            }
-            else
-            {
-                _cleaveTimer -= diff;
-            }
-
-            DoMeleeAttackIfReady();
+                CleaveTimer = 7000;
+            } else CleaveTimer -= diff;
         }
-    private:
-        uint32 _berserkerChargeTimer;
-        uint32 _cleaveTimer;
-        uint32 _mortalStrikeTimer;
-        uint32 _thunderclapTimer;
-        uint32 _uppercutTimer;
+
+        bool OnGossipSelect(Player* player, uint32 /*menuId*/, uint32 gossipListId) override
+        {
+            uint32 const action = player->PlayerTalkClass->GetGossipOptionAction(gossipListId);
+            ClearGossipMenuFor(player);
+            if (action == GOSSIP_SENDER_INFO)
+            {
+                player->CastSpell(player, 23123, false);
+                SendGossipMenuFor(player, 7014, me->GetGUID());
+            }
+            return true;
+        }
+
+        bool OnGossipHello(Player* player) override
+        {
+            InitGossipMenuFor(player, GOSSIP_MENU_HCB);
+            if (me->IsQuestGiver())
+                player->PrepareQuestMenu(me->GetGUID());
+
+            if (player->GetQuestStatus(925) == QUEST_STATUS_INCOMPLETE)
+                AddGossipItemFor(player, GOSSIP_MENU_HCB, GOSSIP_OPTION_HCB, GOSSIP_SENDER_MAIN, GOSSIP_SENDER_INFO);
+
+            SendGossipMenuFor(player, 7013, me->GetGUID());
+
+            return true;
+        }
     };
 
     CreatureAI* GetAI(Creature* creature) const override

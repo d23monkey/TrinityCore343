@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -36,7 +36,7 @@ namespace MMAP
 
         printf("%sWriting debug output...                       \r", tileString);
 
-        std::string name("meshes/%03u%02i%02i.");
+        std::string name("meshes/%04u%02i%02i.");
 
 #define DEBUG_WRITE(fileExtension,data) \
     do { \
@@ -68,7 +68,7 @@ namespace MMAP
 #undef DEBUG_WRITE
     }
 
-    void IntermediateValues::debugWrite(FILE* file, const rcHeightfield* mesh)
+    void IntermediateValues::debugWrite(FILE* file, rcHeightfield const* mesh)
     {
         if (!file || !mesh)
             return;
@@ -83,7 +83,7 @@ namespace MMAP
         for (int y = 0; y < mesh->height; ++y)
             for (int x = 0; x < mesh->width; ++x)
             {
-                rcSpan* span = mesh->spans[x + y * mesh->width];
+                rcSpan* span = mesh->spans[x+y*mesh->width];
 
                 // first, count the number of spans
                 int spanCount = 0;
@@ -97,7 +97,7 @@ namespace MMAP
                 fwrite(&spanCount, sizeof(int), 1, file);
 
                 // write the spans
-                span = mesh->spans[x + y * mesh->width];
+                span = mesh->spans[x+y*mesh->width];
                 while (span)
                 {
                     fwrite(span, sizeof(rcSpan), 1, file);
@@ -106,7 +106,7 @@ namespace MMAP
             }
     }
 
-    void IntermediateValues::debugWrite(FILE* file, const rcCompactHeightfield* chf)
+    void IntermediateValues::debugWrite(FILE* file, rcCompactHeightfield const* chf)
     {
         if (!file | !chf)
             return;
@@ -136,7 +136,7 @@ namespace MMAP
         fwrite(&tmp, sizeof(tmp), 1, file);
 
         if (chf->cells)
-            fwrite(chf->cells, sizeof(rcCompactCell), chf->width * chf->height, file);
+            fwrite(chf->cells, sizeof(rcCompactCell), chf->width*chf->height, file);
         if (chf->spans)
             fwrite(chf->spans, sizeof(rcCompactSpan), chf->spanCount, file);
         if (chf->dist)
@@ -145,7 +145,7 @@ namespace MMAP
             fwrite(chf->areas, sizeof(unsigned char), chf->spanCount, file);
     }
 
-    void IntermediateValues::debugWrite(FILE* file, const rcContourSet* cs)
+    void IntermediateValues::debugWrite(FILE* file, rcContourSet const* cs)
     {
         if (!file || !cs)
             return;
@@ -160,13 +160,13 @@ namespace MMAP
             fwrite(&cs->conts[i].area, sizeof(unsigned char), 1, file);
             fwrite(&cs->conts[i].reg, sizeof(unsigned short), 1, file);
             fwrite(&cs->conts[i].nverts, sizeof(int), 1, file);
-            fwrite(cs->conts[i].verts, sizeof(int), cs->conts[i].nverts * 4, file);
+            fwrite(cs->conts[i].verts, sizeof(int), cs->conts[i].nverts*4, file);
             fwrite(&cs->conts[i].nrverts, sizeof(int), 1, file);
-            fwrite(cs->conts[i].rverts, sizeof(int), cs->conts[i].nrverts * 4, file);
+            fwrite(cs->conts[i].rverts, sizeof(int), cs->conts[i].nrverts*4, file);
         }
     }
 
-    void IntermediateValues::debugWrite(FILE* file, const rcPolyMesh* mesh)
+    void IntermediateValues::debugWrite(FILE* file, rcPolyMesh const* mesh)
     {
         if (!file || !mesh)
             return;
@@ -177,31 +177,31 @@ namespace MMAP
         fwrite(mesh->bmin, sizeof(float), 3, file);
         fwrite(mesh->bmax, sizeof(float), 3, file);
         fwrite(&(mesh->nverts), sizeof(int), 1, file);
-        fwrite(mesh->verts, sizeof(unsigned short), mesh->nverts * 3, file);
+        fwrite(mesh->verts, sizeof(unsigned short), mesh->nverts*3, file);
         fwrite(&(mesh->npolys), sizeof(int), 1, file);
-        fwrite(mesh->polys, sizeof(unsigned short), mesh->npolys * mesh->nvp * 2, file);
+        fwrite(mesh->polys, sizeof(unsigned short), mesh->npolys*mesh->nvp*2, file);
         fwrite(mesh->flags, sizeof(unsigned short), mesh->npolys, file);
         fwrite(mesh->areas, sizeof(unsigned char), mesh->npolys, file);
         fwrite(mesh->regs, sizeof(unsigned short), mesh->npolys, file);
     }
 
-    void IntermediateValues::debugWrite(FILE* file, const rcPolyMeshDetail* mesh)
+    void IntermediateValues::debugWrite(FILE* file, rcPolyMeshDetail const* mesh)
     {
         if (!file || !mesh)
             return;
 
         fwrite(&(mesh->nverts), sizeof(int), 1, file);
-        fwrite(mesh->verts, sizeof(float), mesh->nverts * 3, file);
+        fwrite(mesh->verts, sizeof(float), mesh->nverts*3, file);
         fwrite(&(mesh->ntris), sizeof(int), 1, file);
-        fwrite(mesh->tris, sizeof(char), mesh->ntris * 4, file);
+        fwrite(mesh->tris, sizeof(char), mesh->ntris*4, file);
         fwrite(&(mesh->nmeshes), sizeof(int), 1, file);
-        fwrite(mesh->meshes, sizeof(int), mesh->nmeshes * 4, file);
+        fwrite(mesh->meshes, sizeof(int), mesh->nmeshes*4, file);
     }
 
-    void IntermediateValues::generateObjFile(uint32 mapID, uint32 tileX, uint32 tileY, MeshData& meshData)
+    void IntermediateValues::generateObjFile(uint32 mapID, uint32 tileX, uint32 tileY, MeshData &meshData)
     {
         char objFileName[255];
-        sprintf(objFileName, "meshes/map%03u%02u%02u.obj", mapID, tileY, tileX);
+        sprintf(objFileName, "meshes/map%04u%02u%02u.obj", mapID, tileY, tileX);
 
         FILE* objFile = fopen(objFileName, "wb");
         if (!objFile)
@@ -226,10 +226,10 @@ namespace MMAP
         int triCount = allTris.size() / 3;
 
         for (int i = 0; i < allVerts.size() / 3; i++)
-            fprintf(objFile, "v %f %f %f\n", verts[i * 3], verts[i * 3 + 1], verts[i * 3 + 2]);
+            fprintf(objFile, "v %f %f %f\n", verts[i*3], verts[i*3 + 1], verts[i*3 + 2]);
 
         for (int i = 0; i < allTris.size() / 3; i++)
-            fprintf(objFile, "f %i %i %i\n", tris[i * 3] + 1, tris[i * 3 + 1] + 1, tris[i * 3 + 2] + 1);
+            fprintf(objFile, "f %i %i %i\n", tris[i*3] + 1, tris[i*3 + 1] + 1, tris[i*3 + 2] + 1);
 
         fclose(objFile);
 
@@ -237,7 +237,7 @@ namespace MMAP
         sprintf(tileString, "[%02u,%02u]: ", tileY, tileX);
         printf("%sWriting debug output...                       \r", tileString);
 
-        sprintf(objFileName, "meshes/%03u.map", mapID);
+        sprintf(objFileName, "meshes/%04u.map", mapID);
 
         objFile = fopen(objFileName, "wb");
         if (!objFile)
@@ -252,7 +252,7 @@ namespace MMAP
         fwrite(&b, sizeof(char), 1, objFile);
         fclose(objFile);
 
-        sprintf(objFileName, "meshes/%03u%02u%02u.mesh", mapID, tileY, tileX);
+        sprintf(objFileName, "meshes/%04u%02u%02u.mesh", mapID, tileY, tileX);
         objFile = fopen(objFileName, "wb");
         if (!objFile)
         {
@@ -263,11 +263,11 @@ namespace MMAP
         }
 
         fwrite(&vertCount, sizeof(int), 1, objFile);
-        fwrite(verts, sizeof(float), vertCount * 3, objFile);
+        fwrite(verts, sizeof(float), vertCount*3, objFile);
         fflush(objFile);
 
         fwrite(&triCount, sizeof(int), 1, objFile);
-        fwrite(tris, sizeof(int), triCount * 3, objFile);
+        fwrite(tris, sizeof(int), triCount*3, objFile);
         fflush(objFile);
 
         fclose(objFile);

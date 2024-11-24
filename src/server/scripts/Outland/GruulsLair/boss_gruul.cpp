@@ -1,27 +1,35 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "PassiveAI.h"
-#include "ScriptedCreature.h"
-#include "SpellScript.h"
-#include "SpellScriptLoader.h"
+/*
+TO-DO:
+Slighly(400ms) after spell cast 33965 creatures 19198 are spawned. I guess he forces all enemies including pets(9 summoned units
+and 9 units in his threatlist) to cast 39186(19198 were created by that spell(sniff)). Summoned by that spell creature 19198 casts 33496
+on self after being summoned. Then probably they casts 33497(Pull Towards: (150)) on their creators and that's how that knockback is handled.
+If you look closely, players are knocked to random destinations with random angles, means there is no only one spell which handles knockback.
+19198 despawns after 800ms after being summoned.
+*/
+
+#include "ScriptMgr.h"
 #include "gruuls_lair.h"
-#include "SpellAuraEffects.h"
+#include "MotionMaster.h"
+#include "ScriptedCreature.h"
+#include "SpellInfo.h"
+#include "SpellScript.h"
 
 enum Yells
 {
@@ -36,282 +44,303 @@ enum Yells
 
 enum Spells
 {
-    SPELL_GROWTH                        = 36300,
-    SPELL_CAVE_IN                       = 36240,
-    SPELL_GROUND_SLAM                   = 33525,
-    SPELL_REVERBERATION                 = 36297,
-    SPELL_HURTFUL_STRIKE                = 33813,
-    SPELL_SHATTER                       = 33654,
-    SPELL_LOOK_AROUND                   = 33965,
+    SPELL_GROWTH                = 36300,
+    SPELL_CAVE_IN               = 36240,
+    SPELL_GROUND_SLAM           = 33525, // AoE Ground Slam applying Ground Slam to everyone with a script effect (most likely the knock back, we can code it to a set knockback)
+    SPELL_REVERBERATION         = 36297,
+    SPELL_SHATTER               = 33654,
 
-    // Ground Slam spells
-    SPELL_SUMMON_TRACTOR_BEAM_CREATOR   = 33496,
-    SPELL_TRACTOR_BEAM_PULL             = 33497,
-    SPELL_SUMMON_TRACTOR_BEAM_1         = 33495,
-    SPELL_SUMMON_TRACTOR_BEAM_2         = 33514,
-    SPELL_SUMMON_TRACTOR_BEAM_3         = 33515,
-    SPELL_SUMMON_TRACTOR_BEAM_4         = 33516,
-    SPELL_SUMMON_TRACTOR_BEAM_5         = 33517,
-    SPELL_SUMMON_TRACTOR_BEAM_6         = 33518,
-    SPELL_SUMMON_TRACTOR_BEAM_7         = 33519,
-    SPELL_SUMMON_TRACTOR_BEAM_8         = 33520,
+    SPELL_SHATTER_EFFECT        = 33671,
+    SPELL_HURTFUL_STRIKE        = 33813,
+    SPELL_STONED                = 33652, // Spell is self cast by target
 
-    SPELL_SHATTER_EFFECT                = 33671,
-    SPELL_STONED                        = 33652,
+    SPELL_MAGNETIC_PULL         = 28337,
+    SPELL_KNOCK_BACK            = 24199, // Knockback spell until correct implementation is made
 };
 
-struct boss_gruul : public BossAI
+enum Events
 {
-    boss_gruul(Creature* creature) : BossAI(creature, DATA_GRUUL) { }
+    EVENT_GROWTH = 1,
+    EVENT_CAVE_IN,
+    EVENT_CAVE_IN_STATIC,
+    EVENT_GROUND_SLAM,
+    EVENT_HURTFUL_STRIKE,
+    EVENT_REVERBERATION
+};
 
-    void Reset() override
-    {
-        _Reset();
-        _recentlySpoken = false;
-        _caveInTimer = 29000ms;
-    }
+class boss_gruul : public CreatureScript
+{
+    public:
+        boss_gruul() : CreatureScript("boss_gruul") { }
 
-    void JustEngagedWith(Unit* /*who*/) override
-    {
-        _JustEngagedWith();
-        Talk(SAY_AGGRO);
-
-        scheduler.Schedule(30300ms, [this](TaskContext context)
+        struct boss_gruulAI : public BossAI
         {
-            Talk(EMOTE_GROW);
-            DoCastSelf(SPELL_GROWTH);
-            context.Repeat(30300ms);
-        }).Schedule(_caveInTimer, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_CAVE_IN);
-            if (_caveInTimer > 4000ms)
+            boss_gruulAI(Creature* creature) : BossAI(creature, DATA_GRUUL)
             {
-                _caveInTimer = _caveInTimer - 1500ms;
+                Initialize();
             }
-            context.Repeat(_caveInTimer);
-        }).Schedule(39900ms, 55700ms, [this](TaskContext context)
-        {
-            DoCastSelf(SPELL_REVERBERATION);
-            context.Repeat(39900ms, 55700ms);
-        }).Schedule(5600ms, [this](TaskContext context)
-        {
-            if (Unit* target = SelectTarget(SelectTargetMethod::MaxThreat, 1, 5.0f))
+
+            void Initialize()
             {
-                DoCast(target, SPELL_HURTFUL_STRIKE);
+                m_uiGrowth_Timer = 30000;
+                m_uiCaveIn_Timer = 27000;
+                m_uiCaveIn_StaticTimer = 30000;
+                m_uiGroundSlamTimer = 35000;
+                m_bPerformingGroundSlam = false;
+                m_uiHurtfulStrike_Timer = 8000;
+                m_uiReverberation_Timer = 60000 + 45000;
             }
-            else
+
+            uint32 m_uiGrowth_Timer;
+            uint32 m_uiCaveIn_Timer;
+            uint32 m_uiCaveIn_StaticTimer;
+            uint32 m_uiGroundSlamTimer;
+            uint32 m_uiHurtfulStrike_Timer;
+            uint32 m_uiReverberation_Timer;
+
+            bool m_bPerformingGroundSlam;
+
+            void Reset() override
             {
-                DoCastVictim(SPELL_HURTFUL_STRIKE);
+                _Reset();
+                Initialize();
             }
-            context.Repeat(8400ms);
-        }).Schedule(35s, [this](TaskContext context)
-        {
-            Talk(SAY_SLAM);
-            DoCastSelf(SPELL_GROUND_SLAM);
-            scheduler.DelayAll(9701ms);
-            scheduler.Schedule(9700ms, [this](TaskContext)
+
+            void JustEngagedWith(Unit* who) override
             {
-                Talk(SAY_SHATTER);
-                me->RemoveAurasDueToSpell(SPELL_LOOK_AROUND);
-                DoCastSelf(SPELL_SHATTER);
-            });
-            context.Repeat(60s);
-        });
-    }
-
-    void KilledUnit(Unit* /*who*/) override
-    {
-        if (!_recentlySpoken)
-        {
-            Talk(SAY_SLAY);
-            _recentlySpoken = true;
-        }
-
-        scheduler.Schedule(5s, [this](TaskContext)
-        {
-            _recentlySpoken = false;
-        });
-    }
-
-    void JustDied(Unit* /*killer*/) override
-    {
-        _JustDied();
-        Talk(SAY_DEATH);
-    }
-
-    void UpdateAI(uint32 diff) override
-    {
-        if (!UpdateVictim())
-            return;
-
-        scheduler.Update(diff);
-
-        if (!me->HasUnitState(UNIT_STATE_ROOT))
-        {
-            DoMeleeAttackIfReady();
-        }
-    }
-
-private:
-    std::chrono::milliseconds _caveInTimer;
-    bool _recentlySpoken;
-};
-
-struct npc_invisible_tractor_beam_source : public NullCreatureAI
-{
-    npc_invisible_tractor_beam_source(Creature* creature) : NullCreatureAI(creature) { }
-
-    void IsSummonedBy(WorldObject* summoner) override
-    {
-        if (Unit* summonerUnit = summoner->ToUnit())
-        {
-            DoCast(summonerUnit, SPELL_TRACTOR_BEAM_PULL, true);
-        }
-    }
-};
-
-class spell_gruul_ground_slam : public SpellScript
-{
-    PrepareSpellScript(spell_gruul_ground_slam);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_SUMMON_TRACTOR_BEAM_CREATOR });
-    }
-
-    void ApplyStun()
-    {
-        if (Unit* caster = GetCaster())
-        {
-            caster->CastSpell(caster, SPELL_LOOK_AROUND, true);
-        }
-    }
-
-    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
-    {
-        if (Unit* target = GetHitUnit())
-        {
-            target->CastSpell(target, SPELL_SUMMON_TRACTOR_BEAM_CREATOR, true);
-        }
-    }
-
-    void Register() override
-    {
-        AfterCast += SpellCastFn(spell_gruul_ground_slam::ApplyStun);
-        OnEffectHitTarget += SpellEffectFn(spell_gruul_ground_slam::HandleScriptEffect, EFFECT_1, SPELL_EFFECT_SCRIPT_EFFECT);
-    }
-};
-
-class spell_tractor_beam_creator : public SpellScript
-{
-    PrepareSpellScript(spell_tractor_beam_creator);
-
-    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
-    {
-        if (Unit* caster = GetCaster())
-        {
-            std::vector<uint32> tractorBeamSummons = { SPELL_SUMMON_TRACTOR_BEAM_1, SPELL_SUMMON_TRACTOR_BEAM_2, SPELL_SUMMON_TRACTOR_BEAM_3, SPELL_SUMMON_TRACTOR_BEAM_4,
-                SPELL_SUMMON_TRACTOR_BEAM_5, SPELL_SUMMON_TRACTOR_BEAM_6, SPELL_SUMMON_TRACTOR_BEAM_7, SPELL_SUMMON_TRACTOR_BEAM_8 };
-            uint32 randomTractorSpellID = Acore::Containers::SelectRandomContainerElement(tractorBeamSummons);
-            caster->CastSpell(caster, randomTractorSpellID, true);
-        }
-    }
-
-    void Register() override
-    {
-        OnEffectHitTarget += SpellEffectFn(spell_tractor_beam_creator::HandleScriptEffect, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
-    }
-};
-
-class spell_gruul_ground_slam_trigger : public AuraScript
-{
-    PrepareAuraScript(spell_gruul_ground_slam_trigger);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_STONED });
-    }
-
-    void OnApply(AuraEffect const* aurEff, AuraEffectHandleModes /*mode*/)
-    {
-        if (GetUnitOwner()->GetAuraCount(GetSpellInfo()->Effects[aurEff->GetEffIndex()].TriggerSpell) == 5)
-        {
-            GetUnitOwner()->CastSpell(GetUnitOwner(), SPELL_STONED, true);
-        }
-    }
-
-    void Register() override
-    {
-        AfterEffectRemove += AuraEffectRemoveFn(spell_gruul_ground_slam_trigger::OnApply, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL, AURA_EFFECT_HANDLE_REAL);
-    }
-};
-
-class spell_gruul_shatter : public SpellScript
-{
-    PrepareSpellScript(spell_gruul_shatter);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_SHATTER_EFFECT });
-    }
-
-    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
-    {
-        if (Unit* target = GetHitUnit())
-        {
-            target->RemoveAurasDueToSpell(SPELL_STONED);
-
-            if (target->IsPlayer())
-            {
-                target->CastSpell((Unit*)nullptr, SPELL_SHATTER_EFFECT, true);
+                BossAI::JustEngagedWith(who);
+                Talk(SAY_AGGRO);
             }
-        }
-    }
 
-    void Register() override
-    {
-        OnEffectHitTarget += SpellEffectFn(spell_gruul_shatter::HandleScriptEffect, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
-    }
+            void KilledUnit(Unit* who) override
+            {
+                if (who->GetTypeId() == TYPEID_PLAYER)
+                    Talk(SAY_SLAY);
+            }
+
+            void JustDied(Unit* /*killer*/) override
+            {
+                _JustDied();
+                Talk(SAY_DEATH);
+            }
+
+            void SpellHitTarget(WorldObject* target, SpellInfo const* spellInfo) override
+            {
+                //This to emulate effect1 (77) of SPELL_GROUND_SLAM, knock back to any direction
+                //It's initially wrong, since this will cause fall damage, which is by comments, not intended.
+                if (spellInfo->Id == SPELL_GROUND_SLAM)
+                {
+                    if (target->GetTypeId() == TYPEID_PLAYER)
+                    {
+                        switch (urand(0, 1))
+                        {
+                            case 0:
+                                target->CastSpell(target, SPELL_MAGNETIC_PULL, CastSpellExtraArgs(TRIGGERED_FULL_MASK)
+                                    .SetOriginalCaster(me->GetGUID()));
+                                break;
+
+                            case 1:
+                                target->CastSpell(target, SPELL_KNOCK_BACK, CastSpellExtraArgs(TRIGGERED_FULL_MASK)
+                                    .SetOriginalCaster(me->GetGUID()));
+                                break;
+                        }
+                    }
+                }
+
+                //this part should be in the core
+                if (spellInfo->Id == SPELL_SHATTER)
+                {
+                    /// @todo use eventmap to kill this stuff
+                    //clear this, if we are still performing
+                    if (m_bPerformingGroundSlam)
+                    {
+                        m_bPerformingGroundSlam = false;
+
+                        //and correct movement, if not already
+                        if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() != CHASE_MOTION_TYPE)
+                        {
+                            if (me->GetVictim())
+                                me->GetMotionMaster()->MoveChase(me->GetVictim());
+                        }
+                    }
+                }
+            }
+
+            void UpdateAI(uint32 diff) override
+            {
+                if (!UpdateVictim())
+                    return;
+
+                events.Update(diff);
+
+                if (me->HasUnitState(UNIT_STATE_CASTING))
+                    return;
+
+                /// @todo: convert this shit to eventmap
+
+                // Growth
+                // Gruul can cast this spell up to 30 times
+                if (m_uiGrowth_Timer <= diff)
+                {
+                    Talk(EMOTE_GROW);
+                    DoCast(me, SPELL_GROWTH);
+                    m_uiGrowth_Timer = 30000;
+                }
+                else
+                    m_uiGrowth_Timer -= diff;
+
+                if (m_bPerformingGroundSlam)
+                {
+                    if (m_uiGroundSlamTimer <= diff)
+                    {
+                        m_uiGroundSlamTimer =120000;
+                        m_uiHurtfulStrike_Timer= 8000;
+
+                        if (m_uiReverberation_Timer < 10000)     //Give a little time to the players to undo the damage from shatter
+                            m_uiReverberation_Timer += 10000;
+
+                        DoCast(me, SPELL_SHATTER);
+                    }
+                    else
+                        m_uiGroundSlamTimer -= diff;
+                }
+                else
+                {
+                    // Hurtful Strike
+                    if (m_uiHurtfulStrike_Timer <= diff)
+                    {
+                        Unit* target = SelectTarget(SelectTargetMethod::MaxThreat, 1);
+
+                        if (target && me->IsWithinMeleeRange(me->GetVictim()))
+                            DoCast(target, SPELL_HURTFUL_STRIKE);
+                        else
+                            DoCastVictim(SPELL_HURTFUL_STRIKE);
+
+                        m_uiHurtfulStrike_Timer= 8000;
+                    }
+                    else
+                        m_uiHurtfulStrike_Timer -= diff;
+
+                    // Reverberation
+                    if (m_uiReverberation_Timer <= diff)
+                    {
+                        DoCastVictim(SPELL_REVERBERATION, true);
+                        m_uiReverberation_Timer = urand(15000, 25000);
+                    }
+                    else
+                        m_uiReverberation_Timer -= diff;
+
+                    // Cave In
+                    if (m_uiCaveIn_Timer <= diff)
+                    {
+                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
+                            DoCast(target, SPELL_CAVE_IN);
+
+                        if (m_uiCaveIn_StaticTimer >= 4000)
+                            m_uiCaveIn_StaticTimer -= 2000;
+
+                        m_uiCaveIn_Timer = m_uiCaveIn_StaticTimer;
+                    }
+                    else
+                        m_uiCaveIn_Timer -= diff;
+
+                    // Ground Slam, Gronn Lord's Grasp, Stoned, Shatter
+                    if (m_uiGroundSlamTimer <= diff)
+                    {
+                        me->GetMotionMaster()->Clear();
+                        me->GetMotionMaster()->MoveIdle();
+
+                        m_bPerformingGroundSlam= true;
+                        m_uiGroundSlamTimer = 10000;
+
+                        DoCast(me, SPELL_GROUND_SLAM);
+                    }
+                    else
+                        m_uiGroundSlamTimer -= diff;
+                }
+            }
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
+        {
+            return GetGruulsLairAI<boss_gruulAI>(creature);
+        }
 };
 
-class spell_gruul_shatter_effect : public SpellScript
+class spell_gruul_shatter : public SpellScriptLoader
 {
-    PrepareSpellScript(spell_gruul_shatter_effect);
+    public:
+        spell_gruul_shatter() : SpellScriptLoader("spell_gruul_shatter") { }
 
-    void CalculateDamage()
-    {
-        if (!GetHitUnit())
+        class spell_gruul_shatter_SpellScript : public SpellScript
         {
-            return;
-        }
+            bool Validate(SpellInfo const* /*spell*/) override
+            {
+                return ValidateSpellInfo({ SPELL_STONED, SPELL_SHATTER_EFFECT });
+            }
 
-        float radius = GetSpellInfo()->Effects[EFFECT_0].CalcRadius(GetCaster());
-        if (!radius)
+            void HandleScript(SpellEffIndex /*effIndex*/)
+            {
+                if (Unit* target = GetHitUnit())
+                {
+                    target->RemoveAurasDueToSpell(SPELL_STONED);
+                    target->CastSpell(nullptr, SPELL_SHATTER_EFFECT, true);
+                }
+            }
+
+            void Register() override
+            {
+                OnEffectHitTarget += SpellEffectFn(spell_gruul_shatter_SpellScript::HandleScript, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
+            }
+        };
+
+        SpellScript* GetSpellScript() const override
         {
-            return;
+            return new spell_gruul_shatter_SpellScript();
         }
+};
 
-        float distance = GetCaster()->GetDistance2d(GetHitUnit());
-        if (distance > 1.0f)
+class spell_gruul_shatter_effect : public SpellScriptLoader
+{
+    public:
+        spell_gruul_shatter_effect() : SpellScriptLoader("spell_gruul_shatter_effect") { }
+
+        class spell_gruul_shatter_effect_SpellScript : public SpellScript
         {
-            SetHitDamage(int32(GetHitDamage() * ((radius - distance) / radius)));
-        }
-    }
+            bool Validate(SpellInfo const* spellInfo) override
+            {
+                return ValidateSpellEffect({ { spellInfo->Id, EFFECT_0 } });
+            }
 
-    void Register() override
-    {
-        OnHit += SpellHitFn(spell_gruul_shatter_effect::CalculateDamage);
-    }
+            void CalculateDamage()
+            {
+                if (!GetHitUnit())
+                    return;
+
+                float radius = GetEffectInfo(EFFECT_0).CalcRadius(GetCaster(), SpellTargetIndex::TargetB);
+                if (!radius)
+                    return;
+
+                float distance = GetCaster()->GetDistance2d(GetHitUnit());
+                if (distance > 1.0f)
+                    SetHitDamage(int32(GetHitDamage() * ((radius - distance) / radius)));
+            }
+
+            void Register() override
+            {
+                OnHit += SpellHitFn(spell_gruul_shatter_effect_SpellScript::CalculateDamage);
+            }
+        };
+
+        SpellScript* GetSpellScript() const override
+        {
+            return new spell_gruul_shatter_effect_SpellScript();
+        }
 };
 
 void AddSC_boss_gruul()
 {
-    RegisterGruulsLairAI(boss_gruul);
-    RegisterGruulsLairAI(npc_invisible_tractor_beam_source);
-
-    RegisterSpellScript(spell_gruul_ground_slam);
-    RegisterSpellScript(spell_tractor_beam_creator);
-    RegisterSpellScript(spell_gruul_ground_slam_trigger);
-    RegisterSpellScript(spell_gruul_shatter);
-    RegisterSpellScript(spell_gruul_shatter_effect);
+    new boss_gruul();
+    new spell_gruul_shatter();
+    new spell_gruul_shatter_effect();
 }

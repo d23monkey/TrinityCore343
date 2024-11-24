@@ -1,5 +1,4 @@
-#
-# This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+# This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
 #
 # This file is free software; as a special exception the author gives
 # unlimited permission to copy and/or distribute it, with or without
@@ -8,7 +7,6 @@
 # This program is distributed in the hope that it will be useful, but
 # WITHOUT ANY WARRANTY, to the extent permitted by law; without even the
 # implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-#
 
 CollectSourceFiles(
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -20,11 +18,11 @@ if(USE_COREPCH)
   set(PRIVATE_PCH_HEADER PrecompiledHeaders/databasePCH.h)
 endif()
 
-# Group sources
 GroupSources(${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(database
-  ${PRIVATE_SOURCES})
+  ${PRIVATE_SOURCES}
+)
 
 # Do NOT add any extra include directory unless it does not create unneeded extra dependencies,
 # and specially, not add any dependency to neither of these: shared, game, scripts
@@ -47,17 +45,31 @@ target_include_directories(database
   PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
 
+add_definitions(-DTRINITY_API_EXPORT_DATABASE)
+
 target_link_libraries(database
   PRIVATE
-    acore-core-interface
+    trinity-core-interface
     mysql
   PUBLIC
     common)
 
 set_target_properties(database
-  PROPERTIES
-    FOLDER
-      "server")
+    PROPERTIES
+      FOLDER
+        "server")
+
+if(BUILD_SHARED_LIBS)
+  if(UNIX)
+    install(TARGETS database
+      LIBRARY
+        DESTINATION lib)
+  elseif(WIN32)
+    install(TARGETS database
+      RUNTIME
+        DESTINATION "${CMAKE_INSTALL_PREFIX}")
+  endif()
+endif()
 
 # Generate precompiled header
 if(USE_COREPCH)

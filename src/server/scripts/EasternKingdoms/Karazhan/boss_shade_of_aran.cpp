@@ -1,505 +1,607 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "AreaTriggerScript.h"
-#include "CreatureScript.h"
-#include "GameObject.h"
+/* ScriptData
+SDName: Boss_Shade_of_Aran
+SD%Complete: 95
+SDComment: Flame wreath missing cast animation, mods won't triggere.
+SDCategory: Karazhan
+EndScriptData */
+
+#include "ScriptMgr.h"
+#include "karazhan.h"
+#include "InstanceScript.h"
+#include "Item.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
-#include "SpellAuras.h"
 #include "SpellInfo.h"
-#include "SpellScript.h"
-#include "SpellScriptLoader.h"
-#include "TaskScheduler.h"
-#include "karazhan.h"
-#include "SpellMgr.h"
+#include "TemporarySummon.h"
 
-enum Texts
+enum ShadeOfAran
 {
-    SAY_AGGRO              = 0,
-    SAY_FLAMEWREATH        = 1,
-    SAY_BLIZZARD           = 2,
-    SAY_EXPLOSION          = 3,
-    SAY_DRINK              = 4,
-    SAY_ELEMENTALS         = 5,
-    SAY_KILL               = 6,
-    SAY_TIMEOVER           = 7,
-    SAY_DEATH              = 8,
-    SAY_ATIESH             = 9,
-    EMOTE_ARCANE_EXPLOSION = 10
-};
+    SAY_AGGRO                   = 0,
+    SAY_FLAMEWREATH             = 1,
+    SAY_BLIZZARD                = 2,
+    SAY_EXPLOSION               = 3,
+    SAY_DRINK                   = 4,
+    SAY_ELEMENTALS              = 5,
+    SAY_KILL                    = 6,
+    SAY_TIMEOVER                = 7,
+    SAY_DEATH                   = 8,
+    SAY_ATIESH                  = 9,
 
-enum Spells
-{
-    SPELL_FROSTBOLT              = 29954,
-    SPELL_FIREBALL               = 29953,
-    SPELL_ARCANE_MISSILE         = 29955,
-    SPELL_CHAINSOFICE            = 29991,
-    SPELL_DRAGONSBREATH          = 29964,
-    SPELL_MASSSLOW               = 30035,
-    SPELL_FLAME_WREATH           = 30004,
-    SPELL_FLAME_WREATH_RING      = 29946,
-    SPELL_FLAME_WREATH_RAN_THRU  = 29947, // You ran through the flames!
-    SPELL_FLAME_WREATH_EXPLOSION = 29949,
-    SPELL_AOE_CS                 = 29961,
-    SPELL_PLAYERPULL             = 32265,
-    SPELL_AEXPLOSION             = 29973,
-    SPELL_MASS_POLY              = 29963,
-    SPELL_BLINK_CENTER           = 29967,
-    SPELL_CONJURE                = 29975,
-    SPELL_DRINK                  = 30024,
-    SPELL_POTION                 = 32453,
-    SPELL_AOE_PYROBLAST          = 29978,
+    //Spells
+    SPELL_FROSTBOLT             = 29954,
+    SPELL_FIREBALL              = 29953,
+    SPELL_ARCMISSLE             = 29955,
+    SPELL_CHAINSOFICE           = 29991,
+    SPELL_DRAGONSBREATH         = 29964,
+    SPELL_MASSSLOW              = 30035,
+    SPELL_FLAME_WREATH          = 29946,
+    SPELL_AOE_CS                = 29961,
+    SPELL_PLAYERPULL            = 32265,
+    SPELL_AEXPLOSION            = 29973,
+    SPELL_MASS_POLY             = 29963,
+    SPELL_BLINK_CENTER          = 29967,
+    SPELL_ELEMENTALS            = 29962,
+    SPELL_CONJURE               = 29975,
+    SPELL_DRINK                 = 30024,
+    SPELL_POTION                = 32453,
+    SPELL_AOE_PYROBLAST         = 29978,
 
-    SPELL_SUMMON_WELEMENTAL_1    = 29962,
-    SPELL_SUMMON_WELEMENTAL_2    = 37051,
-    SPELL_SUMMON_WELEMENTAL_3    = 37052,
-    SPELL_SUMMON_WELEMENTAL_4    = 37053,
+    //Creature Spells
+    SPELL_CIRCULAR_BLIZZARD     = 29951,
+    SPELL_WATERBOLT             = 31012,
+    SPELL_SHADOW_PYRO           = 29978,
 
-    SPELL_SUMMON_BLIZZARD        = 29969, // Activates the Blizzard NPC
-
-    SPELL_SHADOW_PYRO            = 29978,
-
-    SPELL_ATIESH_VISUAL          = 31796,
-
-    SPELL_CURSE_OF_TONGUE_RANK1  = 1714,
-    SPELL_CURSE_OF_TONGUE_RANK2  = 11719,
-    SPELL_MIND_NUMBING_POISON    = 5760
-};
-
-enum Creatures
-{
-    NPC_SHADOW_OF_ARAN           = 18254
+    //Creatures
+    CREATURE_WATER_ELEMENTAL    = 17167,
+    CREATURE_SHADOW_OF_ARAN     = 18254,
+    CREATURE_ARAN_BLIZZARD      = 17161,
 };
 
 enum SuperSpell
 {
-    SUPER_FLAME                  = 0,
+    SUPER_FLAME = 0,
     SUPER_BLIZZARD,
     SUPER_AE,
 };
 
-enum Groups
+enum Items
 {
-    GROUP_DRINKING               = 0
+    ITEM_ATIESH_MAGE            = 22589,
+    ITEM_ATIESH_WARLOCK         = 22630,
+    ITEM_ATIESH_PRIEST          = 22631,
+    ITEM_ATIESH_DRUID           = 22632,
 };
 
-enum Misc
+uint32 const AtieshStaves[4] =
 {
-    ACTION_ATIESH_REACT          = 1
+    ITEM_ATIESH_MAGE,
+    ITEM_ATIESH_WARLOCK,
+    ITEM_ATIESH_PRIEST,
+    ITEM_ATIESH_DRUID,
 };
 
-Position const roomCenter = {-11158.f, -1920.f};
-
-std::vector<uint32> immuneSpells = { SPELL_CURSE_OF_TONGUE_RANK1, SPELL_CURSE_OF_TONGUE_RANK2, SPELL_MIND_NUMBING_POISON };
-
-struct boss_shade_of_aran : public BossAI
-{
-    boss_shade_of_aran(Creature* creature) : BossAI(creature, DATA_ARAN), _atieshReaction(false) { }
-
-    void Reset() override
-    {
-        BossAI::Reset();
-        // Reset the mana of the boss fully before resetting drinking
-        // If this was omitted, the boss would start drinking on reset if the mana was low on a wipe
-        me->SetPower(POWER_MANA, me->GetMaxPower(POWER_MANA));
-        _drinkScheduler.CancelAll();
-
-        _lastSuperSpell = 0;
-        _currentNormalSpell = 0;
-
-        _drinking = false;
-        _hasDrunk = false;
-
-        for (auto spell : immuneSpells)
-            me->ApplySpellImmune(0, IMMUNITY_ID, spell, true);
-
-        if (GameObject* libraryDoor = instance->instance->GetGameObject(instance->GetGuidData(DATA_GO_LIBRARY_DOOR)))
-        {
-            libraryDoor->SetGoState(GO_STATE_ACTIVE);
-            libraryDoor->RemoveGameObjectFlag(GO_FLAG_NOT_SELECTABLE);
-        }
-
-        ScheduleHealthCheckEvent(40, [&]{
-            Talk(SAY_ELEMENTALS);
-
-            std::vector<uint32> elementalSpells = { SPELL_SUMMON_WELEMENTAL_1, SPELL_SUMMON_WELEMENTAL_2, SPELL_SUMMON_WELEMENTAL_3, SPELL_SUMMON_WELEMENTAL_4 };
-
-            for (auto const& spell : elementalSpells)
-            {
-                DoCastAOE(spell, true);
-            }
-        });
-    }
-
-    bool CheckAranInRoom()
-    {
-        return me->GetDistance2d(roomCenter.GetPositionX(), roomCenter.GetPositionY()) < 45.0f;
-    }
-
-    void SetGUID(ObjectGuid guid, int32 id) override
-    {
-        if (id == ACTION_ATIESH_REACT && !_atieshReaction)
-        {
-            Talk(SAY_ATIESH);
-            _atieshReaction = true;
-            if (Unit* atieshOwner = ObjectAccessor::GetUnit(*me, guid))
-            {
-                me->PauseMovement(3000);
-                me->SetFacingToObject(atieshOwner);
-            }
-        }
-    }
-
-    void AttackStart(Unit* who) override
-    {
-        if (who && who->isTargetableForAttack() && me->GetReactState() != REACT_PASSIVE)
-        {
-            if (me->Attack(who, false))
-            {
-                me->GetMotionMaster()->MoveChase(who, 45.0f, 0);
-                me->AddThreat(who, 0.0f);
-            }
-        }
-    }
-
-    void KilledUnit(Unit* /*victim*/) override
-    {
-        Talk(SAY_KILL);
-    }
-
-    void JustDied(Unit* /*killer*/) override
-    {
-        Talk(SAY_DEATH);
-        _JustDied();
-
-        if (GameObject* libraryDoor = instance->instance->GetGameObject(instance->GetGuidData(DATA_GO_LIBRARY_DOOR)))
-        {
-            libraryDoor->SetGoState(GO_STATE_ACTIVE);
-            libraryDoor->RemoveGameObjectFlag(GO_FLAG_NOT_SELECTABLE);
-        }
-    }
-
-    void DamageTaken(Unit* doneBy, uint32& damage, DamageEffectType damagetype, SpellSchoolMask damageSchoolMask) override
-    {
-        BossAI::DamageTaken(doneBy, damage, damagetype, damageSchoolMask);
-
-        if ((damagetype == DIRECT_DAMAGE || damagetype == SPELL_DIRECT_DAMAGE) && _drinking && me->GetReactState() == REACT_PASSIVE)
-        {
-            me->RemoveAurasDueToSpell(SPELL_DRINK);
-            me->SetStandState(UNIT_STAND_STATE_STAND);
-            me->SetReactState(REACT_AGGRESSIVE);
-            me->SetPower(POWER_MANA, me->GetMaxPower(POWER_MANA) - 32000);
-            _drinkScheduler.CancelGroup(GROUP_DRINKING);
-            _drinkScheduler.Schedule(1s, [this](TaskContext)
-            {
-                DoCastSelf(SPELL_AOE_PYROBLAST, false);
-                _drinking = false;
-            });
-        }
-    }
-
-    void OnPowerUpdate(Powers /*power*/, int32 /*gain*/, int32 /*updateVal*/, uint32 currentPower) override
-    {
-        // Should drink at 10%, need 10% mana for mass polymorph
-        if (!_hasDrunk && me->GetMaxPower(POWER_MANA) && (currentPower * 100 / me->GetMaxPower(POWER_MANA)) < 13.5)
-        {
-            _hasDrunk = true;
-            me->SetReactState(REACT_PASSIVE);
-
-            // Start drinking after conjuring drinks
-            _drinkScheduler.Schedule(0s, GROUP_DRINKING, [this](TaskContext)
-            {
-                me->InterruptNonMeleeSpells(true);
-                me->RemoveAurasDueToSpell(SPELL_ARCANE_MISSILE);
-                Talk(SAY_DRINK);
-                DoCastAOE(SPELL_MASS_POLY);
-                // If we set drinking earlier it will break when someone attacks aran while casting poly
-                _drinking = true;
-            }).Schedule(3s, GROUP_DRINKING, [this](TaskContext)
-            {
-                DoCastSelf(SPELL_CONJURE);
-            }).Schedule(6s, GROUP_DRINKING, [this](TaskContext)
-            {
-                me->SetStandState(UNIT_STAND_STATE_SIT);
-                DoCastSelf(SPELL_DRINK);
-            }).Schedule(12s, GROUP_DRINKING, [this](TaskContext)
-            {
-                me->SetStandState(UNIT_STAND_STATE_STAND);
-                me->SetReactState(REACT_AGGRESSIVE);
-                me->SetPower(POWER_MANA, me->GetMaxPower(POWER_MANA) - 32000);
-                DoCastSelf(SPELL_AOE_PYROBLAST);
-                _drinkScheduler.CancelGroup(GROUP_DRINKING);
-                _drinking = false;
-            });
-        }
-    }
-
-    void JustEngagedWith(Unit* /*who*/) override
-    {
-        _JustEngagedWith();
-        Talk(SAY_AGGRO);
-
-        //handle timed closing door
-        scheduler.Schedule(15s, [this](TaskContext)
-        {
-            if (GameObject* libraryDoor = instance->instance->GetGameObject(instance->GetGuidData(DATA_GO_LIBRARY_DOOR)))
-            {
-                libraryDoor->SetGoState(GO_STATE_READY);
-                libraryDoor->SetGameObjectFlag(GO_FLAG_NOT_SELECTABLE);
-            }
-        }).Schedule(1s, [this](TaskContext context)
-        {
-            if (!_drinking)
-            {
-                if (me->IsNonMeleeSpellCast(false))
-                {
-                    return;
-                }
-
-                std::list<uint32> normalSpells = { SPELL_ARCANE_MISSILE, SPELL_FIREBALL, SPELL_FROSTBOLT };
-                normalSpells.remove_if([&](uint32 spell) -> bool { return !me->CanCastSpell(spell); });
-
-                if (!normalSpells.empty())
-                {
-                    // If we are able to cast spells, cast them.
-                    _currentNormalSpell = Acore::Containers::SelectRandomContainerElement(normalSpells);
-
-                    DoCastRandomTarget(_currentNormalSpell, 0, 100.0f);
-                    if (me->GetVictim())
-                    {
-                        me->GetMotionMaster()->MoveChase(me->GetVictim(), 45.0f);
-                    }
-                }
-                else
-                {
-                    // Otherwise, chase in melee range for auto attacks (and drink mana potion, if needed).
-                    me->SetWalk(false);
-                    me->ResumeChasingVictim();
-
-                    if (SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(_currentNormalSpell))
-                    {
-                        if (int32(me->GetPower(POWER_MANA)) < spellInfo->CalcPowerCost(me, (SpellSchoolMask)spellInfo->SchoolMask))
-                        {
-                            DoCastSelf(SPELL_POTION);
-                        }
-                    }
-                }
-            }
-            context.Repeat(2s);
-        }).Schedule(5s, [this](TaskContext context)
-        {
-            if (!_drinking)
-            {
-                urand(0, 1) ? DoCastSelf(SPELL_AOE_CS) : DoCastRandomTarget(SPELL_CHAINSOFICE);
-            }
-            context.Repeat(5s, 20s);
-        }).Schedule(6s, [this](TaskContext context)
-        {
-            if (!_drinking)
-            {
-                me->ClearProhibitedSpellTimers();
-
-                DoCastSelf(SPELL_BLINK_CENTER, true);
-
-                std::vector<uint32> superSpells = { SPELL_SUMMON_BLIZZARD, SPELL_AEXPLOSION, SPELL_FLAME_WREATH };
-
-                // Workaround for SelectRandomContainerElementIf
-                std::vector<uint32> allowedSpells;
-                std::copy_if(superSpells.begin(), superSpells.end(), std::back_inserter(allowedSpells), [&](uint32 superSpell) -> bool { return superSpell != _lastSuperSpell; });
-                _lastSuperSpell = allowedSpells[urand(0, allowedSpells.size() - 1)];
-
-                //  SelectRandomContainerElementIf produces unexpected output. Reintroduce when issue is resolved:
-                //  Sample results:
-                //       Selected Super Spell: 3722304989
-                //       superSpells elements : 29969 29973 30004
-                //  _lastSuperSpell = Acore::Containers::SelectRandomContainerElementIf(superSpells, [&](uint32 superSpell) -> bool { return superSpell != _lastSuperSpell; });
-
-                me->InterruptNonMeleeSpells(true); // Super spell should have prio over normal spells
-
-                switch (_lastSuperSpell)
-                {
-                    case SPELL_AEXPLOSION:
-                        Talk(SAY_EXPLOSION);
-                        Talk(EMOTE_ARCANE_EXPLOSION);
-                        DoCastSelf(SPELL_PLAYERPULL, true);
-                        DoCastSelf(SPELL_MASSSLOW, true);
-                        break;
-                    case SPELL_FLAME_WREATH:
-                        Talk(SAY_FLAMEWREATH);
-                        break;
-                    case SPELL_SUMMON_BLIZZARD:
-                        Talk(SAY_BLIZZARD);
-                        break;
-                }
-
-                DoCastAOE(_lastSuperSpell);
-            }
-            context.Repeat(35s, 40s);
-        }).Schedule(12min, [this](TaskContext context)
-        {
-            for (uint32 i = 0; i < 5; ++i)
-            {
-                if (Creature* unit = me->SummonCreature(NPC_SHADOW_OF_ARAN, 0.0f, 0.0f, 0.0f, 0.0f, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 5000))
-                {
-                    unit->Attack(me->GetVictim(), true);
-                    unit->SetFaction(me->GetFaction());
-                }
-            }
-
-            Talk(SAY_TIMEOVER);
-
-            context.Repeat(1min);
-        });
-    }
-
-    void UpdateAI(uint32 diff) override
-    {
-        scheduler.Update(diff);
-        _drinkScheduler.Update(diff);
-
-        if (!UpdateVictim())
-            return;
-
-        if (!CheckAranInRoom())
-        {
-            EnterEvadeMode();
-            return;
-        }
-
-        if (!_drinking)
-            DoMeleeAttackIfReady();
-    }
-
-private:
-    TaskScheduler _drinkScheduler;
-
-    uint32 _currentNormalSpell;
-    uint32 _lastSuperSpell;
-
-    bool _drinking;
-    bool _hasDrunk;
-    bool _atieshReaction;
-};
-
-// 30004 - Flame Wreath
-class spell_flamewreath : public SpellScript
-{
-    PrepareSpellScript(spell_flamewreath);
-
-    bool Validate(SpellInfo const* /*spell*/) override
-    {
-        return ValidateSpellInfo({ SPELL_FLAME_WREATH_RING });
-    }
-
-    void FilterTargets(std::list<WorldObject*>& targets)
-    {
-        uint8 maxSize = 3;
-
-        if (targets.size() > maxSize)
-        {
-            Acore::Containers::RandomResize(targets, maxSize);
-        }
-
-        _targets = targets;
-    }
-
-    void HandleFinish()
-    {
-        for (auto const& target : _targets)
-        {
-            if (Unit* targetUnit = target->ToUnit())
-            {
-                GetCaster()->CastSpell(targetUnit, SPELL_FLAME_WREATH_RING, true);
-            }
-        }
-    }
-
-private:
-    std::list<WorldObject*> _targets;
-
-    void Register() override
-    {
-        OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_flamewreath::FilterTargets, EFFECT_ALL, TARGET_UNIT_SRC_AREA_ENEMY);
-        AfterCast += SpellCastFn(spell_flamewreath::HandleFinish);
-    }
-};
-
-// 29946 - Flame Wreath (visual effect)
-class spell_flamewreath_aura : public AuraScript
-{
-    PrepareAuraScript(spell_flamewreath_aura);
-
-    bool Validate(SpellInfo const* /*spell*/) override
-    {
-        return ValidateSpellInfo({ SPELL_FLAME_WREATH_RAN_THRU, SPELL_FLAME_WREATH_EXPLOSION });
-    }
-
-    void OnRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        if (GetTargetApplication()->GetRemoveMode() == AURA_REMOVE_BY_DEFAULT && GetDuration())
-        {
-            if (Unit* target = GetTarget())
-            {
-                if (target->IsPlayer())
-                {
-                    target->CastSpell(target, SPELL_FLAME_WREATH_RAN_THRU, true);
-
-                    target->m_Events.AddEventAtOffset([target] {
-                        target->RemoveAurasDueToSpell(SPELL_FLAME_WREATH_RAN_THRU);
-                        target->CastSpell(target, SPELL_FLAME_WREATH_EXPLOSION, true);
-                    }, 1s);
-                }
-            }
-        }
-    }
-
-    void Register() override
-    {
-        OnEffectRemove += AuraEffectRemoveFn(spell_flamewreath_aura::OnRemove, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL, AURA_EFFECT_HANDLE_REAL);
-    }
-};
-
-class at_karazhan_atiesh_aran : public AreaTriggerScript
+class boss_shade_of_aran : public CreatureScript
 {
 public:
-    at_karazhan_atiesh_aran() : AreaTriggerScript("at_karazhan_atiesh_aran") { }
+    boss_shade_of_aran() : CreatureScript("boss_shade_of_aran") { }
 
-    bool OnTrigger(Player* player, AreaTrigger const* /*areaTrigger*/) override
+    CreatureAI* GetAI(Creature* creature) const override
     {
-        if (InstanceScript* instance = player->GetInstanceScript())
+        return GetKarazhanAI<boss_aranAI>(creature);
+    }
+
+    struct boss_aranAI : public ScriptedAI
+    {
+        boss_aranAI(Creature* creature) : ScriptedAI(creature), SeenAtiesh(false)
         {
-            if (player->HasAura(SPELL_ATIESH_VISUAL))
+            Initialize();
+            instance = creature->GetInstanceScript();
+        }
+
+        void Initialize()
+        {
+            SecondarySpellTimer = 5000;
+            NormalCastTimer = 0;
+            SuperCastTimer = 35000;
+            BerserkTimer = 720000;
+            CloseDoorTimer = 15000;
+
+            LastSuperSpell = rand32() % 3;
+
+            FlameWreathTimer = 0;
+            FlameWreathCheckTime = 0;
+
+            CurrentNormalSpell = 0;
+            ArcaneCooldown = 0;
+            FireCooldown = 0;
+            FrostCooldown = 0;
+
+            DrinkInterruptTimer = 10000;
+
+            ElementalsSpawned = false;
+            Drinking = false;
+            DrinkInturrupted = false;
+        }
+
+        InstanceScript* instance;
+
+        uint32 SecondarySpellTimer;
+        uint32 NormalCastTimer;
+        uint32 SuperCastTimer;
+        uint32 BerserkTimer;
+        uint32 CloseDoorTimer;                                  // Don't close the door right on aggro in case some people are still entering.
+
+        uint8 LastSuperSpell;
+
+        uint32 FlameWreathTimer;
+        uint32 FlameWreathCheckTime;
+        ObjectGuid FlameWreathTarget[3];
+        float FWTargPosX[3];
+        float FWTargPosY[3];
+
+        uint32 CurrentNormalSpell;
+        uint32 ArcaneCooldown;
+        uint32 FireCooldown;
+        uint32 FrostCooldown;
+
+        uint32 DrinkInterruptTimer;
+
+        bool ElementalsSpawned;
+        bool Drinking;
+        bool DrinkInturrupted;
+        bool SeenAtiesh;
+
+        void Reset() override
+        {
+            Initialize();
+            me->SetCanMelee(true);
+
+            // Not in progress
+            instance->SetBossState(DATA_ARAN, NOT_STARTED);
+            instance->HandleGameObject(instance->GetGuidData(DATA_GO_LIBRARY_DOOR), true);
+        }
+
+        void KilledUnit(Unit* /*victim*/) override
+        {
+            Talk(SAY_KILL);
+        }
+
+        void JustDied(Unit* /*killer*/) override
+        {
+            Talk(SAY_DEATH);
+
+            instance->SetBossState(DATA_ARAN, DONE);
+            instance->HandleGameObject(instance->GetGuidData(DATA_GO_LIBRARY_DOOR), true);
+        }
+
+        void JustEngagedWith(Unit* /*who*/) override
+        {
+            Talk(SAY_AGGRO);
+
+            instance->SetBossState(DATA_ARAN, IN_PROGRESS);
+            instance->HandleGameObject(instance->GetGuidData(DATA_GO_LIBRARY_DOOR), false);
+        }
+
+        void FlameWreathEffect()
+        {
+            std::vector<Unit*> targets;
+            //store the threat list in a different container
+            for (auto* ref : me->GetThreatManager().GetUnsortedThreatList())
             {
-                if (Creature* aran = instance->GetCreature(DATA_ARAN))
+                Unit* target = ref->GetVictim();
+                if (ref->GetVictim()->GetTypeId() == TYPEID_PLAYER && ref->GetVictim()->IsAlive())
+                        targets.push_back(target);
+            }
+
+            //cut down to size if we have more than 3 targets
+            while (targets.size() > 3)
+                targets.erase(targets.begin() + rand32() % targets.size());
+
+            uint32 i = 0;
+            for (std::vector<Unit*>::const_iterator itr = targets.begin(); itr!= targets.end(); ++itr)
+            {
+                if (*itr)
                 {
-                    aran->AI()->SetGUID(player->GetGUID(), ACTION_ATIESH_REACT);
+                    FlameWreathTarget[i] = (*itr)->GetGUID();
+                    FWTargPosX[i] = (*itr)->GetPositionX();
+                    FWTargPosY[i] = (*itr)->GetPositionY();
+                    DoCast((*itr), SPELL_FLAME_WREATH, true);
+                    ++i;
                 }
             }
         }
 
-        return true;
+        void UpdateAI(uint32 diff) override
+        {
+            if (!UpdateVictim())
+                return;
+
+            if (CloseDoorTimer)
+            {
+                if (CloseDoorTimer <= diff)
+                {
+                    instance->HandleGameObject(instance->GetGuidData(DATA_GO_LIBRARY_DOOR), false);
+                    CloseDoorTimer = 0;
+                } else CloseDoorTimer -= diff;
+            }
+
+            //Cooldowns for casts
+            if (ArcaneCooldown)
+            {
+                if (ArcaneCooldown >= diff)
+                    ArcaneCooldown -= diff;
+            else ArcaneCooldown = 0;
+            }
+
+            if (FireCooldown)
+            {
+                if (FireCooldown >= diff)
+                    FireCooldown -= diff;
+            else FireCooldown = 0;
+            }
+
+            if (FrostCooldown)
+            {
+                if (FrostCooldown >= diff)
+                    FrostCooldown -= diff;
+            else FrostCooldown = 0;
+            }
+
+            if (!Drinking && me->GetMaxPower(POWER_MANA) && me->GetPowerPct(POWER_MANA) < 20.f)
+            {
+                Drinking = true;
+                me->InterruptNonMeleeSpells(false);
+
+                Talk(SAY_DRINK);
+
+                if (!DrinkInturrupted)
+                {
+                    DoCast(me, SPELL_MASS_POLY, true);
+                    DoCast(me, SPELL_CONJURE, false);
+                    DoCast(me, SPELL_DRINK, false);
+                    me->SetStandState(UNIT_STAND_STATE_SIT);
+                    DrinkInterruptTimer = 10000;
+                }
+            }
+
+            //Drink Interrupt
+            if (Drinking && DrinkInturrupted)
+            {
+                Drinking = false;
+                me->RemoveAurasDueToSpell(SPELL_DRINK);
+                me->SetStandState(UNIT_STAND_STATE_STAND);
+                me->SetPower(POWER_MANA, me->GetMaxPower(POWER_MANA)-32000);
+                DoCast(me, SPELL_POTION, false);
+            }
+
+            //Drink Interrupt Timer
+            if (Drinking && !DrinkInturrupted)
+            {
+                if (DrinkInterruptTimer >= diff)
+                    DrinkInterruptTimer -= diff;
+                else
+                {
+                    me->SetStandState(UNIT_STAND_STATE_STAND);
+                    DoCast(me, SPELL_POTION, true);
+                    DoCast(me, SPELL_AOE_PYROBLAST, false);
+                    DrinkInturrupted = true;
+                    Drinking = false;
+                }
+            }
+
+            //Don't execute any more code if we are drinking
+            if (Drinking)
+                return;
+
+            //Normal casts
+            if (NormalCastTimer <= diff)
+            {
+                if (!me->IsNonMeleeSpellCast(false))
+                {
+                    Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 100, true);
+                    if (!target)
+                        return;
+
+                    uint32 Spells[3];
+                    uint8 AvailableSpells = 0;
+
+                    //Check for what spells are not on cooldown
+                    if (!ArcaneCooldown)
+                    {
+                        Spells[AvailableSpells] = SPELL_ARCMISSLE;
+                        ++AvailableSpells;
+                    }
+                    if (!FireCooldown)
+                    {
+                        Spells[AvailableSpells] = SPELL_FIREBALL;
+                        ++AvailableSpells;
+                    }
+                    if (!FrostCooldown)
+                    {
+                        Spells[AvailableSpells] = SPELL_FROSTBOLT;
+                        ++AvailableSpells;
+                    }
+
+                    //If no available spells wait 1 second and try again
+                    if (AvailableSpells)
+                    {
+                        CurrentNormalSpell = Spells[rand32() % AvailableSpells];
+                        DoCast(target, CurrentNormalSpell);
+                    }
+                }
+                NormalCastTimer = 1000;
+            } else NormalCastTimer -= diff;
+
+            if (SecondarySpellTimer <= diff)
+            {
+                switch (urand(0, 1))
+                {
+                    case 0:
+                        DoCast(me, SPELL_AOE_CS);
+                        break;
+                    case 1:
+                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 100, true))
+                            DoCast(target, SPELL_CHAINSOFICE);
+                        break;
+                }
+                SecondarySpellTimer = urand(5000, 20000);
+            } else SecondarySpellTimer -= diff;
+
+            if (SuperCastTimer <= diff)
+            {
+                uint8 Available[2];
+
+                switch (LastSuperSpell)
+                {
+                    case SUPER_AE:
+                        Available[0] = SUPER_FLAME;
+                        Available[1] = SUPER_BLIZZARD;
+                        break;
+                    case SUPER_FLAME:
+                        Available[0] = SUPER_AE;
+                        Available[1] = SUPER_BLIZZARD;
+                        break;
+                    case SUPER_BLIZZARD:
+                        Available[0] = SUPER_FLAME;
+                        Available[1] = SUPER_AE;
+                        break;
+                    default:
+                        Available[0] = 0;
+                        Available[1] = 0;
+                        break;
+                }
+
+                LastSuperSpell = Available[urand(0, 1)];
+
+                switch (LastSuperSpell)
+                {
+                    case SUPER_AE:
+                        Talk(SAY_EXPLOSION);
+
+                        DoCast(me, SPELL_BLINK_CENTER, true);
+                        DoCast(me, SPELL_PLAYERPULL, true);
+                        DoCast(me, SPELL_MASSSLOW, true);
+                        DoCast(me, SPELL_AEXPLOSION, false);
+                        break;
+
+                    case SUPER_FLAME:
+                        Talk(SAY_FLAMEWREATH);
+
+                        FlameWreathTimer = 20000;
+                        FlameWreathCheckTime = 500;
+
+                        FlameWreathTarget[0].Clear();
+                        FlameWreathTarget[1].Clear();
+                        FlameWreathTarget[2].Clear();
+
+                        FlameWreathEffect();
+                        break;
+
+                    case SUPER_BLIZZARD:
+                        Talk(SAY_BLIZZARD);
+
+                        if (Creature* pSpawn = me->SummonCreature(CREATURE_ARAN_BLIZZARD, 0.0f, 0.0f, 0.0f, 0.0f, TEMPSUMMON_TIMED_DESPAWN, 25s))
+                        {
+                            pSpawn->SetFaction(me->GetFaction());
+                            pSpawn->CastSpell(pSpawn, SPELL_CIRCULAR_BLIZZARD, false);
+                        }
+                        break;
+                }
+
+                SuperCastTimer = urand(35000, 40000);
+            } else SuperCastTimer -= diff;
+
+            if (!ElementalsSpawned && HealthBelowPct(40))
+            {
+                ElementalsSpawned = true;
+
+                for (uint32 i = 0; i < 4; ++i)
+                {
+                    if (Creature* unit = me->SummonCreature(CREATURE_WATER_ELEMENTAL, 0.0f, 0.0f, 0.0f, 0.0f, TEMPSUMMON_TIMED_DESPAWN, 90s))
+                    {
+                        unit->Attack(me->GetVictim(), true);
+                        unit->SetFaction(me->GetFaction());
+                    }
+                }
+
+                Talk(SAY_ELEMENTALS);
+            }
+
+            if (BerserkTimer <= diff)
+            {
+                for (uint32 i = 0; i < 5; ++i)
+                {
+                    if (Creature* unit = me->SummonCreature(CREATURE_SHADOW_OF_ARAN, 0.0f, 0.0f, 0.0f, 0.0f, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 5s))
+                    {
+                        unit->Attack(me->GetVictim(), true);
+                        unit->SetFaction(me->GetFaction());
+                    }
+                }
+
+                Talk(SAY_TIMEOVER);
+
+                BerserkTimer = 60000;
+            } else BerserkTimer -= diff;
+
+            //Flame Wreath check
+            if (FlameWreathTimer)
+            {
+                if (FlameWreathTimer >= diff)
+                    FlameWreathTimer -= diff;
+                else FlameWreathTimer = 0;
+
+                if (FlameWreathCheckTime <= diff)
+                {
+                    for (uint8 i = 0; i < 3; ++i)
+                    {
+                        if (!FlameWreathTarget[i])
+                            continue;
+
+                        Unit* unit = ObjectAccessor::GetUnit(*me, FlameWreathTarget[i]);
+                        if (unit && !unit->IsWithinDist2d(FWTargPosX[i], FWTargPosY[i], 3))
+                        {
+                            unit->CastSpell(unit, 20476, CastSpellExtraArgs(TRIGGERED_FULL_MASK)
+                                .SetOriginalCaster(me->GetGUID()));
+                            unit->CastSpell(unit, 11027, true);
+                            FlameWreathTarget[i].Clear();
+                        }
+                    }
+                    FlameWreathCheckTime = 500;
+                } else FlameWreathCheckTime -= diff;
+            }
+
+            me->SetCanMelee(ArcaneCooldown && FireCooldown && FrostCooldown);
+        }
+
+        void DamageTaken(Unit* /*pAttacker*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
+        {
+            if (!DrinkInturrupted && Drinking && damage)
+                DrinkInturrupted = true;
+        }
+
+        void SpellHit(WorldObject* /*caster*/, SpellInfo const* spellInfo) override
+        {
+            //We only care about interrupt effects and only if they are durring a spell currently being cast
+            if (!spellInfo->HasEffect(SPELL_EFFECT_INTERRUPT_CAST) || !me->IsNonMeleeSpellCast(false))
+                return;
+
+            //Interrupt effect
+            me->InterruptNonMeleeSpells(false);
+
+            //Normally we would set the cooldown equal to the spell duration
+            //but we do not have access to the DurationStore
+
+            switch (CurrentNormalSpell)
+            {
+                case SPELL_ARCMISSLE: ArcaneCooldown = 5000; break;
+                case SPELL_FIREBALL: FireCooldown = 5000; break;
+                case SPELL_FROSTBOLT: FrostCooldown = 5000; break;
+            }
+        }
+
+        void MoveInLineOfSight(Unit* who) override
+        {
+            ScriptedAI::MoveInLineOfSight(who);
+
+            if (SeenAtiesh || me->IsInCombat() || me->GetDistance2d(who) > me->GetAttackDistance(who) + 10.0f)
+                return;
+
+            Player* player = who->ToPlayer();
+            if (!player)
+                return;
+
+            for (uint32 id : AtieshStaves)
+            {
+                if (!PlayerHasWeaponEquipped(player, id))
+                    continue;
+
+                SeenAtiesh = true;
+                Talk(SAY_ATIESH);
+                me->SetFacingTo(me->GetAbsoluteAngle(player));
+                me->ClearUnitState(UNIT_STATE_MOVING);
+                me->GetMotionMaster()->MoveDistract(7 * IN_MILLISECONDS, me->GetAbsoluteAngle(who));
+                break;
+            }
+        }
+
+        private:
+            bool PlayerHasWeaponEquipped(Player* player, uint32 itemEntry)
+            {
+                Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND);
+                if (item && item->GetEntry() == itemEntry)
+                    return true;
+
+                return false;
+            }
+    };
+};
+
+class npc_aran_elemental : public CreatureScript
+{
+public:
+    npc_aran_elemental() : CreatureScript("npc_aran_elemental") { }
+
+    CreatureAI* GetAI(Creature* creature) const override
+    {
+        return GetKarazhanAI<water_elementalAI>(creature);
     }
+
+    struct water_elementalAI : public ScriptedAI
+    {
+        water_elementalAI(Creature* creature) : ScriptedAI(creature)
+        {
+            Initialize();
+        }
+
+        void Initialize()
+        {
+            CastTimer = 2000 + (rand32() % 3000);
+        }
+
+        uint32 CastTimer;
+
+        void Reset() override
+        {
+            Initialize();
+        }
+
+        void JustEngagedWith(Unit* /*who*/) override { }
+
+        void UpdateAI(uint32 diff) override
+        {
+            if (!UpdateVictim())
+                return;
+
+            if (CastTimer <= diff)
+            {
+                DoCastVictim(SPELL_WATERBOLT);
+                CastTimer = urand(2000, 5000);
+            } else CastTimer -= diff;
+        }
+    };
 };
 
 void AddSC_boss_shade_of_aran()
 {
-    RegisterKarazhanCreatureAI(boss_shade_of_aran);
-    RegisterSpellScript(spell_flamewreath);
-    RegisterSpellScript(spell_flamewreath_aura);
-    new at_karazhan_atiesh_aran();
+    new boss_shade_of_aran();
+    new npc_aran_elemental();
 }

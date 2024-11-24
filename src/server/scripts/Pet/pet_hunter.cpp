@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,115 +20,105 @@
  * Scriptnames of files in this file should be prefixed with "npc_pet_hun_".
  */
 
-#include "CreatureScript.h"
-#include "PetDefines.h"
+#include "ScriptMgr.h"
+#include "Containers.h"
+#include "CreatureAIImpl.h"
 #include "ScriptedCreature.h"
+#include "TemporarySummon.h"
 
 enum HunterSpells
 {
     SPELL_HUNTER_CRIPPLING_POISON       = 30981, // Viper
     SPELL_HUNTER_DEADLY_POISON_PASSIVE  = 34657, // Venomous Snake
-    SPELL_HUNTER_MIND_NUMBING_POISON    = 25810, // Viper
-    SPELL_HUNTER_GLYPH_OF_SNAKE_TRAP    = 56849,
-    SPELL_HUNTER_PET_SCALING            = 62915
+    SPELL_HUNTER_MIND_NUMBING_POISON    = 25810  // Viper
+};
+
+enum HunterCreatures
+{
+    NPC_HUNTER_VIPER                    = 19921
 };
 
 struct npc_pet_hunter_snake_trap : public ScriptedAI
 {
-    npc_pet_hunter_snake_trap(Creature* creature) : ScriptedAI(creature) { _init = false; }
+    npc_pet_hunter_snake_trap(Creature* creature) : ScriptedAI(creature), _isViper(false), _spellTimer(0) { }
 
-    void Reset() override
+    void JustEngagedWith(Unit* /*who*/) override { }
+
+    void JustAppeared() override
     {
-        _spellTimer = urand(1500, 3000);
+        _isViper = me->GetEntry() == NPC_HUNTER_VIPER ? true : false;
 
-        // Start attacking attacker of owner on first ai update after spawn - move in line of sight may choose better target
-        if (!me->GetVictim())
-            if (Unit* tgt = me->SelectNearestTarget(10.0f))
-            {
-                me->AddThreat(tgt, 100000.0f);
-                AttackStart(tgt);
-            }
+        me->SetMaxHealth(uint32(107 * (me->GetLevel() - 40) * 0.025f));
+        // Add delta to make them not all hit the same time
+        me->SetBaseAttackTime(BASE_ATTACK, me->GetBaseAttackTime(BASE_ATTACK) + urandms(0,6));
+
+        if (!_isViper && !me->HasAura(SPELL_HUNTER_DEADLY_POISON_PASSIVE))
+            DoCast(me, SPELL_HUNTER_DEADLY_POISON_PASSIVE, true);
     }
 
-    void EnterEvadeMode(EvadeReason /*why*/) override
-    {
-        // _EnterEvadeMode();
-        me->GetThreatMgr().ClearAllThreat();
-        me->CombatStop(true);
-        me->LoadCreaturesAddon(true);
-        me->SetLootRecipient(nullptr);
-        me->ResetPlayerDamageReq();
-        me->ClearLastLeashExtensionTimePtr();
-
-        me->AddUnitState(UNIT_STATE_EVADE);
-        me->GetMotionMaster()->MoveTargetedHome();
-
-        Reset();
-    }
-
-    //Redefined for random target selection:
-    void MoveInLineOfSight(Unit* who) override
-    {
-        if (!me->GetVictim() && who->isTargetableForAttack() && (me->IsHostileTo(who)) && who->isInAccessiblePlaceFor(me))
-        {
-            if (me->GetDistanceZ(who) > CREATURE_Z_ATTACK_RANGE)
-                return;
-
-            if (me->IsWithinDistInMap(who, 10.0f))
-            {
-                me->AddThreat(who, 100000.0f);
-                AttackStart(who);
-            }
-        }
-    }
+    // Redefined for random target selection:
+    void MoveInLineOfSight(Unit* /*who*/) override { }
 
     void UpdateAI(uint32 diff) override
     {
+        if (me->GetVictim() && me->GetVictim()->HasBreakableByDamageCrowdControlAura())
+        { // don't break cc
+            me->GetThreatManager().ClearFixate();
+            me->InterruptNonMeleeSpells(false);
+            me->AttackStop();
+            return;
+        }
+
+        if (me->IsSummon() && !me->GetThreatManager().GetFixateTarget())
+        { // find new target
+            Unit* summoner = me->ToTempSummon()->GetSummonerUnit();
+
+            std::vector<Unit*> targets;
+
+            auto addTargetIfValid = [this, &targets, summoner](CombatReference* ref) mutable
+            {
+                Unit* enemy = ref->GetOther(summoner);
+                if (!enemy->HasBreakableByDamageCrowdControlAura() && me->CanCreatureAttack(enemy) && me->IsWithinDistInMap(enemy, me->GetAttackDistance(enemy)))
+                    targets.push_back(enemy);
+            };
+
+            for (std::pair<ObjectGuid const, PvPCombatReference*> const& pair : summoner->GetCombatManager().GetPvPCombatRefs())
+                addTargetIfValid(pair.second);
+
+            if (targets.empty())
+                for (std::pair<ObjectGuid const, CombatReference*> const& pair : summoner->GetCombatManager().GetPvECombatRefs())
+                    addTargetIfValid(pair.second);
+
+            for (Unit* target : targets)
+                me->EngageWithTarget(target);
+
+            if (!targets.empty())
+            {
+                Unit* target = Trinity::Containers::SelectRandomContainerElement(targets);
+                me->GetThreatManager().FixateTarget(target);
+            }
+        }
+
         if (!UpdateVictim())
             return;
 
-        if (me->GetVictim()->HasBreakableByDamageCrowdControlAura(me))
+        // Viper
+        if (_isViper)
         {
-            me->InterruptNonMeleeSpells(false);
-            return;
+            if (_spellTimer <= diff)
+            {
+                if (!urand(0, 2)) // 33% chance to cast
+                    DoCastVictim(RAND(SPELL_HUNTER_MIND_NUMBING_POISON, SPELL_HUNTER_CRIPPLING_POISON));
+
+                _spellTimer = 3000;
+            }
+            else
+                _spellTimer -= diff;
         }
-
-        if (!_init)
-        {
-            _init = true;
-
-            uint32 health = uint32(107 * (me->GetLevel() - 40) * 0.025f);
-            me->SetCreateHealth(health);
-            me->SetModifierValue(UNIT_MOD_HEALTH, BASE_VALUE, (float)health);
-            me->SetMaxHealth(health);
-
-            //Add delta to make them not all hit the same time
-            uint32 delta = urand(0, 700);
-            me->SetAttackTime(BASE_ATTACK, me->GetAttackTime(BASE_ATTACK) + delta);
-
-            if (me->GetEntry() == NPC_VENOMOUS_SNAKE)
-                DoCastSelf(SPELL_HUNTER_DEADLY_POISON_PASSIVE, true);
-
-            // Glyph of Snake Trap
-            if (Unit* owner = me->GetOwner())
-                if (owner->GetAuraEffectDummy(SPELL_HUNTER_GLYPH_OF_SNAKE_TRAP))
-                    me->CastSpell(me, SPELL_HUNTER_PET_SCALING, true);
-        }
-
-        _spellTimer += diff;
-        if (_spellTimer >= 3000)
-        {
-            if (urand(0, 2) == 0) // 33% chance to cast
-                DoCastVictim(RAND(SPELL_HUNTER_MIND_NUMBING_POISON, SPELL_HUNTER_CRIPPLING_POISON));
-
-            _spellTimer = 0;
-        }
-
-        DoMeleeAttackIfReady();
     }
 
 private:
-    bool _init;
+    bool _isViper;
     uint32 _spellTimer;
 };
 

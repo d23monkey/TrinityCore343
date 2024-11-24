@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,29 +18,48 @@
 #ifndef BFD_H_
 #define BFD_H_
 
-#define DataHeader "BFD"
+#include "CreatureAIImpl.h"
 
-enum Data
+#define BFDScriptName "instance_blackfathom_deeps"
+#define DataHeader "BFDv1"
+
+uint32 const EncounterCount = 3;
+
+enum BFDData64
 {
-    TYPE_GELIHAST               = 0,
-    TYPE_FIRE1                  = 1,
-    TYPE_FIRE2                  = 2,
-    TYPE_FIRE3                  = 3,
-    TYPE_FIRE4                  = 4,
-    TYPE_AKU_MAI_EVENT          = 5,
-    TYPE_AKU_MAI                = 6,
-    MAX_ENCOUNTERS              = 7
+    DATA_SHRINE1,
+    DATA_SHRINE2,
+    DATA_SHRINE3,
+    DATA_SHRINE4,
+    DATA_TWILIGHT_LORD_KELRIS,
+    DATA_SHRINE_OF_GELIHAST,
+    DATA_ALTAR_OF_THE_DEEPS,
+    DATA_MAINDOOR,
 };
 
-enum CreatureIds
+enum BFDData
 {
+    DATA_GELIHAST,
+    DATA_KELRIS,
+    DATA_AKU_MAI,
+    DATA_FIRE,
+    DATA_EVENT
+};
+
+enum BFDCreatureIds
+{
+    NPC_TWILIGHT_LORD_KELRIS                               = 4832,
+    NPC_LORGUS_JETT                                        = 12902,
+
     NPC_AKU_MAI_SNAPJAW                                    = 4825,
     NPC_MURKSHALLOW_SOFTSHELL                              = 4977,
     NPC_AKU_MAI_SERVANT                                    = 4978,
-    NPC_BARBED_CRUSTACEAN                                  = 4823
+    NPC_BARBED_CRUSTACEAN                                  = 4823,
+
+    NPC_MORRIDUNE                                          = 6729
 };
 
-enum GameObjectIds
+enum BFDGameObjectIds
 {
     GO_SHRINE_OF_GELIHAST                                  = 103015,
     GO_FIRE_OF_AKU_MAI_1                                   = 21118,
@@ -51,4 +70,13 @@ enum GameObjectIds
     GO_ALTAR_OF_THE_DEEPS                                  = 103016
 };
 
-#endif
+template <class AI, class T>
+inline AI* GetBlackfathomDeepsAI(T* obj)
+{
+    return GetInstanceAI<AI>(obj, BFDScriptName);
+}
+
+#define RegisterBlackfathomDeepsCreatureAI(ai_name) RegisterCreatureAIWithFactory(ai_name, GetBlackfathomDeepsAI)
+#define RegisterBlackfathomDeepsGameObjectAI(ai_name) RegisterGameObjectAIWithFactory(ai_name, GetBlackfathomDeepsAI)
+
+#endif // BFD_H_

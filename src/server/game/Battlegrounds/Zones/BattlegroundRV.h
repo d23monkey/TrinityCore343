@@ -1,20 +1,19 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
 #ifndef __BATTLEGROUNDRV_H
 #define __BATTLEGROUNDRV_H
 
@@ -39,13 +38,14 @@ enum BattlegroundRVObjectTypes
     BG_RV_OBJECT_PULLEY_1,
     BG_RV_OBJECT_PULLEY_2,
 
+    BG_RV_OBJECT_PILAR_COLLISION_1,
+    BG_RV_OBJECT_PILAR_COLLISION_2,
+    BG_RV_OBJECT_PILAR_COLLISION_3,
+    BG_RV_OBJECT_PILAR_COLLISION_4,
+
     BG_RV_OBJECT_ELEVATOR_1,
     BG_RV_OBJECT_ELEVATOR_2,
-
-    BG_RV_OBJECT_READY_MARKER_1,
-    BG_RV_OBJECT_READY_MARKER_2,
-
-    BG_RV_OBJECT_MAX,
+    BG_RV_OBJECT_MAX
 };
 
 enum BattlegroundRVGameObjects
@@ -61,14 +61,18 @@ enum BattlegroundRVGameObjects
     BG_RV_OBJECT_TYPE_PULLEY_2                   = 192390,
     BG_RV_OBJECT_TYPE_GEAR_1                     = 192393,
     BG_RV_OBJECT_TYPE_GEAR_2                     = 192394,
-
     BG_RV_OBJECT_TYPE_ELEVATOR_1                 = 194582,
     BG_RV_OBJECT_TYPE_ELEVATOR_2                 = 194586,
+
+    BG_RV_OBJECT_TYPE_PILAR_COLLISION_1          = 194580, // axe
+    BG_RV_OBJECT_TYPE_PILAR_COLLISION_2          = 194579, // arena
+    BG_RV_OBJECT_TYPE_PILAR_COLLISION_3          = 194581, // lightning
+    BG_RV_OBJECT_TYPE_PILAR_COLLISION_4          = 194578, // ivory
 
     BG_RV_OBJECT_TYPE_PILAR_1                    = 194583, // axe
     BG_RV_OBJECT_TYPE_PILAR_2                    = 194584, // arena
     BG_RV_OBJECT_TYPE_PILAR_3                    = 194585, // lightning
-    BG_RV_OBJECT_TYPE_PILAR_4                    = 194587, // ivory
+    BG_RV_OBJECT_TYPE_PILAR_4                    = 194587  // ivory
 };
 
 enum BattlegroundRVData
@@ -77,38 +81,30 @@ enum BattlegroundRVData
     BG_RV_STATE_SWITCH_PILLARS,
     BG_RV_STATE_CLOSE_FIRE,
 
-    BG_RV_WORLD_STATE_A                          = 0xe11,
-    BG_RV_WORLD_STATE_H                          = 0xe10,
-    BG_RV_WORLD_STATE                            = 0xe1a,
+    BG_RV_PILLAR_SWITCH_TIMER                    = 25000,
+    BG_RV_FIRE_TO_PILLAR_TIMER                   = 20000,
+    BG_RV_CLOSE_FIRE_TIMER                       =  5000,
+    BG_RV_FIRST_TIMER                            = 20133,
 };
 
-class AC_GAME_API BattlegroundRV : public Arena
+class BattlegroundRV : public Arena
 {
-public:
-    BattlegroundRV();
+    public:
+        BattlegroundRV(BattlegroundTemplate const* battlegroundTemplate);
 
-    /* inherited from BattlegroundClass */
-    void StartingEventOpenDoors() override;
-    void Init() override;
-    void FillInitialWorldStates(WorldPacket& d) override;
-    void HandleAreaTrigger(Player* player, uint32 trigger) override;
-    bool SetupBattleground() override;
-    bool HandlePlayerUnderMap(Player* player) override;
+        /* inherited from BattlegroundClass */
+        void StartingEventOpenDoors() override;
 
-    GameObject* GetPillarAtPosition(Position* p);
+        void HandleAreaTrigger(Player* source, uint32 trigger, bool entered) override;
+        bool SetupBattleground() override;
 
-private:
-    Milliseconds _timer;
-    uint32 _state;
-    uint16 _checkPlayersTimer;
+    private:
+        void PostUpdateImpl(uint32 diff) override;
 
-    void PostUpdateImpl(uint32 diff) override;
+        void TogglePillarCollision();
 
-protected:
-    void TeleportUnitToNewZ(Unit* unit, float newZ, bool casting);
-    void CheckPositionForUnit(Unit* unit);
-    void UpdatePillars();
-    uint32 GetPillarIdForPos(Position* p);
+        uint32 _timer;
+        uint32 _state;
+        bool   _pillarCollision;
 };
-
 #endif

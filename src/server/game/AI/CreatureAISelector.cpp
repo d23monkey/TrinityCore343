@@ -1,27 +1,32 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureAISelector.h"
+#include "AIException.h"
+#include "AreaTrigger.h"
 #include "Creature.h"
+#include "CreatureAISelector.h"
 #include "CreatureAIFactory.h"
-
+#include "Log.h"
 #include "MovementGenerator.h"
 
 #include "GameObject.h"
+#include "GameObjectAIFactory.h"
+
+#include "AreaTriggerAI.h"
 
 #include "ScriptMgr.h"
 
@@ -51,7 +56,7 @@ namespace FactorySelector
     };
 
     template <class AI, class T>
-    inline FactoryHolder<AI, T> const* SelectFactory(T* obj)
+    inline FactoryHolder<AI, T> const* SelectFactory(T const* obj)
     {
         static_assert(std::is_same<AI, CreatureAI>::value || std::is_same<AI, GameObjectAI>::value, "Invalid template parameter");
         static_assert(std::is_same<AI, CreatureAI>::value == std::is_same<T, Creature>::value, "Incompatible AI for type");
@@ -82,17 +87,50 @@ namespace FactorySelector
             return ASSERT_NOTNULL(sCreatureAIRegistry->GetRegistryItem("PetAI"))->Create(creature);
 
         // scriptname in db
-        if (CreatureAI* scriptedAI = sScriptMgr->GetCreatureAI(creature))
-            return scriptedAI;
+        try
+        {
+            if (CreatureAI* scriptedAI = sScriptMgr->GetCreatureAI(creature))
+                return scriptedAI;
+        }
+        catch (InvalidAIException const& e)
+        {
+            TC_LOG_ERROR("entities.unit", "Exception trying to assign script '{}' to Creature (Entry: {}), this Creature will have a default AI. Exception message: {}",
+                creature->GetScriptName(), creature->GetEntry(), e.what());
+        }
 
         return SelectFactory<CreatureAI>(creature)->Create(creature);
     }
 
+    uint32 GetSelectedAIId(Creature const* creature)
+    {
+        if (creature->IsPet())
+        {
+            auto const* registry = ASSERT_NOTNULL(sCreatureAIRegistry->GetRegistryItem("PetAI"));
+            auto const* factory = dynamic_cast<SelectableAI<Creature, CreatureAI> const*>(registry);
+            ASSERT(factory);
+
+            return factory->GetScriptId();
+        }
+
+        if (uint32 id = creature->GetScriptId())
+        {
+            if (sScriptMgr->CanCreateCreatureAI(id))
+            {
+                return id;
+            }
+        }
+
+        auto const* factory = dynamic_cast<SelectableAI<Creature, CreatureAI> const*>(SelectFactory<CreatureAI>(creature));
+        ASSERT(factory);
+
+        return factory->GetScriptId();
+    }
+
     MovementGenerator* SelectMovementGenerator(Unit* unit)
     {
-        MovementGeneratorType type = IDLE_MOTION_TYPE;
+        MovementGeneratorType type = unit->GetDefaultMovementType();
         if (Creature* creature = unit->ToCreature())
-            if (!creature->GetCharmerOrOwnerPlayerOrPlayerItself())
+            if (!creature->GetPlayerMovingMe())
                 type = creature->GetDefaultMovementType();
 
         MovementGeneratorCreator const* mv_factory = sMovementGeneratorRegistry->GetRegistryItem(type);
@@ -106,5 +144,47 @@ namespace FactorySelector
             return scriptedAI;
 
         return SelectFactory<GameObjectAI>(go)->Create(go);
+    }
+
+    uint32 GetSelectedAIId(GameObject const* go)
+    {
+        if (uint32 id = go->GetScriptId())
+        {
+            if (sScriptMgr->CanCreateGameObjectAI(id))
+            {
+                return id;
+            }
+        }
+
+        auto const* factory = dynamic_cast<SelectableAI<GameObject, GameObjectAI> const*>(SelectFactory<GameObjectAI>(go));
+        ASSERT(factory);
+
+        return factory->GetScriptId();
+    }
+
+    static uint32 GetNullAreaTriggerAIScriptId()
+    {
+        return sObjectMgr->GetScriptId("NullAreaTriggerAI", false);
+    }
+
+    AreaTriggerAI* SelectAreaTriggerAI(AreaTrigger* at)
+    {
+        if (AreaTriggerAI* ai = sScriptMgr->GetAreaTriggerAI(at))
+            return ai;
+        else
+            return new NullAreaTriggerAI(at, GetNullAreaTriggerAIScriptId());
+    }
+
+    uint32 GetSelectedAIId(AreaTrigger const* at)
+    {
+        if (uint32 id = at->GetScriptId())
+        {
+            if (sScriptMgr->CanCreateAreaTriggerAI(id))
+            {
+                return id;
+            }
+        }
+
+        return GetNullAreaTriggerAIScriptId();
     }
 }

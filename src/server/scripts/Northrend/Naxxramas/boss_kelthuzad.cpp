@@ -1,341 +1,295 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "Player.h"
-#include "ScriptedCreature.h"
-#include "SpellScript.h"
-#include "SpellScriptLoader.h"
+#include "ScriptMgr.h"
+#include "GameObject.h"
+#include "InstanceScript.h"
+#include "MotionMaster.h"
 #include "naxxramas.h"
+#include "ObjectAccessor.h"
+#include "Player.h"
+#include "PlayerAI.h"
+#include "ScriptedCreature.h"
+#include "SpellAuraEffects.h"
+#include "SpellScript.h"
+#include "TemporarySummon.h"
 
-enum Yells
+enum Texts
 {
-    SAY_ANSWER_REQUEST                      = 3,
-    SAY_TAUNT                               = 6,
-    SAY_AGGRO                               = 7,
-    SAY_SLAY                                = 8,
-    SAY_DEATH                               = 9,
-    SAY_CHAIN                               = 10,
-    SAY_FROST_BLAST                         = 11,
-    SAY_REQUEST_AID                         = 12,
-    EMOTE_PHASE_TWO                         = 13,
-    SAY_SUMMON_MINIONS                      = 14,
-    SAY_SPECIAL                             = 15,
+    SAY_AGGRO                                              = 7,
+    SAY_SLAY                                               = 8,
+    SAY_DEATH                                              = 9,
+    SAY_CHAINS                                             = 10,
+    SAY_REQUEST_AID                                        = 12, //start of phase 3
+    EMOTE_PHASE_TWO                                        = 13,
+    SAY_SUMMON_MINIONS                                     = 14, //start of phase 1
+    SAY_SPECIAL                                            = 15,
 
-    EMOTE_GUARDIAN_FLEE                     = 0,
-    EMOTE_GUARDIAN_APPEAR                   = 1
+    // The Lich King
+    SAY_ANSWER_REQUEST                                     = 3,
+
+    // Guardian of Icecrown
+    EMOTE_GUARDIAN_FLEE                                    = 0,
+    EMOTE_GUARDIAN_APPEAR                                  = 1
+};
+
+enum Events
+{
+    // phase one
+    EVENT_SKELETON = 1,
+    EVENT_BANSHEE,
+    EVENT_ABOMINATION,
+    EVENT_DESPAWN_MINIONS,
+    EVENT_PHASE_TWO,
+
+    // phase two
+    EVENT_FROSTBOLT_VOLLEY,
+    EVENT_SHADOW_FISSURE,
+    EVENT_DETONATE_MANA,
+    EVENT_FROST_BLAST,
+    EVENT_CHAINS,
+
+    // phase three transition
+    EVENT_TRANSITION_REPLY,
+    EVENT_TRANSITION_SUMMON,
+};
+
+enum Actions
+{
+    ACTION_BEGIN_ENCOUNTER,
+    ACTION_JUST_SUMMONED,
+    ACTION_ABOMINATION_DIED,
+    ACTION_KELTHUZAD_DIED
+};
+
+enum KTData
+{
+    DATA_MINION_POCKET_ID,
+    DATA_ABOMINATION_DEATH_COUNT
 };
 
 enum Spells
 {
-    // Kel'Thzuad
-    SPELL_FROST_BOLT_SINGLE_10              = 28478,
-    SPELL_FROST_BOLT_SINGLE_25              = 55802,
-    SPELL_FROST_BOLT_MULTI_10               = 28479,
-    SPELL_FROST_BOLT_MULTI_25               = 55807,
-    SPELL_SHADOW_FISURE                     = 27810,
-    SPELL_VOID_BLAST                        = 27812,
+    // Kel'thuzad - Phase one
+    SPELL_VISUAL_CHANNEL                    = 29423,  // channeled throughout phase one
+
+    // Kel'thuzad - Phase two
+    SPELL_FROSTBOLT_SINGLE                  = 28478,
+    SPELL_FROSTBOLT_VOLLEY                  = 28479,
+    SPELL_SHADOW_FISSURE                    = 27810,
     SPELL_DETONATE_MANA                     = 27819,
     SPELL_MANA_DETONATION_DAMAGE            = 27820,
     SPELL_FROST_BLAST                       = 27808,
-    SPELL_CHAINS_OF_KELTHUZAD               = 28410, // 28408 script effect
+    SPELL_FROST_BLAST_DMG                   = 29879,
+    SPELL_CHAINS                            = 28410,
+    SPELL_CHAINS_DUMMY                      = 28408, // this holds the category cooldown - the main chains spell can't have one as it is cast multiple times
+
     SPELL_BERSERK                           = 28498,
-    SPELL_KELTHUZAD_CHANNEL                 = 29423,
 
-    // Minions
-    SPELL_FRENZY                            = 28468,
+    // Unstoppable Abomination
     SPELL_MORTAL_WOUND                      = 28467,
-    SPELL_BLOOD_TAP                         = 28470
+
+    // Guardian of Icecrown
+    SPELL_BLOOD_TAP                         = 28470,
+
+    // Shadow Fissure
+    SPELL_VOID_BLAST                        = 27812
 };
 
-enum Misc
+static const uint8 nGuardianSpawns = 4;
+static const uint8 nMinionGroups = 7;
+enum SummonGroups
 {
-    NPC_SOLDIER_OF_THE_FROZEN_WASTES        = 16427,
-    NPC_UNSTOPPABLE_ABOMINATION             = 16428,
-    NPC_SOUL_WEAVER                         = 16429,
-    NPC_GUARDIAN_OF_ICECROWN                = 16441,
+    SUMMON_GROUP_GUARDIAN_FIRST             = 01 /*..04 */,
+    SUMMON_GROUP_MINION_FIRST               = 05 /*..11 */
+};
+static NAXData64 const portalList[] = { DATA_KELTHUZAD_PORTAL01, DATA_KELTHUZAD_PORTAL02, DATA_KELTHUZAD_PORTAL03, DATA_KELTHUZAD_PORTAL04 };
 
-    ACTION_CALL_HELP_ON                     = 1,
-    ACTION_CALL_HELP_OFF                    = 2,
-    ACTION_SECOND_PHASE                     = 3,
-    ACTION_GUARDIANS_OFF                    = 4
+enum Phases
+{
+    PHASE_ONE   = 1,
+    PHASE_TWO   = 2 // "phase three" is not actually a phase in events, as timers from phase two carry over
 };
 
-enum Event
+enum Movements
 {
-    // Kel'Thuzad
-    EVENT_SUMMON_SOLDIER                    = 1,
-    EVENT_SUMMON_UNSTOPPABLE_ABOMINATION    = 2,
-    EVENT_SUMMON_SOUL_WEAVER                = 3,
-    EVENT_PHASE_2                           = 4,
-    EVENT_FROST_BOLT_SINGLE                 = 5,
-    EVENT_FROST_BOLT_MULTI                  = 6,
-    EVENT_DETONATE_MANA                     = 7,
-    EVENT_PHASE_3                           = 8,
-    EVENT_P3_LICH_KING_SAY                  = 9,
-    EVENT_SHADOW_FISSURE                    = 10,
-    EVENT_FROST_BLAST                       = 11,
-    EVENT_CHAINS                            = 12,
-    EVENT_SUMMON_GUARDIAN_OF_ICECROWN       = 13,
-    EVENT_FLOOR_CHANGE                      = 14,
-    EVENT_ENRAGE                            = 15,
-    EVENT_SPAWN_POOL                        = 16,
-
-    // Minions
-    EVENT_MINION_FRENZY                     = 17,
-    EVENT_MINION_MORTAL_WOUND               = 18,
-    EVENT_MINION_BLOOD_TAP                  = 19
+    MOVEMENT_MINION_RANDOM = 1,
 };
 
-const Position SummonGroups[12] =
+enum Creatures
 {
-    // Portals
-    {3783.272705f, -5062.697266f, 143.711203f, 3.617599f}, // LEFT_FAR
-    {3730.291260f, -5027.239258f, 143.956909f, 4.461900f}, // LEFT_MIDDLE
-    {3683.868652f, -5057.281250f, 143.183884f, 5.237086f}, // LEFT_NEAR
-    {3759.355225f, -5174.128418f, 143.802383f, 2.170104f}, // RIGHT_FAR
-    {3700.724365f, -5185.123047f, 143.928024f, 1.309310f}, // RIGHT_MIDDLE
-    {3665.121094f, -5138.679199f, 143.183212f, 0.604023f}, // RIGHT_NEAR
-
-    // Middle
-    {3769.34f, -5071.80f, 143.2082f, 3.658f},
-    {3729.78f, -5043.56f, 143.3867f, 4.475f},
-    {3682.75f, -5055.26f, 143.1848f, 5.295f},
-    {3752.58f, -5161.82f, 143.2944f, 2.126f},
-    {3702.83f, -5171.70f, 143.4356f, 1.305f},
-    {3665.30f, -5141.55f, 143.1846f, 0.566f}
+    NPC_SKELETON1                                           = 16427, // Soldiers of the Frozen Wastes
+    NPC_SKELETON2                                           = 23561,
+    NPC_ABOMINATION1                                        = 16428, // Unstoppable Abominations
+    NPC_ABOMINATION2                                        = 23562,
+    NPC_BANSHEE1                                            = 16429, // Soul Weavers
+    NPC_BANSHEE2                                            = 23563,
+    NPC_GUARDIAN                                            = 16441  // Guardians of Icecrown
 };
 
-const Position SpawnPool[7] =
+static const uint8 nMinionSpawnPoints = 7;
+static const Position minionSpawnPoints[nMinionSpawnPoints] = {
+    { 3768.40f, -5072.00f, 143.65f }, // summon group  5
+    { 3729.30f, -5044.10f, 143.65f }, // summon group  6
+    { 3683.00f, -5054.05f, 143.65f }, // summon group  7
+    { 3654.15f, -5093.48f, 143.65f }, // summon group  8
+    { 3664.55f, -5140.50f, 143.65f }, // summon group  9
+    { 3704.00f, -5170.00f, 143.65f }, // summon group 10
+    { 3751.95f, -5158.90f, 143.65f }  // summon group 11
+};
+static inline Position const& GetRandomMinionSpawnPoint()
 {
-    // Portals
-    {3783.272705f, -5062.697266f, 143.711203f, 3.617599f}, // LEFT_FAR
-    {3730.291260f, -5027.239258f, 143.956909f, 4.461900f}, // LEFT_MIDDLE
-    {3683.868652f, -5057.281250f, 143.183884f, 5.237086f}, // LEFT_NEAR
-    {3759.355225f, -5174.128418f, 143.802383f, 2.170104f}, // RIGHT_FAR
-    {3700.724365f, -5185.123047f, 143.928024f, 1.309310f}, // RIGHT_MIDDLE
-    {3665.121094f, -5138.679199f, 143.183212f, 0.604023f}, // RIGHT_NEAR
-    {3651.729980f, -5092.620117f, 143.380005f, 6.050000f} // GATE
+    return minionSpawnPoints[urand(0, nMinionSpawnPoints - 1)];
+}
+
+// uniformly distribute on the circle
+static Position GetRandomPositionOnCircle(Position const& center, float radius)
+{
+    float angle = float(M_PI * rand_norm() * 2.0);
+    float relDistance = rand_norm() + rand_norm();
+    if (relDistance > 1)
+        relDistance = 1 - relDistance;
+    return Position(center.GetPositionX() + std::sin(angle) * relDistance * radius, center.GetPositionY() + std::cos(angle) * relDistance * radius, center.GetPositionZ());
+}
+
+class KelThuzadCharmedPlayerAI : public SimpleCharmedPlayerAI
+{
+    public:
+        KelThuzadCharmedPlayerAI(Player* player) : SimpleCharmedPlayerAI(player) { }
+
+        struct CharmedPlayerTargetSelectPred
+        {
+            bool operator()(Unit const* target) const
+            {
+                Player const* pTarget = target->ToPlayer();
+                if (!pTarget)
+                    return false;
+                if (pTarget->HasAura(SPELL_CHAINS))
+                    return false;
+                if (pTarget->HasBreakableByDamageCrowdControlAura())
+                    return false;
+                // We _really_ dislike healers. So we hit them in the face. Repeatedly. Exclusively.
+                return PlayerAI::IsPlayerHealer(pTarget);
+            }
+        };
+
+        Unit* SelectAttackTarget() const override
+        {
+            if (Creature* charmer = GetCharmer())
+            {
+                if (Unit* target = charmer->AI()->SelectTarget(SelectTargetMethod::Random, 0, CharmedPlayerTargetSelectPred()))
+                    return target;
+                if (Unit* target = charmer->AI()->SelectTarget(SelectTargetMethod::Random, 0, 0.0f, true, true, -SPELL_CHAINS))
+                    return target;
+            }
+            return nullptr;
+        }
 };
 
-class boss_kelthuzad : public CreatureScript
+struct ManaUserTargetSelector
 {
-public:
-    boss_kelthuzad() : CreatureScript("boss_kelthuzad") { }
-
-    CreatureAI* GetAI(Creature* pCreature) const override
+    bool operator()(Unit const* target) const
     {
-        return GetNaxxramasAI<boss_kelthuzadAI>(pCreature);
+        return target->GetTypeId() == TYPEID_PLAYER && target->GetPowerType() == POWER_MANA;
     }
+};
 
-    struct boss_kelthuzadAI : public BossAI
-    {
-        explicit boss_kelthuzadAI(Creature* c) : BossAI(c, BOSS_KELTHUZAD), summons(me)
+struct boss_kelthuzad : public BossAI
+{
+    public:
+        boss_kelthuzad(Creature* creature) : BossAI(creature, BOSS_KELTHUZAD), _skeletonCount(0), _bansheeCount(0), _abominationCount(0), _abominationDeathCount(0), _frostboltCooldown(0), _phaseThree(false), _guardianCount(0)
         {
-            pInstance = me->GetInstanceScript();
-            _justSpawned = true;
-        }
-
-        EventMap events;
-        SummonList summons;
-        InstanceScript* pInstance;
-        bool _justSpawned;
-
-        float NormalizeOrientation(float o)
-        {
-            return std::fmod(o, 2.0f * static_cast<float>(M_PI)); // Only positive values will be passed
-        }
-
-        void SpawnHelpers()
-        {
-            // spawn at gate
-            me->SummonCreature(NPC_UNSTOPPABLE_ABOMINATION, 3656.19f, -5093.78f, 143.33f, 6.08, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2000);// abo center
-            me->SummonCreature(NPC_UNSTOPPABLE_ABOMINATION, 3657.94f, -5087.68f, 143.60f, 6.08, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2000);// abo left
-            me->SummonCreature(NPC_UNSTOPPABLE_ABOMINATION, 3655.48f, -5100.05f, 143.53f, 6.08, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2000);// abo right
-            me->SummonCreature(NPC_SOUL_WEAVER, 3651.73f, -5092.62f, 143.38f, 6.05, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2000); // soul behind
-            me->SummonCreature(NPC_SOLDIER_OF_THE_FROZEN_WASTES, 3660.17f, -5092.45f, 143.37f, 6.07, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2000); // ske front left
-            me->SummonCreature(NPC_SOLDIER_OF_THE_FROZEN_WASTES, 3659.39f, -5096.21f, 143.29f, 6.07, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2000); // ske front right
-            me->SummonCreature(NPC_SOLDIER_OF_THE_FROZEN_WASTES, 3659.29f, -5090.19f, 143.48f, 6.07, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2000); // ske left left
-            me->SummonCreature(NPC_SOLDIER_OF_THE_FROZEN_WASTES, 3657.43f, -5098.03f, 143.41f, 6.07, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2000); // ske right right
-            me->SummonCreature(NPC_SOLDIER_OF_THE_FROZEN_WASTES, 3654.36f, -5090.51f, 143.48f, 6.09, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2000); // ske behind left
-            me->SummonCreature(NPC_SOLDIER_OF_THE_FROZEN_WASTES, 3653.35f, -5095.91f, 143.41f, 6.09, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2000); // ske right right
-
-            // 6 rooms, 8 soldiers, 3 abominations and 1 weaver in each room | middle positions in table starts from 6
-            for (uint8 i = 6; i < 12; ++i)
-            {
-                for (uint8 j = 0; j < 8; ++j)
-                {
-                    float angle = M_PI * 2 / 8 * j;
-                    me->SummonCreature(NPC_SOLDIER_OF_THE_FROZEN_WASTES, SummonGroups[i].GetPositionX() + 6 * cos(angle), SummonGroups[i].GetPositionY() + 6 * std::sin(angle), SummonGroups[i].GetPositionZ(), SummonGroups[i].GetOrientation(), TEMPSUMMON_CORPSE_TIMED_DESPAWN, 20000);
-                }
-            }
-            for (uint8 i = 6; i < 12; ++i)
-            {
-                for (uint8 j = 1; j < 4; ++j)
-                {
-                    float dist = j == 2 ? 0.0f : 8.0f; // second in middle
-                    float angle = SummonGroups[i].GetOrientation() + M_PI * 2 / 4 * j;
-                    me->SummonCreature(NPC_UNSTOPPABLE_ABOMINATION, SummonGroups[i].GetPositionX() + dist * cos(angle), SummonGroups[i].GetPositionY() + dist * std::sin(angle), SummonGroups[i].GetPositionZ(), SummonGroups[i].GetOrientation(), TEMPSUMMON_CORPSE_TIMED_DESPAWN, 20000);
-                }
-            }
-            for (uint8 i = 6; i < 12; ++i)
-            {
-                for (uint8 j = 0; j < 1; ++j)
-                {
-                    float angle = SummonGroups[i].GetOrientation() + M_PI;
-                    me->SummonCreature(NPC_SOUL_WEAVER, SummonGroups[i].GetPositionX() + 6 * cos(angle), SummonGroups[i].GetPositionY() + 6 * std::sin(angle), SummonGroups[i].GetPositionZ() + 0.5f, SummonGroups[i].GetOrientation(), TEMPSUMMON_CORPSE_TIMED_DESPAWN, 20000);
-                }
-            }
-        }
-
-        void SummonHelper(uint32 entry, uint32 count)
-        {
-            for (uint8 i = 0; i < count; ++i)
-            {
-                if (Creature* cr = me->SummonCreature(entry, SpawnPool[urand(0, 6)], TEMPSUMMON_CORPSE_TIMED_DESPAWN, 20000))
-                {
-                    if (Unit* target = SelectTargetFromPlayerList(100.0f))
-                    {
-                        cr->AI()->DoAction(ACTION_CALL_HELP_OFF);
-                        cr->AI()->AttackStart(target);
-                    }
-                }
-            }
+            for (uint8 i = 0; i < nGuardianSpawns; ++i)
+                _guardianGroups[i] = SUMMON_GROUP_GUARDIAN_FIRST + i;
         }
 
         void Reset() override
         {
-            BossAI::Reset();
-            events.Reset();
-            summons.DespawnAll();
-            me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_DISABLE_MOVE);
-            me->SetReactState(REACT_AGGRESSIVE);
-            if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_FLOOR)))
-            {
-                go->SetPhaseMask(1, true);
-                go->SetGoState(GO_STATE_READY);
-            }
-            if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_GATE)))
-            {
-                if (!_justSpawned) // Don't open the door if we just spawned and are still doing the conversation
-                {
-                    go->SetGoState(GO_STATE_ACTIVE);
-                }
-            }
-            _justSpawned = false;
-            if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_PORTAL_1)))
-            {
-                go->SetGoState(GO_STATE_READY);
-            }
-            if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_PORTAL_2)))
-            {
-                go->SetGoState(GO_STATE_READY);
-            }
-            if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_PORTAL_3)))
-            {
-                go->SetGoState(GO_STATE_READY);
-            }
-            if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_PORTAL_4)))
-            {
-                go->SetGoState(GO_STATE_READY);
-            }
+            if (!me->IsAlive())
+                return;
+            _Reset();
+            me->SetReactState(REACT_PASSIVE);
+            me->SetUninteractible(true);
+            me->SetImmuneToPC(true);
+            _skeletonCount = 0;
+            _bansheeCount = 0;
+            _abominationCount = 0;
+            _abominationDeathCount = 0;
+            _phaseThree = false;
         }
 
-        void EnterEvadeMode(EvadeReason why) override
+        void EnterEvadeMode(EvadeReason /*why*/) override
         {
-            me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_DISABLE_MOVE);
-            ScriptedAI::EnterEvadeMode(why);
-        }
-
-        void KilledUnit(Unit* who) override
-        {
-            if (!who->IsPlayer())
+            if (!me->IsAlive())
                 return;
 
-            Talk(SAY_SLAY);
-            if (pInstance)
-            {
-                pInstance->SetData(DATA_IMMORTAL_FAIL, 0);
-            }
+            for (NAXData64 portalData : portalList)
+                if (GameObject* portal = ObjectAccessor::GetGameObject(*me, instance->GetGuidData(portalData)))
+                    portal->SetGoState(GO_STATE_READY);
+
+            Reset();
+            _DespawnAtEvade();
         }
 
-        void JustDied(Unit*  killer) override
+        void JustSummoned (Creature* summon) override
+        { // prevent DoZoneInCombat
+            summons.Summon(summon);
+        }
+
+        void KilledUnit(Unit* victim) override
         {
-            BossAI::JustDied(killer);
-            summons.DoAction(ACTION_GUARDIANS_OFF);
-            if (Creature* guardian = summons.GetCreatureWithEntry(NPC_GUARDIAN_OF_ICECROWN))
-            {
-                guardian->AI()->Talk(EMOTE_GUARDIAN_FLEE);
-            }
+            if (victim->GetTypeId() == TYPEID_PLAYER)
+                Talk(SAY_SLAY);
+        }
+
+        void JustDied(Unit* /*killer*/) override
+        {
+            SummonList::iterator it = summons.begin();
+            while (it != summons.end())
+                if (Creature* cSummon = ObjectAccessor::GetCreature(*me, *it))
+                {
+                    if (cSummon->IsAlive() && cSummon->GetEntry() == NPC_GUARDIAN)
+                    {
+                        cSummon->AI()->DoAction(ACTION_KELTHUZAD_DIED);
+                        it = summons.erase(it); // prevent them from being despawned by _JustDied
+                    }
+                    else
+                        ++it;
+                }
+
+            _JustDied();
             Talk(SAY_DEATH);
-            if (pInstance)
-            {
-                if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_GATE)))
-                {
-                    go->SetGoState(GO_STATE_ACTIVE);
-                }
-            }
         }
 
-        void MoveInLineOfSight(Unit* who) override
+        void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
         {
-            if (!me->IsInCombat() && who->IsPlayer() && who->IsAlive() && me->GetDistance(who) <= 50.0f)
-                AttackStart(who);
+            if (events.IsInPhase(PHASE_ONE))
+                damage = 0;
         }
 
-        void JustEngagedWith(Unit* who) override
+        void SpellHit(WorldObject* /*caster*/, SpellInfo const* spellInfo) override
         {
-            BossAI::JustEngagedWith(who);
-            Talk(SAY_SUMMON_MINIONS);
-            me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_DISABLE_MOVE);
-            me->RemoveAllAttackers();
-            me->SetTarget();
-            me->SetReactState(REACT_PASSIVE);
-            me->CastSpell(me, SPELL_KELTHUZAD_CHANNEL, false);
-            events.ScheduleEvent(EVENT_SPAWN_POOL, 5s);
-            events.ScheduleEvent(EVENT_SUMMON_SOLDIER, 6400ms);
-            events.ScheduleEvent(EVENT_SUMMON_UNSTOPPABLE_ABOMINATION, 10s);
-            events.ScheduleEvent(EVENT_SUMMON_SOUL_WEAVER, 12s);
-            events.ScheduleEvent(EVENT_PHASE_2, 228s);
-            events.ScheduleEvent(EVENT_ENRAGE, 15min);
-            if (pInstance)
+            if (spellInfo->Id == SPELL_CHAINS_DUMMY)
             {
-                if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_FLOOR)))
-                {
-                    events.ScheduleEvent(EVENT_FLOOR_CHANGE, 15s);
-                    go->SetGoState(GO_STATE_ACTIVE);
-                }
-            }
-            if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_GATE)))
-            {
-                go->SetGoState(GO_STATE_READY);
-            }
-        }
-
-        void JustSummoned(Creature* cr) override
-        {
-            summons.Summon(cr);
-            if (!cr->IsInCombat())
-            {
-                cr->GetMotionMaster()->MoveRandom(5);
-            }
-            if (cr->GetEntry() == NPC_GUARDIAN_OF_ICECROWN)
-            {
-                cr->SetHomePosition(cr->GetPositionX(), cr->GetPositionY(), cr->GetPositionZ(), cr->GetOrientation());
+                Talk(SAY_CHAINS);
+                std::list<Unit*> targets;
+                SelectTargetList(targets, 3, SelectTargetMethod::Random, 0, 0.0f, true, false);
+                for (Unit* target : targets)
+                    DoCast(target, SPELL_CHAINS);
             }
         }
 
@@ -345,366 +299,573 @@ public:
                 return;
 
             events.Update(diff);
-            if (!me->HasAura(SPELL_KELTHUZAD_CHANNEL))
+
+            if (_frostboltCooldown < diff)
+                _frostboltCooldown = 0;
+            else
+                _frostboltCooldown -= diff;
+
+            if (!events.IsInPhase(PHASE_ONE) && me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+
+            if (!_phaseThree && HealthBelowPct(45))
             {
-                if (me->HasUnitState(UNIT_STATE_CASTING))
+                _phaseThree = true;
+                _guardianCount = 0;
+                Talk(SAY_REQUEST_AID);
+                events.ScheduleEvent(EVENT_TRANSITION_REPLY, Seconds(4), 0, PHASE_TWO);
+                events.ScheduleEvent(EVENT_TRANSITION_SUMMON, randtime(Seconds(7), Seconds(9)), 0, PHASE_TWO);
+                events.ScheduleEvent(EVENT_TRANSITION_SUMMON, randtime(Seconds(13), Seconds(15)), 0, PHASE_TWO);
+                if (Is25ManRaid())
+                {
+                    events.ScheduleEvent(EVENT_TRANSITION_SUMMON, randtime(Seconds(19), Seconds(21)), 0, PHASE_TWO);
+                    events.ScheduleEvent(EVENT_TRANSITION_SUMMON, randtime(Seconds(25), Seconds(27)), 0, PHASE_TWO);
+                }
+            }
+
+            while (uint32 eventId = events.ExecuteEvent())
+            {
+                if (_frostboltCooldown <= 4 * IN_MILLISECONDS) // stop casting bolts for 4 seconds after doing another action
+                    _frostboltCooldown = 4 * IN_MILLISECONDS;
+                switch (eventId)
+                {
+                    case EVENT_SKELETON:
+                    {
+                        ++_skeletonCount;
+                        if (_skeletonCount == 1) // the first skeleton is actually one of the pre-existing ones - I'm not sure why, but that's what the sniffs say
+                        {
+                            std::list<Creature*> skeletons;
+                            me->GetCreatureListWithEntryInGrid(skeletons, NPC_SKELETON2, 200.0f);
+                            if (skeletons.empty())
+                            { // prevent UB
+                                EnterEvadeMode(EvadeReason::Other);
+                                return;
+                            }
+                            std::list<Creature*>::iterator it = skeletons.begin();
+                            std::advance(it, urand(0, skeletons.size() - 1));
+                            (*it)->SetReactState(REACT_AGGRESSIVE);
+                            (*it)->AI()->DoZoneInCombat(); // will select a player on our threat list as we are the summoner
+                        }
+                        else
+                        {
+                            // retail uses server-side spell 28421 for this
+                            Creature* summon = me->SummonCreature(NPC_SKELETON1, GetRandomMinionSpawnPoint(), TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2s);
+                            summon->AI()->DoZoneInCombat();
+                        }
+
+                        uint8 nextTime = 0;
+                        if (_skeletonCount < 10)
+                            nextTime = 5;
+                        else if (_skeletonCount < 19)
+                            nextTime = 4;
+                        else if (_skeletonCount < 31)
+                            nextTime = 3;
+                        else if (_skeletonCount == 31)
+                            nextTime = 4;
+                        else if (_skeletonCount < 72)
+                            nextTime = 2;
+
+                        if (nextTime)
+                            events.ScheduleEvent(EVENT_SKELETON, Seconds(nextTime), 0, PHASE_ONE);
+                        break;
+                    }
+
+                    case EVENT_BANSHEE:
+                    {
+                        ++_bansheeCount;
+                        // retail uses server-side spell 28423 for this
+                        Creature* summon = me->SummonCreature(NPC_BANSHEE1, GetRandomMinionSpawnPoint(), TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2s);
+                        summon->AI()->DoZoneInCombat();
+
+                        uint8 nextTime = 0;
+                        if (_bansheeCount < 3)
+                            nextTime = 30;
+                        else if (_bansheeCount < 7)
+                            nextTime = 20;
+                        else if (_bansheeCount < 9)
+                            nextTime = 15;
+
+                        if (nextTime)
+                            events.ScheduleEvent(EVENT_BANSHEE, Seconds(nextTime), 0, PHASE_ONE);
+                        break;
+                    }
+
+                    case EVENT_ABOMINATION:
+                    {
+                        ++_abominationCount;
+                        // retail uses server-side spell 28422 for this
+                        Creature* summon = me->SummonCreature(NPC_ABOMINATION1, GetRandomMinionSpawnPoint(), TEMPSUMMON_CORPSE_TIMED_DESPAWN, 2s);
+                        summon->AI()->DoZoneInCombat();
+
+                        uint8 nextTime = 0;
+                        if (_abominationCount < 3)
+                            nextTime = 30;
+                        else if (_abominationCount < 7)
+                            nextTime = 20;
+                        else if (_abominationCount < 9)
+                            nextTime = 15;
+
+                        if (nextTime)
+                            events.ScheduleEvent(EVENT_ABOMINATION, Seconds(nextTime), 0, PHASE_ONE);
+                        break;
+                    }
+
+                    case EVENT_DESPAWN_MINIONS:
+                    {
+                        // we need a temp vector, as we can't modify summons while iterating (this would cause UB)
+                        std::vector<Creature*> toDespawn;
+                        toDespawn.reserve(summons.size());
+                        for (ObjectGuid sGuid : summons)
+                            if (Creature* summon = ObjectAccessor::GetCreature(*me, sGuid))
+                                if (!summon->IsInCombat())
+                                    toDespawn.push_back(summon);
+                        for (Creature* summon : toDespawn)
+                            summon->DespawnOrUnsummon();
+                        Talk(SAY_AGGRO);
+                        break;
+                    }
+
+                    case EVENT_PHASE_TWO:
+                        me->CastStop();
+                        events.SetPhase(PHASE_TWO);
+                        me->SetUninteractible(false);
+                        me->SetImmuneToPC(false);
+                        ResetThreatList();
+                        me->SetReactState(REACT_AGGRESSIVE);
+                        Talk(EMOTE_PHASE_TWO);
+
+                        _frostboltCooldown = 2 * IN_MILLISECONDS;
+                        events.ScheduleEvent(EVENT_FROSTBOLT_VOLLEY, randtime(Seconds(24), Seconds(28)), 0, PHASE_TWO);
+                        events.ScheduleEvent(EVENT_SHADOW_FISSURE, randtime(Seconds(6), Seconds(10)), 0, PHASE_TWO);
+                        events.ScheduleEvent(EVENT_DETONATE_MANA, randtime(Seconds(27), Seconds(33)), 0, PHASE_TWO);
+                        events.ScheduleEvent(EVENT_FROST_BLAST, randtime(Seconds(25), Seconds(45)), 0, PHASE_TWO);
+                        if (Is25ManRaid())
+                            events.ScheduleEvent(EVENT_CHAINS, randtime(Seconds(60), Seconds(80)), 0, PHASE_TWO);
+                        break;
+
+                    case EVENT_FROSTBOLT_VOLLEY:
+                        DoCastAOE(SPELL_FROSTBOLT_VOLLEY);
+                        events.Repeat(randtime(Seconds(16), Seconds(18)));
+                        break;
+
+                    case EVENT_SHADOW_FISSURE:
+                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 0.0f, true))
+                            DoCast(target, SPELL_SHADOW_FISSURE);
+                        events.Repeat(randtime(Seconds(14), Seconds(17)));
+                        break;
+
+                    case EVENT_DETONATE_MANA:
+                    {
+                        ManaUserTargetSelector pred;
+                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, pred))
+                            DoCast(target, SPELL_DETONATE_MANA);
+                        events.Repeat(randtime(Seconds(30), Seconds(40)));
+                        break;
+                    }
+
+                    case EVENT_FROST_BLAST:
+                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1, 0.0f, true))
+                            DoCast(target, SPELL_FROST_BLAST);
+                        events.Repeat(randtime(Seconds(25), Seconds(45)));
+                        break;
+
+                    case EVENT_CHAINS:
+                    {
+                        DoCastAOE(SPELL_CHAINS_DUMMY);
+                        events.Repeat(Minutes(1) + randtime(Seconds(0), Seconds(20)));
+                        break;
+                    }
+
+                    case EVENT_TRANSITION_REPLY:
+                        if (Creature* lichKing = ObjectAccessor::GetCreature(*me, instance->GetGuidData(DATA_LICH_KING)))
+                            lichKing->AI()->Talk(SAY_ANSWER_REQUEST);
+                        for (NAXData64 portalData : portalList)
+                            if (GameObject* portal = ObjectAccessor::GetGameObject(*me, instance->GetGuidData(portalData)))
+                                portal->SetGoState(GO_STATE_ACTIVE);
+                        break;
+
+                    case EVENT_TRANSITION_SUMMON:
+                    {
+                        uint8 selected = urand(_guardianCount, nGuardianSpawns - 1);
+                        if (selected != _guardianCount)
+                            std::swap(_guardianGroups[selected], _guardianGroups[_guardianCount]);
+
+                        std::list<TempSummon*> summoned;
+                        // server-side spell 28454 is used on retail - no point replicating this in spell_dbc
+                        me->SummonCreatureGroup(_guardianGroups[_guardianCount++], &summoned);
+                        for (TempSummon* guardian : summoned)
+                            guardian->AI()->DoAction(ACTION_JUST_SUMMONED);
+                        break;
+                    }
+                }
+
+                if (!events.IsInPhase(PHASE_ONE) && me->HasUnitState(UNIT_STATE_CASTING))
                     return;
             }
 
-            switch (events.ExecuteEvent())
+            if (!_frostboltCooldown)
             {
-                case EVENT_FLOOR_CHANGE:
-                    if (pInstance)
+                DoCastVictim(SPELL_FROSTBOLT_SINGLE);
+                _frostboltCooldown = 3 * IN_MILLISECONDS;
+            }
+        }
+
+        uint32 GetData(uint32 data) const override
+        {
+            if (data == DATA_ABOMINATION_DEATH_COUNT)
+                return _abominationDeathCount;
+            return 0;
+        }
+
+        void DoAction(int32 action) override
+        {
+            switch (action)
+            {
+                case ACTION_BEGIN_ENCOUNTER:
+                    if (instance->GetBossState(BOSS_KELTHUZAD) != NOT_STARTED)
+                        return;
+                    me->SetImmuneToPC(false);
+                    instance->SetBossState(BOSS_KELTHUZAD, IN_PROGRESS);
+                    events.SetPhase(PHASE_ONE);
+                    DoZoneInCombat();
+                    DoCastAOE(SPELL_VISUAL_CHANNEL);
+                    Talk(SAY_SUMMON_MINIONS);
+
+                    for (uint8 group = SUMMON_GROUP_MINION_FIRST; group < SUMMON_GROUP_MINION_FIRST + nMinionGroups; ++group)
                     {
-                        if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_FLOOR)))
+                        std::list<TempSummon*> summoned;
+                        me->SummonCreatureGroup(group, &summoned);
+                        for (TempSummon* summon : summoned)
                         {
-                            events.ScheduleEvent(EVENT_FLOOR_CHANGE, 15s);
-                            go->SetGoState(GO_STATE_READY);
-                            go->SetPhaseMask(2, true);
+                            summon->SetReactState(REACT_PASSIVE);
+                            summon->AI()->SetData(DATA_MINION_POCKET_ID, group);
                         }
                     }
+
+                    events.ScheduleEvent(EVENT_SKELETON, Seconds(5), 0, PHASE_ONE);
+                    events.ScheduleEvent(EVENT_BANSHEE, Seconds(30), 0, PHASE_ONE);
+                    events.ScheduleEvent(EVENT_ABOMINATION, Seconds(30), 0, PHASE_ONE);
+                    events.ScheduleEvent(EVENT_DESPAWN_MINIONS, Minutes(3) + Seconds(33), 0, PHASE_ONE);
+                    events.ScheduleEvent(EVENT_PHASE_TWO, Minutes(3) + Seconds(48), 0, PHASE_ONE);
                     break;
-                case EVENT_SPAWN_POOL:
-                    SpawnHelpers();
+
+                case ACTION_ABOMINATION_DIED:
+                    ++_abominationDeathCount;
                     break;
-                case EVENT_SUMMON_SOLDIER:
-                    SummonHelper(NPC_SOLDIER_OF_THE_FROZEN_WASTES, 1);
-                    events.Repeat(3100ms);
-                    break;
-                case EVENT_SUMMON_UNSTOPPABLE_ABOMINATION:
-                    SummonHelper(NPC_UNSTOPPABLE_ABOMINATION, 1);
-                    events.Repeat(18s + 500ms);
-                    break;
-                case EVENT_SUMMON_SOUL_WEAVER:
-                    SummonHelper(NPC_SOUL_WEAVER, 1);
-                    events.Repeat(30s);
-                    break;
-                case EVENT_PHASE_2:
-                    Talk(EMOTE_PHASE_TWO);
-                    Talk(SAY_AGGRO);
-                    events.Reset();
-                    summons.DoAction(ACTION_SECOND_PHASE);
-                    me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_DISABLE_MOVE);
-                    me->GetMotionMaster()->MoveChase(me->GetVictim());
-                    me->RemoveAura(SPELL_KELTHUZAD_CHANNEL);
-                    me->SetReactState(REACT_AGGRESSIVE);
-                    events.ScheduleEvent(EVENT_FROST_BOLT_SINGLE, 2s, 10s);
-                    events.ScheduleEvent(EVENT_FROST_BOLT_MULTI, 15s, 30s);
-                    events.ScheduleEvent(EVENT_DETONATE_MANA, 30s);
-                    events.ScheduleEvent(EVENT_PHASE_3, 1s);
-                    events.ScheduleEvent(EVENT_SHADOW_FISSURE, 25s);
-                    events.ScheduleEvent(EVENT_FROST_BLAST, 45s);
-                    if (Is25ManRaid())
-                    {
-                        events.ScheduleEvent(EVENT_CHAINS, 90s);
-                    }
-                    break;
-                case EVENT_ENRAGE:
-                    me->CastSpell(me, SPELL_BERSERK, true);
-                    break;
-                case EVENT_FROST_BOLT_SINGLE:
-                    me->CastSpell(me->GetVictim(), RAID_MODE(SPELL_FROST_BOLT_SINGLE_10, SPELL_FROST_BOLT_SINGLE_25), false);
-                    events.Repeat(2s, 10s);
-                    break;
-                case EVENT_FROST_BOLT_MULTI:
-                    me->CastSpell(me, RAID_MODE(SPELL_FROST_BOLT_MULTI_10, SPELL_FROST_BOLT_MULTI_25), false);
-                    events.Repeat(15s, 30s);
-                    break;
-                case EVENT_SHADOW_FISSURE:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 100.0f, true))
-                    {
-                        me->CastSpell(target, SPELL_SHADOW_FISURE, false);
-                    }
-                    events.Repeat(25s);
-                    break;
-                case EVENT_FROST_BLAST:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, RAID_MODE(1, 0), 0, true))
-                    {
-                        me->CastSpell(target, SPELL_FROST_BLAST, false);
-                    }
-                    Talk(SAY_FROST_BLAST);
-                    events.Repeat(45s);
-                    break;
-                case EVENT_CHAINS:
-                    for (uint8 i = 0; i < 3; ++i)
-                    {
-                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1, 200, true, true, -SPELL_CHAINS_OF_KELTHUZAD))
-                        {
-                            me->CastSpell(target, SPELL_CHAINS_OF_KELTHUZAD, true);
-                        }
-                    }
-                    Talk(SAY_CHAIN);
-                    events.Repeat(90s);
-                    break;
-                case EVENT_DETONATE_MANA:
-                    {
-                        std::vector<Unit*> unitList;
-                        ThreatContainer::StorageType const& threatList = me->GetThreatMgr().GetThreatList();
-                        for (auto itr : threatList)
-                        {
-                            if (itr->getTarget()->IsPlayer()
-                                    && itr->getTarget()->getPowerType() == POWER_MANA
-                                    && itr->getTarget()->GetPower(POWER_MANA))
-                                    {
-                                        unitList.push_back(itr->getTarget());
-                                    }
-                        }
-                        if (!unitList.empty())
-                        {
-                            auto itr = unitList.begin();
-                            advance(itr, urand(0, unitList.size() - 1));
-                            me->CastSpell(*itr, SPELL_DETONATE_MANA, false);
-                            Talk(SAY_SPECIAL);
-                        }
-                        events.Repeat(30s);
-                        break;
-                    }
-                case EVENT_PHASE_3:
-                    if (me->HealthBelowPct(45))
-                    {
-                        Talk(SAY_REQUEST_AID);
-                        events.DelayEvents(5500ms);
-                        events.ScheduleEvent(EVENT_P3_LICH_KING_SAY, 5s);
-                        if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_PORTAL_1)))
-                        {
-                            go->SetGoState(GO_STATE_ACTIVE);
-                        }
-                        if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_PORTAL_2)))
-                        {
-                            go->SetGoState(GO_STATE_ACTIVE);
-                        }
-                        if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_PORTAL_3)))
-                        {
-                            go->SetGoState(GO_STATE_ACTIVE);
-                        }
-                        if (GameObject* go = me->GetMap()->GetGameObject(pInstance->GetGuidData(DATA_KELTHUZAD_PORTAL_4)))
-                        {
-                            go->SetGoState(GO_STATE_ACTIVE);
-                        }
-                        break;
-                    }
-                    events.Repeat(1s);
-                    break;
-                case EVENT_P3_LICH_KING_SAY:
-                    if (pInstance)
-                    {
-                        if (Creature* cr = ObjectAccessor::GetCreature(*me, pInstance->GetGuidData(DATA_LICH_KING_BOSS)))
-                        {
-                            cr->AI()->Talk(SAY_ANSWER_REQUEST);
-                        }
-                    }
-                    for (uint8 i = 0 ; i < RAID_MODE(2, 4); ++i)
-                    {
-                        events.ScheduleEvent(EVENT_SUMMON_GUARDIAN_OF_ICECROWN, 10000 + (i * 5000));
-                    }
-                    break;
-                case EVENT_SUMMON_GUARDIAN_OF_ICECROWN:
-                    if (Creature* cr = me->SummonCreature(NPC_GUARDIAN_OF_ICECROWN, SpawnPool[RAND(0, 1, 3, 4)]))
-                    {
-                        cr->AI()->Talk(EMOTE_GUARDIAN_APPEAR);
-                        cr->AI()->AttackStart(me->GetVictim());
-                    }
+
+                default:
                     break;
             }
-            if (!me->HasUnitFlag(UNIT_FLAG_DISABLE_MOVE))
-                DoMeleeAttackIfReady();
         }
-    };
+
+        PlayerAI* GetAIForCharmedPlayer(Player* player) override
+        {
+            return new KelThuzadCharmedPlayerAI(player);
+        }
+
+    private:
+        uint8 _skeletonCount;
+        uint8 _bansheeCount;
+        uint8 _abominationCount;
+        uint8 _abominationDeathCount;
+        uint32 _frostboltCooldown;
+        bool _phaseThree;
+        uint32 _guardianCount;
+        std::array<uint32, nGuardianSpawns> _guardianGroups;
 };
 
-class boss_kelthuzad_minion : public CreatureScript
+static const float MINION_AGGRO_DISTANCE = 20.0f;
+// @hack the entire _movementTimer logic only exists because RandomMovementGenerator gets really confused due to the unique map geography of KT's room (it's placed on top of a copy of Winterspring).
+// As of the time of writing, RMG sometimes selects positions on the "floor" below the room, causing Abominations to path wildly through the room.
+// This custom movement code prevents this by simply ignoring z coord calculation (the floor of the minion coves is flat anyway).
+// Dev from the future that is reading this, if RMG has been fixed on the current core revision, please get rid of this hack. Thank you!
+struct npc_kelthuzad_minionAI : public ScriptedAI
 {
-public:
-    boss_kelthuzad_minion() : CreatureScript("boss_kelthuzad_minion") { }
-
-    CreatureAI* GetAI(Creature* pCreature) const override
-    {
-        return GetNaxxramasAI<boss_kelthuzad_minionAI>(pCreature);
-    }
-
-    struct boss_kelthuzad_minionAI : public ScriptedAI
-    {
-        explicit boss_kelthuzad_minionAI(Creature* c) : ScriptedAI(c) { }
-
-        EventMap events;
-        bool callHelp{};
+    public:
+        npc_kelthuzad_minionAI(Creature* creature) : ScriptedAI(creature), instance(creature->GetInstanceScript()), pocketId(0), _movementTimer(urandms(4,12)), _home(me->GetPosition()) { }
 
         void Reset() override
         {
-            me->SetNoCallAssistance(true);
-            callHelp = true;
-            events.Reset();
         }
 
-        void DoAction(int32 param) override
+        void EnterEvadeMode(EvadeReason why) override
         {
-            if (param == ACTION_CALL_HELP_ON)
-            {
-                callHelp = true;
-            }
-            else if (param == ACTION_CALL_HELP_OFF)
-            {
-                callHelp = false;
-            }
-            else if (param == ACTION_SECOND_PHASE)
-            {
-                if (!me->IsInCombat())
-                {
-                    me->DespawnOrUnsummon(500);
-                }
-            }
-            if (param == ACTION_GUARDIANS_OFF)
-            {
-                me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                me->SetUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
-                me->RemoveAllAuras();
-                EnterEvadeMode();
-                me->SetPosition(me->GetHomePosition());
-            }
+            ScriptedAI::EnterEvadeMode(why);
+            if (Creature* kelThuzad = ObjectAccessor::GetCreature(*me, instance->GetGuidData(DATA_KELTHUZAD)))
+                kelThuzad->AI()->EnterEvadeMode(EvadeReason::Other);
         }
 
-        void MoveInLineOfSight(Unit* who) override
+        void JustEngagedWith(Unit* who) override
         {
-            if (!who->IsPlayer() && !who->IsPet())
+            _movementTimer = 0; // once it's zero, it'll never get checked again
+            if (!me->HasReactState(REACT_PASSIVE))
+            {
+                DoZoneInCombat();
+                return;
+            }
+
+            if (!pocketId)
                 return;
 
-            ScriptedAI::MoveInLineOfSight(who);
-        }
-
-        void JustDied(Unit* /*killer*/) override
-        {
-            if (me->GetEntry() == NPC_UNSTOPPABLE_ABOMINATION && me->GetInstanceScript())
-            {
-                me->GetInstanceScript()->SetData(DATA_ABOMINATION_KILLED, 0);
-            }
+            std::list<Creature*> others;
+            me->GetCreatureListWithEntryInGrid(others, me->GetEntry(), 80.0f);
+            for (Creature* other : others)
+                if (other->AI()->GetData(DATA_MINION_POCKET_ID) == pocketId)
+                {
+                    other->SetReactState(REACT_AGGRESSIVE);
+                    other->AI()->AttackStart(who);
+                }
+            me->SetReactState(REACT_AGGRESSIVE);
+            AttackStart(who);
+            ScriptedAI::JustEngagedWith(who);
         }
 
         void AttackStart(Unit* who) override
         {
             ScriptedAI::AttackStart(who);
-            if (callHelp)
+        }
+
+        void MoveInLineOfSight(Unit* who) override
+        {
+            if (!me->HasReactState(REACT_PASSIVE))
             {
-                std::list<Creature*> targets;
-                me->GetCreaturesWithEntryInRange(targets, 15.0f, me->GetEntry());
-                for (std::list<Creature*>::const_iterator itr = targets.begin(); itr != targets.end(); ++itr)
-                {
-                    if ((*itr)->GetGUID() != me->GetGUID())
-                    {
-                        (*itr)->ToCreature()->AI()->DoAction(ACTION_CALL_HELP_OFF);
-                        (*itr)->ToCreature()->AI()->AttackStart(who);
-                    }
-                }
+                ScriptedAI::MoveInLineOfSight(who);
+                return;
             }
 
-            if (me->GetEntry() != NPC_UNSTOPPABLE_ABOMINATION && me->GetEntry() != NPC_GUARDIAN_OF_ICECROWN)
+            if (me->CanStartAttack(who, false) && me->GetDistance2d(who) <= MINION_AGGRO_DISTANCE)
+                JustEngagedWith(who);
+        }
+
+        void SetData(uint32 data, uint32 value) override
+        {
+            if (data == DATA_MINION_POCKET_ID)
+                pocketId = value;
+        }
+
+        uint32 GetData(uint32 data) const override
+        {
+            if (data == DATA_MINION_POCKET_ID)
+                return pocketId;
+            return 0;
+        }
+
+        void MovementInform(uint32 /*type*/, uint32 id) override
+        {
+            if (id == MOVEMENT_MINION_RANDOM)
+                _movementTimer = urandms(2, 10) + urandms(2, 10);
+        }
+
+        void UpdateRandomMovement(uint32 diff)
+        {
+            if (!_movementTimer)
+                return;
+
+            if (_movementTimer <= diff)
             {
-                me->AddThreat(who, 1000000.0f);
+                _movementTimer = 0;
+                me->GetMotionMaster()->MovePoint(MOVEMENT_MINION_RANDOM, GetRandomPositionOnCircle(_home, 3.0f));
+            }
+            else
+                _movementTimer -= diff;
+        }
+
+    protected:
+        InstanceScript* const instance;
+        uint32 pocketId;
+
+    private:
+        uint32 _movementTimer;
+        Position const _home;
+};
+
+struct npc_kelthuzad_skeleton : public npc_kelthuzad_minionAI
+{
+    npc_kelthuzad_skeleton(Creature* creature) : npc_kelthuzad_minionAI(creature) { }
+
+    void UpdateAI(uint32 diff) override
+    {
+        UpdateRandomMovement(diff);
+
+        if (!UpdateVictim())
+            return;
+    }
+};
+
+struct npc_kelthuzad_banshee : public npc_kelthuzad_minionAI
+{
+    npc_kelthuzad_banshee(Creature* creature) : npc_kelthuzad_minionAI(creature) { }
+
+    void UpdateAI(uint32 diff) override
+    {
+        UpdateRandomMovement(diff);
+
+        if (!UpdateVictim())
+            return;
+    }
+};
+
+struct npc_kelthuzad_abomination : public npc_kelthuzad_minionAI
+{
+    npc_kelthuzad_abomination(Creature* creature) : npc_kelthuzad_minionAI(creature), _woundTimer(urandms(10, 20)) { }
+
+    void UpdateAI(uint32 diff) override
+    {
+        UpdateRandomMovement(diff);
+
+        if (!UpdateVictim())
+            return;
+
+        if (_woundTimer <= diff)
+        {
+            _woundTimer = urandms(14, 18);
+            DoCastVictim(SPELL_MORTAL_WOUND);
+        }
+        else
+            _woundTimer -= diff;
+    }
+
+    void JustDied(Unit* killer) override
+    {
+        if (Creature* kelThuzad = ObjectAccessor::GetCreature(*me, instance->GetGuidData(DATA_KELTHUZAD)))
+            kelThuzad->AI()->DoAction(ACTION_ABOMINATION_DIED);
+        npc_kelthuzad_minionAI::JustDied(killer);
+    }
+
+    uint32 _woundTimer;
+};
+
+struct npc_kelthuzad_guardian : public ScriptedAI
+{
+    public:
+        npc_kelthuzad_guardian(Creature* creature) : ScriptedAI(creature), instance(creature->GetInstanceScript()), _visibilityTimer(0), _bloodTapTimer(0) { }
+
+        void DoAction(int32 action) override
+        {
+            switch (action)
+            {
+                case ACTION_JUST_SUMMONED:
+                    me->SetVisible(false);
+                    me->SetHomePosition(me->GetPosition());
+                    DoZoneInCombat();
+                    me->SetCombatPulseDelay(5);
+                    _visibilityTimer =  2 * IN_MILLISECONDS;
+                    _bloodTapTimer   = 25 * IN_MILLISECONDS;
+                    break;
+                case ACTION_KELTHUZAD_DIED:
+                    Talk(EMOTE_GUARDIAN_FLEE);
+                    me->SetReactState(REACT_PASSIVE);
+                    me->RemoveAllAuras();
+                    me->CombatStop();
+                    me->StopMoving();
+                    me->SetImmuneToPC(true);
+                    me->DespawnOrUnsummon(30s); // just in case anything interrupts the movement
+                    me->GetMotionMaster()->MoveTargetedHome();
+                    break;
+                default:
+                    break;
             }
         }
 
-        void JustEngagedWith(Unit*  /*who*/) override
+        void EnterEvadeMode(EvadeReason why) override
         {
-            me->SetInCombatWithZone();
-            if (me->GetEntry() == NPC_UNSTOPPABLE_ABOMINATION)
-            {
-                events.ScheduleEvent(EVENT_MINION_FRENZY, 1s);
-                events.ScheduleEvent(EVENT_MINION_MORTAL_WOUND, 5s);
-            }
-            else if (me->GetEntry() == NPC_GUARDIAN_OF_ICECROWN)
-            {
-                events.ScheduleEvent(EVENT_MINION_BLOOD_TAP, 15s);
-            }
-        }
-
-        void KilledUnit(Unit* who) override
-        {
-            if (who->IsPlayer() && me->GetInstanceScript())
-            {
-                me->GetInstanceScript()->SetData(DATA_IMMORTAL_FAIL, 0);
-            }
+            if (Creature* kelthuzad = ObjectAccessor::GetCreature(*me, instance->GetGuidData(DATA_KELTHUZAD)))
+                kelthuzad->AI()->EnterEvadeMode();
+            ScriptedAI::EnterEvadeMode(why);
         }
 
         void JustReachedHome() override
         {
-            if (me->GetEntry() == NPC_GUARDIAN_OF_ICECROWN)
-            {
-                me->DespawnOrUnsummon();
-            }
+            me->DespawnOrUnsummon();
+        }
+
+        void Reset() override
+        {
+            me->SetCombatPulseDelay(0);
+            ScriptedAI::Reset();
         }
 
         void UpdateAI(uint32 diff) override
         {
+            if (_visibilityTimer)
+            {
+                if (diff > _visibilityTimer)
+                    _visibilityTimer -= diff;
+                else
+                {
+                    me->SetVisible(true);
+                    Talk(EMOTE_GUARDIAN_APPEAR);
+                    _visibilityTimer = 0;
+                }
+            }
+
             if (!UpdateVictim())
                 return;
 
-            events.Update(diff);
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
+            if (_bloodTapTimer <= diff)
             {
-                case EVENT_MINION_MORTAL_WOUND:
-                    me->CastSpell(me->GetVictim(), SPELL_MORTAL_WOUND, false);
-                    events.Repeat(15s);
-                    break;
-                case EVENT_MINION_FRENZY:
-                    if (me->HealthBelowPct(35))
-                    {
-                        me->CastSpell(me, SPELL_FRENZY, true);
-                        break;
-                    }
-                    events.Repeat(1s);
-                    break;
-                case EVENT_MINION_BLOOD_TAP:
-                    me->CastSpell(me->GetVictim(), SPELL_BLOOD_TAP, false);
-                    events.Repeat(15s);
-                    break;
+                DoCastVictim(SPELL_BLOOD_TAP);
+                _bloodTapTimer = urandms(18, 26);
             }
-            DoMeleeAttackIfReady();
+            else
+                _bloodTapTimer -= diff;
         }
-    };
+
+    private:
+        InstanceScript* const instance;
+        uint32 _visibilityTimer;
+        uint32 _bloodTapTimer;
 };
 
-class spell_kelthuzad_frost_blast : public SpellScript
+struct npc_kelthuzad_shadow_fissure : public ScriptedAI
 {
-    PrepareSpellScript(spell_kelthuzad_frost_blast);
+    npc_kelthuzad_shadow_fissure(Creature* creature) : ScriptedAI(creature) { }
 
-    bool Validate(SpellInfo const* /*spell*/) override
+    void InitializeAI() override
     {
-        return ValidateSpellInfo({ SPELL_FROST_BLAST });
+        me->SetReactState(REACT_PASSIVE);
     }
 
-    void FilterTargets(std::list<WorldObject*>& targets)
+    void JustAppeared() override
     {
-        Unit* caster = GetCaster();
-        if (!caster || !caster->ToCreature())
-            return;
+        _scheduler.Schedule(5s, [this](TaskContext /*task*/)
+        {
+            DoCastSelf(SPELL_VOID_BLAST);
+        });
+    }
 
-        std::list<WorldObject*> tmplist;
-        for (auto& target : targets)
-        {
-            if (!target->ToUnit()->HasAura(SPELL_FROST_BLAST))
-            {
-                tmplist.push_back(target);
-            }
-        }
-        targets.clear();
-        for (auto& itr : tmplist)
-        {
-            targets.push_back(itr);
-        }
+    void UpdateAI(uint32 diff) override
+    {
+        _scheduler.Update(diff);
+    }
+
+private:
+    TaskScheduler _scheduler;
+};
+
+// 28410 - Chains of Kel'Thuzad
+class spell_kelthuzad_chains : public AuraScript
+{
+    void HandleApply(AuraEffect const* aurEff, AuraEffectHandleModes mode)
+    {
+        aurEff->HandleAuraModScale(GetTargetApplication(), mode, true);
+    }
+
+    void HandleRemove(AuraEffect const* aurEff, AuraEffectHandleModes mode)
+    {
+        aurEff->HandleAuraModScale(GetTargetApplication(), mode, false);
     }
 
     void Register() override
     {
-        OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_kelthuzad_frost_blast::FilterTargets, EFFECT_ALL, TARGET_UNIT_DEST_AREA_ENEMY);
+        AfterEffectApply += AuraEffectApplyFn(spell_kelthuzad_chains::HandleApply, EFFECT_1, SPELL_AURA_MOD_DAMAGE_PERCENT_DONE, AURA_EFFECT_HANDLE_REAL);
+        AfterEffectRemove += AuraEffectApplyFn(spell_kelthuzad_chains::HandleRemove, EFFECT_1, SPELL_AURA_MOD_DAMAGE_PERCENT_DONE, AURA_EFFECT_HANDLE_REAL);
     }
 };
 
-class spell_kelthuzad_detonate_mana_aura : public AuraScript
+// 27819 - Detonate Mana
+class spell_kelthuzad_detonate_mana : public AuraScript
 {
-    PrepareAuraScript(spell_kelthuzad_detonate_mana_aura);
-
     bool Validate(SpellInfo const* /*spell*/) override
     {
         return ValidateSpellInfo({ SPELL_MANA_DETONATION_DAMAGE });
@@ -713,24 +874,104 @@ class spell_kelthuzad_detonate_mana_aura : public AuraScript
     void HandleScript(AuraEffect const* aurEff)
     {
         PreventDefaultAction();
+
         Unit* target = GetTarget();
-        if (auto mana = int32(target->GetMaxPower(POWER_MANA) / 10))
+        if (int32 mana = int32(target->GetMaxPower(POWER_MANA) / 10))
         {
             mana = target->ModifyPower(POWER_MANA, -mana);
-            target->CastCustomSpell(SPELL_MANA_DETONATION_DAMAGE, SPELLVALUE_BASE_POINT0, -mana * 10, target, true, nullptr, aurEff);
+            CastSpellExtraArgs args(aurEff);
+            args.AddSpellBP0(-mana * 10);
+            target->CastSpell(target, SPELL_MANA_DETONATION_DAMAGE, args);
         }
     }
 
     void Register() override
     {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_kelthuzad_detonate_mana_aura::HandleScript, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
+        OnEffectPeriodic += AuraEffectPeriodicFn(spell_kelthuzad_detonate_mana::HandleScript, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
     }
+};
+
+// 27808 - Frost Blast
+class spell_kelthuzad_frost_blast : public AuraScript
+{
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo({ SPELL_FROST_BLAST_DMG });
+    }
+
+    void PeriodicTick(AuraEffect const* aurEff)
+    {
+        PreventDefaultAction();
+
+        // Stuns the target, dealing 26% of the target's maximum health in Frost damage every second for 4 sec.
+        if (Unit* caster = GetCaster())
+        {
+            CastSpellExtraArgs args(aurEff);
+            args.AddSpellBP0(GetTarget()->CountPctFromMaxHealth(26));
+            caster->CastSpell(GetTarget(), SPELL_FROST_BLAST_DMG, args);
+        }
+    }
+
+    void Register() override
+    {
+        OnEffectPeriodic += AuraEffectPeriodicFn(spell_kelthuzad_frost_blast::PeriodicTick, EFFECT_1, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
+    }
+};
+
+class at_kelthuzad_center : public AreaTriggerScript
+{
+public:
+    at_kelthuzad_center() : AreaTriggerScript("at_kelthuzad_center") { }
+
+    bool OnTrigger(Player* player, AreaTriggerEntry const* /*at*/) override
+    {
+        InstanceScript* instance = player->GetInstanceScript();
+        if (!instance || instance->GetBossState(BOSS_KELTHUZAD) != NOT_STARTED)
+            return true;
+
+        if (player->IsGameMaster())
+            return true;
+
+        Creature* kelThuzad = ObjectAccessor::GetCreature(*player, instance->GetGuidData(DATA_KELTHUZAD));
+        if (!kelThuzad)
+            return true;
+
+        kelThuzad->AI()->DoAction(ACTION_BEGIN_ENCOUNTER);
+
+        return true;
+    }
+};
+
+class achievement_just_cant_get_enough : public AchievementCriteriaScript
+{
+   public:
+        achievement_just_cant_get_enough() : AchievementCriteriaScript("achievement_just_cant_get_enough") { }
+
+        bool OnCheck(Player* /*player*/, Unit* target) override
+        {
+            if (!target)
+                return false;
+
+            if (InstanceScript* instance = target->GetInstanceScript())
+                if (Creature* kelThuzad = ObjectAccessor::GetCreature(*target, instance->GetGuidData(DATA_KELTHUZAD)))
+                    if (kelThuzad->AI()->GetData(DATA_ABOMINATION_DEATH_COUNT) >= 18)
+                        return true;
+
+            return false;
+        }
 };
 
 void AddSC_boss_kelthuzad()
 {
-    new boss_kelthuzad();
-    new boss_kelthuzad_minion();
+    RegisterNaxxramasCreatureAI(boss_kelthuzad);
+    RegisterNaxxramasCreatureAI(npc_kelthuzad_skeleton);
+    RegisterNaxxramasCreatureAI(npc_kelthuzad_banshee);
+    RegisterNaxxramasCreatureAI(npc_kelthuzad_abomination);
+    RegisterNaxxramasCreatureAI(npc_kelthuzad_guardian);
+    RegisterNaxxramasCreatureAI(npc_kelthuzad_shadow_fissure);
+    RegisterSpellScript(spell_kelthuzad_chains);
+    RegisterSpellScript(spell_kelthuzad_detonate_mana);
     RegisterSpellScript(spell_kelthuzad_frost_blast);
-    RegisterSpellScript(spell_kelthuzad_detonate_mana_aura);
+    new at_kelthuzad_center();
+    new achievement_just_cant_get_enough();
 }

@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -21,47 +21,46 @@
 #include "CreatureAIImpl.h"
 
 #define ScholomanceScriptName "instance_scholomance"
+#define DataHeader "SC_old"
 
-enum DataTypes
+enum SCDataTypes
 {
-    DATA_KIRTONOS_THE_HERALD            = 0,
-    DATA_MINI_BOSSES                    = 1,
-    DATA_RAS_HUMAN                      = 2,
-    DATA_DARKMASTER_GANDLING            = 3
+    DATA_DOCTORTHEOLENKRASTINOV         = 0,
+    DATA_INSTRUCTORMALICIA              = 1,
+    DATA_LADYILLUCIABAROV               = 2,
+    DATA_LORDALEXEIBAROV                = 3,
+    DATA_LOREKEEPERPOLKELT              = 4,
+    DATA_THERAVENIAN                    = 5,
+    DATA_DARKMASTERGANDLING             = 6,
+    DATA_KIRTONOS                       = 7,
+    DATA_JANDICE_BAROV                  = 8,
+    DATA_RATTLEGORE                     = 9,
+    DATA_MARDUK_BLACKPOOL               = 10,
+    DATA_VECTUS                         = 11,
+    DATA_RAS_FROSTWHISPER               = 12,
+
+    MAX_ENCOUNTER
 };
 
-enum ModelIds
+enum SCCreatureIds
 {
-    MODEL_RAS_HUMAN = 3975
+    NPC_DARKMASTER_GANDLING             = 1853,
+    NPC_MARDUK_BLACKPOOL                = 10433,
+    NPC_RATTLEGORE                      = 11622,
+    NPC_BONE_MINION                     = 16119
 };
 
-enum TalkGroupIds
+enum SCGameobjectIds
 {
-    TALK_RAS_HUMAN = 0
-};
-
-enum CreatureIds
-{
-    NPC_RISEN_GUARDIAN          = 11598,
-    NPC_DARKMASTER_GANDLING     = 1853,
-    NPC_KIRTONOS                = 10506
-};
-
-enum GameobjectIds
-{
-    GO_BRAZIER_KIRTONOS         = 175564,
-    GO_GATE_KIRTONOS            = 175570,
-
-    GO_DOOR_OPENED_WITH_KEY     = 175167,
-
-    GO_GATE_GANDLING_ENTRANCE   = 177374,
-
-    GO_GATE_GANDLING_DOWN_NORTH = 177371,
-    GO_GATE_GANDLING_DOWN_EAST  = 177373,
-    GO_GATE_GANDLING_DOWN_SOUTH = 177372,
-    GO_GATE_GANDLING_UP_NORTH   = 177376,
-    GO_GATE_GANDLING_UP_EAST    = 177377,
-    GO_GATE_GANDLING_UP_SOUTH   = 177375
+    GO_GATE_KIRTONOS                    = 175570,
+    GO_GATE_GANDLING                    = 177374,
+    GO_GATE_RAVENIAN                    = 177372,
+    GO_GATE_THEOLEN                     = 177377,
+    GO_GATE_ILLUCIA                     = 177371,
+    GO_GATE_MALICIA                     = 177375,
+    GO_GATE_BAROV                       = 177373,
+    GO_GATE_POLKELT                     = 177376,
+    GO_BRAZIER_OF_THE_HERALD            = 175564
 };
 
 template <class AI, class T>
@@ -69,7 +68,5 @@ inline AI* GetScholomanceAI(T* obj)
 {
     return GetInstanceAI<AI>(obj, ScholomanceScriptName);
 }
-
-#define RegisterScholomanceCreatureAI(ai_name) RegisterCreatureAIWithFactory(ai_name, GetScholomanceAI)
 
 #endif

@@ -1,117 +1,151 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
 #include "the_eye.h"
+#include "ScriptedCreature.h"
+#include "ScriptMgr.h"
 
-enum voidReaver
+enum ReaverTexts
 {
     SAY_AGGRO                   = 0,
     SAY_SLAY                    = 1,
     SAY_DEATH                   = 2,
-    SAY_POUNDING                = 3,
+    SAY_POUNDING                = 3
+};
 
+enum ReaverSpells
+{
     SPELL_POUNDING              = 34162,
     SPELL_ARCANE_ORB            = 34172,
     SPELL_KNOCK_AWAY            = 25778,
-    SPELL_BERSERK               = 26662
+    SPELL_BERSERK               = 27680
 };
 
-enum Groups
+enum ReaverEvents
 {
-    GROUP_ARCANE_ORB            = 1
+    EVENT_POUNDING              = 1,
+    EVENT_ARCANE_ORB,
+    EVENT_KNOCK_AWAY,
+    EVENT_BERSERK
 };
 
 struct boss_void_reaver : public BossAI
 {
-    boss_void_reaver(Creature* creature) : BossAI(creature, DATA_REAVER)
-    {
-        callForHelpRange = 105.0f;
-        scheduler.SetValidator([this]
-        {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
-
-        me->ApplySpellImmune(0, IMMUNITY_DISPEL, DISPEL_POISON, true);
-        me->ApplySpellImmune(0, IMMUNITY_EFFECT, SPELL_EFFECT_HEALTH_LEECH, true);
-        me->ApplySpellImmune(0, IMMUNITY_EFFECT, SPELL_EFFECT_POWER_DRAIN, true);
-        me->ApplySpellImmune(0, IMMUNITY_STATE, SPELL_AURA_PERIODIC_LEECH, true);
-        me->ApplySpellImmune(0, IMMUNITY_STATE, SPELL_AURA_PERIODIC_MANA_LEECH, true);
-    }
+    boss_void_reaver(Creature* creature) : BossAI(creature, DATA_VOID_REAVER), _enraged(false) { }
 
     void Reset() override
     {
-        BossAI::Reset();
-        _recentlySpoken = false;
-    }
-
-    void KilledUnit(Unit* /*victim*/) override
-    {
-        if (!_recentlySpoken)
-        {
-            Talk(SAY_SLAY);
-            _recentlySpoken = true;
-            scheduler.Schedule(5s, [this](TaskContext)
-            {
-                _recentlySpoken = false;
-            });
-        }
-    }
-
-    void JustDied(Unit* killer) override
-    {
-        Talk(SAY_DEATH);
-        BossAI::JustDied(killer);
+        _Reset();
+        _enraged = false;
     }
 
     void JustEngagedWith(Unit* who) override
     {
-        BossAI::JustEngagedWith(who);
         Talk(SAY_AGGRO);
+        BossAI::JustEngagedWith(who);
+        me->CallForHelp(120.0f);
 
-        scheduler.Schedule(10min, [this](TaskContext)
-        {
-            DoCastSelf(SPELL_BERSERK);
-        }).Schedule(8300ms, [this](TaskContext context)
-        {
-            Talk(SAY_POUNDING);
-            DoCastSelf(SPELL_POUNDING);
-            scheduler.DelayGroup(GROUP_ARCANE_ORB, 3s);
-            context.Repeat(12100ms, 15800ms);
-        }).Schedule(3450ms, GROUP_ARCANE_ORB, [this](TaskContext context)
-        {
-            if (DoCastRandomTarget(SPELL_ARCANE_ORB, 0, -20.0f) != SPELL_CAST_OK)
-            {
-                DoCastRandomTarget(SPELL_ARCANE_ORB, 0, 18.0f);
-            }
-            context.Repeat(2400ms, 6300ms);
-        }).Schedule(14350ms, [this](TaskContext context)
-        {
-            DoCastVictim(SPELL_KNOCK_AWAY);
-            context.Repeat(20550ms, 22550ms);
-        });
+        events.ScheduleEvent(EVENT_POUNDING, 15s);
+        events.ScheduleEvent(EVENT_ARCANE_ORB, 3s);
+        events.ScheduleEvent(EVENT_KNOCK_AWAY, 30s);
+        events.ScheduleEvent(EVENT_BERSERK, 10min);
     }
 
-    private:
-        bool _recentlySpoken;
+    void KilledUnit(Unit* /*victim*/) override
+    {
+        Talk(SAY_SLAY);
+    }
+
+    void JustDied(Unit* /*killer*/) override
+    {
+        Talk(SAY_DEATH);
+        _JustDied();
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_POUNDING:
+                    DoCastVictim(SPELL_POUNDING);
+                    Talk(SAY_POUNDING);
+                    events.ScheduleEvent(EVENT_POUNDING, 15s);
+                    break;
+                case EVENT_ARCANE_ORB:
+                {
+                    std::vector<Unit*> target_list;
+                    for (auto* ref : me->GetThreatManager().GetUnsortedThreatList())
+                    {
+                        Unit* target = ref->GetVictim();
+                        if (target->GetTypeId() == TYPEID_PLAYER && target->IsAlive() && !target->IsWithinDist(me, 18, false))
+                            target_list.push_back(target);
+                    }
+
+                    Unit* target;
+                    if (!target_list.empty())
+                        target = *(target_list.begin() + rand32() % target_list.size());
+                    else
+                        target = me->GetVictim();
+
+                    if (target)
+                        me->CastSpell(target, SPELL_ARCANE_ORB);
+
+                    events.ScheduleEvent(EVENT_ARCANE_ORB, 3s);
+                    break;
+                }
+                case EVENT_KNOCK_AWAY:
+                    DoCastVictim(SPELL_KNOCK_AWAY);
+                    // Drop 25% aggro
+                    if (GetThreat(me->GetVictim()))
+                        ModifyThreatByPercent(me->GetVictim(), -25);
+
+                    events.ScheduleEvent(EVENT_KNOCK_AWAY, 30s);
+                    break;
+                case EVENT_BERSERK:
+                    if (!_enraged)
+                    {
+                        DoCastSelf(SPELL_BERSERK);
+                        _enraged = true;
+                    }
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+    }
+
+private:
+    bool _enraged;
 };
 
 void AddSC_boss_void_reaver()
 {
-    RegisterTheEyeAI(boss_void_reaver);
+    RegisterTheEyeCreatureAI(boss_void_reaver);
 }

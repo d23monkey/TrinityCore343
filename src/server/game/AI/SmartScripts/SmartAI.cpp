@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -16,314 +16,202 @@
  */
 
 #include "SmartAI.h"
-#include "AreaTriggerScript.h"
-#include "CellImpl.h"
-#include "GridDefines.h"
-#include "GridNotifiers.h"
+#include "AreaTrigger.h"
+#include "ConditionMgr.h"
+#include "Creature.h"
+#include "CreatureGroups.h"
+#include "DB2Structure.h"
+#include "GameObject.h"
 #include "Group.h"
-#include "ObjectDefines.h"
-#include "ObjectMgr.h"
-#include "ScriptedCreature.h"
-#include "SpellMgr.h"
+#include "Log.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
+#include "PetDefines.h"
+#include "Player.h"
+#include "ScriptMgr.h"
 #include "Vehicle.h"
+#include "WaypointManager.h"
 
-SmartAI::SmartAI(Creature* c) : CreatureAI(c)
+SmartAI::SmartAI(Creature* creature, uint32 scriptId) : CreatureAI(creature, scriptId), _charmed(false), _followCreditType(0), _followArrivedTimer(0), _followCredit(0), _followArrivedEntry(0), _followDistance(0.f), _followAngle(0.f),
+    _escortState(SMART_ESCORT_NONE), _escortNPCFlags(0), _escortInvokerCheckTimer(1000), _currentWaypointNodeId(0), _waypointReached(false), _waypointPauseTimer(0), _waypointPauseForced(false), _repeatWaypointPath(false),
+    _OOCReached(false), _waypointPathEnded(false), _run(true), _evadeDisabled(false), _canCombatMove(true), _invincibilityHPLevel(0), _despawnTime(0), _despawnState(0), _vehicleConditionsTimer(0),
+    _gossipReturn(false), _escortQuestId(0)
 {
-    mIsCharmed = false;
-    // copy script to local (protection for table reload)
-
-    mWayPoints = nullptr;
-    mEscortState = SMART_ESCORT_NONE;
-    mCurrentWPID = 0;//first wp id is 1 !!
-    mWPReached = false;
-    mOOCReached = false;
-    mWPPauseTimer = 0;
-    mLastWP = nullptr;
-    mEscortNPCFlags = 0;
-
-    mCanRepeatPath = false;
-
-    // spawn in run mode
-    // Xinef: spawn in run mode and set mRun to run... this overrides SetWalk EVERYWHERE
-    mRun = true;
-    mEvadeDisabled = false;
-
-    mCanAutoAttack = true;
-    mCanCombatMove = true;
-
-    mForcedPaused = false;
-
-    mEscortQuestID = 0;
-
-    mDespawnTime = 0;
-    mDespawnState = 0;
-
-    mEscortInvokerCheckTimer = 1000;
-    mFollowDist = 0;
-    mFollowAngle = 0;
-    mFollowCredit = 0;
-    mFollowArrivedEntry = 0;
-    mFollowCreditType = 0;
-    mFollowArrivedAlive = 0;
-    mFollowArrivedTimer = 0;
-    mInvincibilityHpLevel = 0;
-
-    mJustReset = false;
-
-    mcanSpawn = true;
-
-    // Xinef: Vehicle conditions
-    m_ConditionsTimer = 0;
-    if (me->GetVehicleKit())
-        conditions = sConditionMgr->GetConditionsForNotGroupedEntry(CONDITION_SOURCE_TYPE_CREATURE_TEMPLATE_VEHICLE, me->GetEntry());
+    _vehicleConditions = sConditionMgr->HasConditionsForNotGroupedEntry(CONDITION_SOURCE_TYPE_CREATURE_TEMPLATE_VEHICLE, creature->GetEntry());
 }
 
 bool SmartAI::IsAIControlled() const
 {
-    return !mIsCharmed;
+    return !_charmed;
 }
 
-void SmartAI::UpdateDespawn(const uint32 diff)
-{
-    if (mDespawnState <= 1 || mDespawnState > 3)
-        return;
-
-    if (mDespawnTime < diff)
-    {
-        if (mDespawnState == 2)
-        {
-            me->SetVisible(false);
-            mDespawnTime = 5000;
-            mDespawnState++;
-        }
-        else
-            me->DespawnOrUnsummon();
-    }
-    else
-        mDespawnTime -= diff;
-}
-
-WayPoint* SmartAI::GetNextWayPoint()
-{
-    if (!mWayPoints || mWayPoints->empty())
-        return nullptr;
-
-    mCurrentWPID++;
-    WPPath::const_iterator itr = mWayPoints->find(mCurrentWPID);
-    if (itr != mWayPoints->end())
-    {
-        mLastWP = (*itr).second;
-        if (mLastWP->id != mCurrentWPID)
-            LOG_ERROR("scripts.ai.sai", "SmartAI::GetNextWayPoint: Got not expected waypoint id {}, expected {}", mLastWP->id, mCurrentWPID);
-
-        return (*itr).second;
-    }
-    return nullptr;
-}
-
-void SmartAI::GenerateWayPointArray(Movement::PointsArray* points)
-{
-    if (!mWayPoints || mWayPoints->empty())
-        return;
-
-    // Flying unit, just fill array
-    if (me->m_movementInfo.HasMovementFlag((MovementFlags)(MOVEMENTFLAG_CAN_FLY | MOVEMENTFLAG_DISABLE_GRAVITY)))
-    {
-        // xinef: first point in vector is unit real position
-        points->clear();
-        points->push_back(G3D::Vector3(me->GetPositionX(), me->GetPositionY(), me->GetPositionZ()));
-        uint32 wpCounter = mCurrentWPID;
-        WPPath::const_iterator itr;
-        while ((itr = mWayPoints->find(wpCounter++)) != mWayPoints->end())
-        {
-            WayPoint* wp = (*itr).second;
-            points->push_back(G3D::Vector3(wp->x, wp->y, wp->z));
-        }
-    }
-    else
-    {
-        for (float size = 1.0f; size; size *= 0.5f)
-        {
-            std::vector<G3D::Vector3> pVector;
-            // xinef: first point in vector is unit real position
-            pVector.push_back(G3D::Vector3(me->GetPositionX(), me->GetPositionY(), me->GetPositionZ()));
-            uint32 length = (mWayPoints->size() - mCurrentWPID) * size;
-
-            uint32 cnt = 0;
-            uint32 wpCounter = mCurrentWPID;
-            WPPath::const_iterator itr;
-            while ((itr = mWayPoints->find(wpCounter++)) != mWayPoints->end() && cnt++ <= length)
-            {
-                WayPoint* wp = (*itr).second;
-                pVector.push_back(G3D::Vector3(wp->x, wp->y, wp->z));
-            }
-
-            if (pVector.size() > 2) // more than source + dest
-            {
-                G3D::Vector3 middle = (pVector[0] + pVector[pVector.size() - 1]) / 2.f;
-                G3D::Vector3 offset;
-
-                bool continueLoop = false;
-                for (uint32 i = 1; i < pVector.size() - 1; ++i)
-                {
-                    offset = middle - pVector[i];
-                    if (std::fabs(offset.x) >= 0xFF || std::fabs(offset.y) >= 0xFF || std::fabs(offset.z) >= 0x7F)
-                    {
-                        // offset is too big, split points
-                        continueLoop = true;
-                        break;
-                    }
-                }
-                if (continueLoop)
-                    continue;
-            }
-            // everything ok
-            *points = pVector;
-            break;
-        }
-    }
-}
-
-void SmartAI::StartPath(bool run, uint32 path, bool repeat, Unit* invoker)
+void SmartAI::StartPath(uint32 pathId/* = 0*/, bool repeat/* = false*/, Unit* invoker/* = nullptr*/, uint32 nodeId/* = 0*/)
 {
     if (HasEscortState(SMART_ESCORT_ESCORTING))
         StopPath();
 
-    if (path)
-    {
-        if (!LoadPath(path))
-            return;
-    }
-
-    if (!mWayPoints || mWayPoints->empty())
+    if (!pathId)
         return;
 
-    if (WayPoint* wp = GetNextWayPoint())
+    WaypointPath const* path = LoadPath(pathId);
+    if (!path)
+        return;
+
+    _currentWaypointNodeId = nodeId;
+    _waypointPathEnded = false;
+
+    _repeatWaypointPath = repeat;
+
+    // Do not use AddEscortState, removing everything from previous
+    _escortState = SMART_ESCORT_ESCORTING;
+
+    if (invoker && invoker->GetTypeId() == TYPEID_PLAYER)
     {
-        AddEscortState(SMART_ESCORT_ESCORTING);
-        mCanRepeatPath = repeat;
-        SetRun(run);
-
-        if (invoker && invoker->IsPlayer())
-        {
-            mEscortNPCFlags = me->GetNpcFlags();
-            me->ReplaceAllNpcFlags(UNIT_NPC_FLAG_NONE);
-        }
-
-        Movement::PointsArray pathPoints;
-        GenerateWayPointArray(&pathPoints);
-
-        me->GetMotionMaster()->MoveSplinePath(&pathPoints);
-        GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_START, nullptr, wp->id, GetScript()->GetPathId());
+        _escortNPCFlags = me->GetNpcFlags();
+        me->ReplaceAllNpcFlags(UNIT_NPC_FLAG_NONE);
     }
+
+    me->GetMotionMaster()->MovePath(*path, _repeatWaypointPath);
 }
 
-bool SmartAI::LoadPath(uint32 entry)
+WaypointPath const* SmartAI::LoadPath(uint32 entry)
 {
     if (HasEscortState(SMART_ESCORT_ESCORTING))
-        return false;
+        return nullptr;
 
-    mWayPoints = sSmartWaypointMgr->GetPath(entry);
-    if (!mWayPoints)
+    WaypointPath const* path = sWaypointMgr->GetPath(entry);
+    if (!path || path->Nodes.empty())
     {
         GetScript()->SetPathId(0);
-        return false;
+        return nullptr;
     }
 
     GetScript()->SetPathId(entry);
-    return true;
+    return path;
 }
 
 void SmartAI::PausePath(uint32 delay, bool forced)
 {
     if (!HasEscortState(SMART_ESCORT_ESCORTING))
+    {
+        me->PauseMovement(delay, MOTION_SLOT_DEFAULT, forced);
+        if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() == WAYPOINT_MOTION_TYPE)
+        {
+            std::pair<uint32, uint32> waypointInfo = me->GetCurrentWaypointInfo();
+            GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_PAUSED, nullptr, waypointInfo.first, waypointInfo.second);
+        }
         return;
+    }
 
     if (HasEscortState(SMART_ESCORT_PAUSED))
     {
-        LOG_ERROR("scripts.ai.sai", "SmartAI::StartPath: Creature entry {} wanted to pause waypoint movement while already paused, ignoring.", me->GetEntry());
+        TC_LOG_ERROR("scripts.ai.sai", "SmartAI::PausePath: Creature wanted to pause waypoint (current waypoint: {}) movement while already paused, ignoring. ({})", _currentWaypointNodeId, me->GetGUID().ToString());
         return;
     }
 
-    AddEscortState(SMART_ESCORT_PAUSED);
-    mWPPauseTimer = delay;
-    if (forced && !mWPReached)
+    _waypointPauseTimer = delay;
+
+    if (forced)
     {
-        mForcedPaused = forced;
-        SetRun(mRun);
-        if (me->GetMotionMaster()->GetMotionSlotType(MOTION_SLOT_ACTIVE) == ESCORT_MOTION_TYPE)
-            me->GetMotionMaster()->MovementExpired();
-
-        me->StopMoving();
-        me->GetMotionMaster()->MoveIdle();//force stop
-
-        auto waypoint = mWayPoints->find(mCurrentWPID);
-        if (waypoint->second->o.has_value())
-        {
-            me->SetFacingTo(waypoint->second->o.has_value());
-        }
+        _waypointPauseForced = forced;
+        SetRun(_run);
+        me->PauseMovement();
+        me->SetHomePosition(me->GetPosition());
     }
-    GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_PAUSED, nullptr, mCurrentWPID, GetScript()->GetPathId());
+    else
+        _waypointReached = false;
+
+    AddEscortState(SMART_ESCORT_PAUSED);
+    GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_PAUSED, nullptr, _currentWaypointNodeId, GetScript()->GetPathId());
+}
+
+bool SmartAI::CanResumePath()
+{
+    if (!HasEscortState(SMART_ESCORT_ESCORTING))
+    {
+        // The whole resume logic doesn't support this case
+        return false;
+    }
+
+    return HasEscortState(SMART_ESCORT_PAUSED);
 }
 
 void SmartAI::StopPath(uint32 DespawnTime, uint32 quest, bool fail)
 {
     if (!HasEscortState(SMART_ESCORT_ESCORTING))
+    {
+        std::pair<uint32, uint32> waypointInfo = { 0, 0 };
+        if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() == WAYPOINT_MOTION_TYPE)
+            waypointInfo = me->GetCurrentWaypointInfo();
+
+        if (_despawnState != 2)
+            SetDespawnTime(DespawnTime);
+
+        me->GetMotionMaster()->MoveIdle();
+
+        if (waypointInfo.second)
+            GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_STOPPED, nullptr, waypointInfo.first, waypointInfo.second);
+
+        if (!fail)
+        {
+            if (waypointInfo.second)
+                GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_ENDED, nullptr, waypointInfo.first, waypointInfo.second);
+            if (_despawnState == 1)
+                StartDespawn();
+        }
         return;
+    }
 
     if (quest)
-        mEscortQuestID = quest;
+        _escortQuestId = quest;
 
-    SetDespawnTime(DespawnTime);
+    if (_despawnState != 2)
+        SetDespawnTime(DespawnTime);
 
-    if (me->GetMotionMaster()->GetMotionSlotType(MOTION_SLOT_ACTIVE) == ESCORT_MOTION_TYPE)
-        me->GetMotionMaster()->MovementExpired();
-
-    me->StopMoving();
     me->GetMotionMaster()->MoveIdle();
-    GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_STOPPED, nullptr, mCurrentWPID, GetScript()->GetPathId());
+
+    GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_STOPPED, nullptr, _currentWaypointNodeId, GetScript()->GetPathId());
+
     EndPath(fail);
 }
 
 void SmartAI::EndPath(bool fail)
 {
     RemoveEscortState(SMART_ESCORT_ESCORTING | SMART_ESCORT_PAUSED | SMART_ESCORT_RETURNING);
-    mWayPoints = nullptr;
-    mLastWP = nullptr;
-    mWPPauseTimer = 0;
 
-    if (mEscortNPCFlags)
+    _waypointPauseTimer = 0;
+
+    if (_escortNPCFlags)
     {
-        me->ReplaceAllNpcFlags(NPCFlags(mEscortNPCFlags));
-        mEscortNPCFlags = 0;
+        me->ReplaceAllNpcFlags((NPCFlags)_escortNPCFlags);
+        _escortNPCFlags = 0;
     }
 
     ObjectVector const* targets = GetScript()->GetStoredTargetVector(SMART_ESCORT_TARGETS, *me);
-    if (targets && mEscortQuestID)
+    if (targets && _escortQuestId)
     {
         if (targets->size() == 1 && GetScript()->IsPlayer((*targets->begin())))
         {
             Player* player = targets->front()->ToPlayer();
+            if (!fail && player->IsAtGroupRewardDistance(me) && !player->HasCorpse())
+                player->GroupEventHappens(_escortQuestId, me);
+
+            if (fail)
+                player->FailQuest(_escortQuestId);
+
             if (Group* group = player->GetGroup())
             {
                 for (GroupReference* groupRef = group->GetFirstMember(); groupRef != nullptr; groupRef = groupRef->next())
                 {
                     Player* groupGuy = groupRef->GetSource();
-                    if (!groupGuy || !player->IsInMap(groupGuy))
+                    if (!groupGuy->IsInMap(player))
                         continue;
 
                     if (!fail && groupGuy->IsAtGroupRewardDistance(me) && !groupGuy->HasCorpse())
-                        groupGuy->AreaExploredOrEventHappens(mEscortQuestID);
-                    else if (fail && groupGuy->GetQuestStatus(mEscortQuestID) == QUEST_STATUS_INCOMPLETE)
-                        groupGuy->FailQuest(mEscortQuestID);
+                        groupGuy->AreaExploredOrEventHappens(_escortQuestId);
+                    else if (fail)
+                        groupGuy->FailQuest(_escortQuestId);
                 }
-            }
-            else
-            {
-                if (!fail && player->IsAtGroupRewardDistance(me) && !player->HasCorpse())
-                    player->GroupEventHappens(mEscortQuestID, me);
-                else if (fail && player->GetQuestStatus(mEscortQuestID) == QUEST_STATUS_INCOMPLETE)
-                    player->FailQuest(mEscortQuestID);
             }
         }
         else
@@ -334,48 +222,45 @@ void SmartAI::EndPath(bool fail)
                 {
                     Player* player = target->ToPlayer();
                     if (!fail && player->IsAtGroupRewardDistance(me) && !player->HasCorpse())
-                        player->AreaExploredOrEventHappens(mEscortQuestID);
-                    else if (fail && player->GetQuestStatus(mEscortQuestID) == QUEST_STATUS_INCOMPLETE)
-                        player->FailQuest(mEscortQuestID);
+                        player->AreaExploredOrEventHappens(_escortQuestId);
+                    else if (fail)
+                        player->FailQuest(_escortQuestId);
                 }
             }
         }
     }
 
-    // Xinef: if the escort failed - DO NOT PROCESS ANYTHING
-    // Xinef: End Path events should be only processed if it was SUCCESSFUL stop or stop called by SMART_ACTION_WAYPOINT_STOP
+    // End Path events should be only processed if it was SUCCESSFUL stop or stop called by SMART_ACTION_WAYPOINT_STOP
     if (fail)
-    {
-        mCurrentWPID = 0;
         return;
-    }
 
-    GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_ENDED, nullptr, mCurrentWPID, GetScript()->GetPathId());
-    mCurrentWPID = 0;
+    uint32 pathid = GetScript()->GetPathId();
+    GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_ENDED, nullptr, _currentWaypointNodeId, pathid);
 
-    if (mCanRepeatPath)
+    if (_repeatWaypointPath)
     {
         if (IsAIControlled())
-            StartPath(mRun, GetScript()->GetPathId(), true);
+            StartPath(GetScript()->GetPathId(), _repeatWaypointPath);
     }
-    else
+    else if (pathid == GetScript()->GetPathId()) // if it's not the same pathid, our script wants to start another path; don't override it
         GetScript()->SetPathId(0);
 
-    if (mDespawnState == 1)
+    if (_despawnState == 1)
         StartDespawn();
 }
 
 void SmartAI::ResumePath()
 {
-    SetRun(mRun);
+    GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_RESUMED, nullptr, _currentWaypointNodeId, GetScript()->GetPathId());
 
-    if (mLastWP)
-    {
-        Movement::PointsArray pathPoints;
-        GenerateWayPointArray(&pathPoints);
+    RemoveEscortState(SMART_ESCORT_PAUSED);
 
-        me->GetMotionMaster()->MoveSplinePath(&pathPoints);
-    }
+    _waypointPauseForced = false;
+    _waypointReached = false;
+    _waypointPauseTimer = 0;
+
+    SetRun(_run);
+    me->ResumeMovement();
 }
 
 void SmartAI::ReturnToLastOOCPos()
@@ -384,165 +269,27 @@ void SmartAI::ReturnToLastOOCPos()
         return;
 
     me->SetWalk(false);
-    float x, y, z, o;
-    me->GetHomePosition(x, y, z, o);
-    me->GetMotionMaster()->MovePoint(SMART_ESCORT_LAST_OOC_POINT, x, y, z);
-}
-
-void SmartAI::UpdatePath(const uint32 diff)
-{
-    if (!HasEscortState(SMART_ESCORT_ESCORTING))
-        return;
-
-    if (mEscortInvokerCheckTimer < diff)
-    {
-        // Xinef: Escort failed - no players in range
-        // Xinef: Despawn immediately
-        if (!IsEscortInvokerInRange())
-        {
-            StopPath(0, mEscortQuestID, true);
-
-            // Xinef: allow to properly hook out of range despawn action, which in most cases should perform the same operation as dying
-            GetScript()->ProcessEventsFor(SMART_EVENT_DEATH, me);
-            me->DespawnOrUnsummon(1);
-            return;
-        }
-        mEscortInvokerCheckTimer = 1000;
-    }
-    else
-        mEscortInvokerCheckTimer -= diff;
-
-    // handle pause
-    if (HasEscortState(SMART_ESCORT_PAUSED))
-    {
-        if (mWPPauseTimer < diff)
-        {
-            if (!me->IsInCombat() && !HasEscortState(SMART_ESCORT_RETURNING) && (mWPReached || mForcedPaused))
-            {
-                GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_RESUMED, nullptr, mCurrentWPID, GetScript()->GetPathId());
-                RemoveEscortState(SMART_ESCORT_PAUSED);
-                if (mForcedPaused)// if paused between 2 wps resend movement
-                {
-                    mWPReached = false;
-                    mForcedPaused = false;
-                    ResumePath();
-                }
-
-                mWPPauseTimer = 0;
-            }
-        }
-        else
-            mWPPauseTimer -= diff;
-    }
-
-    if (HasEscortState(SMART_ESCORT_RETURNING))
-    {
-        if (mOOCReached)//reached OOC WP
-        {
-            mOOCReached = false;
-            RemoveEscortState(SMART_ESCORT_RETURNING);
-            if (!HasEscortState(SMART_ESCORT_PAUSED))
-                ResumePath();
-        }
-    }
-
-    if ((me->GetVictim() && me->IsInCombat()) || HasEscortState(SMART_ESCORT_PAUSED | SMART_ESCORT_RETURNING))
-        return;
-
-    // handle next wp
-    if (!me->HasUnitState(UNIT_STATE_NOT_MOVE) && me->movespline->Finalized())//reached WP
-    {
-        if (!mWPReached)
-        {
-            ResumePath();
-            return;
-        }
-
-        mWPReached = false;
-        if (mCurrentWPID == GetWPCount())
-            EndPath();
-        else if (GetNextWayPoint())
-        {
-            SetRun(mRun);
-            // xinef: if we have reached waypoint, and there is no working spline movement it means our splitted array has ended, make new one
-            if (me->movespline->Finalized())
-                ResumePath();
-        }
-    }
-}
-
-void SmartAI::CheckConditions(const uint32 diff)
-{
-    Vehicle* vehicle = me->GetVehicleKit();
-    if (!vehicle)
-        return;
-
-    if (m_ConditionsTimer < diff)
-    {
-        if (!conditions.empty())
-        {
-            for (SeatMap::iterator itr = vehicle->Seats.begin(); itr != vehicle->Seats.end(); ++itr)
-                if (Unit* passenger = ObjectAccessor::GetUnit(*me, itr->second.Passenger.Guid))
-                {
-                    if (Player* player = passenger->ToPlayer())
-                    {
-                        if (!sConditionMgr->IsObjectMeetToConditions(player, me, conditions))
-                        {
-                            player->ExitVehicle();
-                            return;//check other pessanger in next tick
-                        }
-                    }
-                }
-        }
-        m_ConditionsTimer = 1000;
-    }
-    else
-        m_ConditionsTimer -= diff;
+    me->GetMotionMaster()->MovePoint(SMART_ESCORT_LAST_OOC_POINT, me->GetHomePosition());
 }
 
 void SmartAI::UpdateAI(uint32 diff)
 {
-    bool hasVictim = UpdateVictim();
+    if (!me->IsAlive())
+    {
+        if (IsEngaged())
+            EngagementOver();
+        return;
+    }
+
     CheckConditions(diff);
+
+    UpdateVictim();
+
     GetScript()->OnUpdate(diff);
+
     UpdatePath(diff);
+    UpdateFollow(diff);
     UpdateDespawn(diff);
-
-    //TODO move to void
-    if (mFollowGuid)
-    {
-        if (mFollowArrivedTimer < diff)
-        {
-            if (me->FindNearestCreature(mFollowArrivedEntry, INTERACTION_DISTANCE, mFollowArrivedAlive))
-            {
-                StopFollow(true);
-                return;
-            }
-
-            mFollowArrivedTimer = 1000;
-        }
-        else
-            mFollowArrivedTimer -= diff;
-    }
-
-    if (!IsAIControlled())
-    {
-        if (CharmInfo* charmInfo = me->GetCharmInfo())
-        {
-            if (charmInfo->IsCommandAttack() && mCanAutoAttack)
-            {
-                DoMeleeAttackIfReady();
-            }
-        }
-
-        return;
-    }
-
-    if (!hasVictim)
-        return;
-
-    if (mCanAutoAttack)
-        DoMeleeAttackIfReady();
 }
 
 bool SmartAI::IsEscortInvokerInRange()
@@ -561,8 +308,7 @@ bool SmartAI::IsEscortInvokerInRange()
                 for (GroupReference* groupRef = group->GetFirstMember(); groupRef != nullptr; groupRef = groupRef->next())
                 {
                     Player* groupGuy = groupRef->GetSource();
-
-                    if (groupGuy && me->IsInMap(groupGuy) && me->GetDistance(groupGuy) <= checkDist)
+                    if (groupGuy->IsInMap(player) && me->GetDistance(groupGuy) <= checkDist)
                         return true;
                 }
             }
@@ -579,83 +325,75 @@ bool SmartAI::IsEscortInvokerInRange()
             }
         }
 
-        // Xinef: no valid target found
+        // no valid target found
         return false;
     }
-    // Xinef: no player invoker was stored, just ignore range check
+
+    // no player invoker was stored, just ignore range check
     return true;
 }
 
-void SmartAI::MovepointReached(uint32 id)
+void SmartAI::WaypointReached(uint32 nodeId, uint32 pathId)
 {
-    // override the id, path can be resumed any time and counter will reset
-    // mCurrentWPID holds proper id
-
-    // xinef: both point movement and escort generator can enter this function
-    if (id == SMART_ESCORT_LAST_OOC_POINT)
+    if (!HasEscortState(SMART_ESCORT_ESCORTING))
     {
-        mOOCReached = true;
+        GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_REACHED, nullptr, nodeId, pathId);
         return;
     }
 
-    mWPReached = true;
-    GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_REACHED, nullptr, mCurrentWPID);
+    _currentWaypointNodeId = nodeId;
 
-    if (mLastWP)
+    GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_REACHED, nullptr, _currentWaypointNodeId, pathId);
+
+    if (_waypointPauseTimer && !_waypointPauseForced)
     {
-        me->SetPosition(mLastWP->x, mLastWP->y, mLastWP->z, me->GetOrientation());
+        _waypointReached = true;
+        me->PauseMovement();
         me->SetHomePosition(me->GetPosition());
     }
-
-    if (HasEscortState(SMART_ESCORT_PAUSED))
+    else if (HasEscortState(SMART_ESCORT_ESCORTING) && me->GetMotionMaster()->GetCurrentMovementGeneratorType() == WAYPOINT_MOTION_TYPE)
     {
-        if (me->GetMotionMaster()->GetMotionSlotType(MOTION_SLOT_ACTIVE) == ESCORT_MOTION_TYPE)
-            me->GetMotionMaster()->MovementExpired();
-
-        me->StopMovingOnCurrentPos();
-        me->GetMotionMaster()->MoveIdle();
-    }
-    // Xinef: Can be unset in ProcessEvents
-    else if (HasEscortState(SMART_ESCORT_ESCORTING) && me->GetMotionMaster()->GetCurrentMovementGeneratorType() == ESCORT_MOTION_TYPE)
-    {
-        mWPReached = false;
-        if (mCurrentWPID == GetWPCount())
-            EndPath();
-        else if (GetNextWayPoint())
-        {
-            SetRun(mRun);
-            // xinef: if we have reached waypoint, and there is no working spline movement it means our splitted array has ended, make new one
-            if (me->movespline->Finalized())
-                ResumePath();
-        }
+        WaypointPath const* path = sWaypointMgr->GetPath(pathId);
+        if (path && _currentWaypointNodeId == path->Nodes.back().Id)
+            _waypointPathEnded = true;
+        else
+            SetRun(_run);
     }
 }
 
-void SmartAI::MovementInform(uint32 MovementType, uint32 Data)
+///@todo move escort related logic
+void SmartAI::WaypointPathEnded(uint32 nodeId, uint32 pathId)
 {
-    if (MovementType == POINT_MOTION_TYPE && Data == SMART_ESCORT_LAST_OOC_POINT)
+    if (!HasEscortState(SMART_ESCORT_ESCORTING))
+    {
+        GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_ENDED, nullptr, nodeId, pathId);
+        return;
+    }
+}
+
+void SmartAI::MovementInform(uint32 type, uint32 id)
+{
+    if (type == POINT_MOTION_TYPE && id == SMART_ESCORT_LAST_OOC_POINT)
         me->ClearUnitState(UNIT_STATE_EVADE);
 
-    if (MovementType == WAYPOINT_MOTION_TYPE)
-        GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_DATA_REACHED, nullptr, Data + 1); // Data + 1 to align smart_scripts and waypoint_data Id rows
+    GetScript()->ProcessEventsFor(SMART_EVENT_MOVEMENTINFORM, nullptr, type, id);
 
-    GetScript()->ProcessEventsFor(SMART_EVENT_MOVEMENTINFORM, nullptr, MovementType, Data);
     if (!HasEscortState(SMART_ESCORT_ESCORTING))
         return;
 
-    if (MovementType == ESCORT_MOTION_TYPE || (MovementType == POINT_MOTION_TYPE && Data == SMART_ESCORT_LAST_OOC_POINT))
-        MovepointReached(Data);
+    if (type == POINT_MOTION_TYPE && id == SMART_ESCORT_LAST_OOC_POINT)
+        _OOCReached = true;
 }
 
 void SmartAI::EnterEvadeMode(EvadeReason /*why*/)
 {
-    if (mEvadeDisabled)
+    if (_evadeDisabled)
     {
         GetScript()->ProcessEventsFor(SMART_EVENT_EVADE);
         return;
     }
 
-    if (me->GetCharmerGUID().IsPlayer() || me->HasUnitFlag(UNIT_FLAG_POSSESSED))
+    if (!IsAIControlled())
     {
         me->AttackStop();
         return;
@@ -666,31 +404,31 @@ void SmartAI::EnterEvadeMode(EvadeReason /*why*/)
 
     me->AddUnitState(UNIT_STATE_EVADE);
 
-    GetScript()->ProcessEventsFor(SMART_EVENT_EVADE); //must be after aura clear so we can cast spells from db
+    GetScript()->ProcessEventsFor(SMART_EVENT_EVADE); // must be after _EnterEvadeMode (spells, auras, ...)
 
-    SetRun(mRun);
-    if (HasEscortState(SMART_ESCORT_ESCORTING))
+    SetRun(_run);
+
+    if (Unit* owner = me->GetCharmerOrOwner())
+    {
+        me->GetMotionMaster()->MoveFollow(owner, PET_FOLLOW_DIST, PET_FOLLOW_ANGLE);
+        me->ClearUnitState(UNIT_STATE_EVADE);
+    }
+    else if (HasEscortState(SMART_ESCORT_ESCORTING))
     {
         AddEscortState(SMART_ESCORT_RETURNING);
         ReturnToLastOOCPos();
     }
-    else if (mFollowGuid)
+    else if (Unit* target = !_followGUID.IsEmpty() ? ObjectAccessor::GetUnit(*me, _followGUID) : nullptr)
     {
-        if (Unit* target = ObjectAccessor::GetUnit(*me, mFollowGuid))
-            me->GetMotionMaster()->MoveFollow(target, mFollowDist, mFollowAngle);
+        me->GetMotionMaster()->MoveFollow(target, _followDistance, _followAngle);
+        // evade is not cleared in MoveFollow, so we can't keep it
         me->ClearUnitState(UNIT_STATE_EVADE);
-
-        // xinef: do not forget to reset scripts as we wont call reached home
-        GetScript()->OnReset();
     }
     else
-    {
         me->GetMotionMaster()->MoveTargetedHome();
 
-        // xinef: do not forget to reset scripts as we wont call reached home
-        if (!me->HasUnitState(UNIT_STATE_EVADE))
-            GetScript()->OnReset();
-    }
+    if (!me->HasUnitState(UNIT_STATE_EVADE))
+        GetScript()->OnReset();
 }
 
 void SmartAI::MoveInLineOfSight(Unit* who)
@@ -703,108 +441,116 @@ void SmartAI::MoveInLineOfSight(Unit* who)
     if (!IsAIControlled())
         return;
 
-    if (me->GetVictim())
+    if (HasEscortState(SMART_ESCORT_ESCORTING) && AssistPlayerInCombatAgainst(who))
         return;
 
-    if (me->HasReactState(REACT_PASSIVE) || AssistPlayerInCombatAgainst(who))
-        return;
-
-    if (me->HasReactState(REACT_AGGRESSIVE) && me->CanStartAttack(who))
-    {
-        if (me->HasUnitState(UNIT_STATE_DISTRACTED))
-        {
-            me->ClearUnitState(UNIT_STATE_DISTRACTED);
-            me->GetMotionMaster()->Clear();
-        }
-        AttackStart(who);
-    }
-}
-
-bool SmartAI::CanAIAttack(Unit const* /*who*/) const
-{
-    return !(me->GetReactState() == REACT_PASSIVE);
+    CreatureAI::MoveInLineOfSight(who);
 }
 
 bool SmartAI::AssistPlayerInCombatAgainst(Unit* who)
 {
-    if (!IsAIControlled())
+    if (me->HasReactState(REACT_PASSIVE) || !IsAIControlled())
         return false;
 
-    // Xinef: if unit has no victim, or victim is player controlled thing
-    if (!who->GetVictim() || who->GetCharmerOrOwnerOrOwnGUID().IsPlayer())
+    if (!who || !who->GetVictim())
         return false;
 
-    //experimental (unknown) flag not present
-    if (!(me->GetCreatureTemplate()->type_flags & CREATURE_TYPE_FLAG_CAN_ASSIST))
+    // experimental (unknown) flag not present
+    if (!(me->GetCreatureDifficulty()->TypeFlags & CREATURE_TYPE_FLAG_CAN_ASSIST))
         return false;
 
-    // Xinef: victim of unit has to be a player controlled unit
-    if (!who->GetVictim()->GetCharmerOrOwnerOrOwnGUID().IsPlayer())
+    // not a player
+    if (!who->EnsureVictim()->GetCharmerOrOwnerPlayerOrPlayerItself())
         return false;
 
-    // Xinef: Check if victim can be assisted
+    if (!who->isInAccessiblePlaceFor(me))
+        return false;
+
+    if (!CanAIAttack(who))
+        return false;
+
+    // we cannot attack in evade mode
+    if (me->IsInEvadeMode())
+        return false;
+
+    // or if enemy is in evade mode
+    if (who->GetTypeId() == TYPEID_UNIT && who->ToCreature()->IsInEvadeMode())
+        return false;
+
     if (!me->IsValidAssistTarget(who->GetVictim()))
         return false;
 
-    //too far away and no free sight?
+    // too far away and no free sight
     if (me->IsWithinDistInMap(who, SMART_MAX_AID_DIST) && me->IsWithinLOSInMap(who))
     {
-        AttackStart(who);
+        me->EngageWithTarget(who);
         return true;
     }
 
     return false;
 }
 
-void SmartAI::JustRespawned()
+void SmartAI::InitializeAI()
 {
-    mDespawnTime = 0;
-    mDespawnState = 0;
-    mEscortState = SMART_ESCORT_NONE;
-    me->SetVisible(true);
-    if (me->GetFaction() != me->GetCreatureTemplate()->faction)
-        me->RestoreFaction();
-    mJustReset = true;
-    JustReachedHome();
+    GetScript()->OnInitialize(me);
+
+    _despawnTime = 0;
+    _despawnState = 0;
+    _escortState = SMART_ESCORT_NONE;
+    _followGUID.Clear(); // do not reset follower on Reset(), we need it after combat evade
+    _followDistance = 0;
+    _followAngle = 0;
+    _followCredit = 0;
+    _followArrivedTimer = 1000;
+    _followArrivedEntry = 0;
+    _followCreditType = 0;
+}
+
+void SmartAI::JustAppeared()
+{
+    CreatureAI::JustAppeared();
+
+    if (me->isDead())
+        return;
+
     GetScript()->ProcessEventsFor(SMART_EVENT_RESPAWN);
-    mFollowGuid.Clear();//do not reset follower on Reset(), we need it after combat evade
-    mFollowDist = 0;
-    mFollowAngle = 0;
-    mFollowCredit = 0;
-    mFollowArrivedTimer = 1000;
-    mFollowArrivedEntry = 0;
-    mFollowCreditType = 0;
-    mFollowArrivedAlive = true;
+    GetScript()->OnReset();
 }
 
 void SmartAI::JustReachedHome()
 {
     GetScript()->OnReset();
+    GetScript()->ProcessEventsFor(SMART_EVENT_REACHED_HOME);
 
-    if (!mJustReset)
+    CreatureGroup* formation = me->GetFormation();
+    if (!formation || formation->GetLeader() == me || !formation->IsFormed())
     {
-        GetScript()->ProcessEventsFor(SMART_EVENT_REACHED_HOME);
+        if (me->GetMotionMaster()->GetCurrentMovementGeneratorType(MOTION_SLOT_DEFAULT) != WAYPOINT_MOTION_TYPE)
+        {
+            if (me->GetWaypointPathId())
+                me->GetMotionMaster()->MovePath(me->GetWaypointPathId(), true);
+        }
 
-        if (!UpdateVictim() && me->GetMotionMaster()->GetCurrentMovementGeneratorType() == IDLE_MOTION_TYPE && me->GetWaypointPath())
-            me->GetMotionMaster()->MovePath(me->GetWaypointPath(), true);
+        me->ResumeMovement();
     }
-
-    mJustReset = false;
+    else if (formation->IsFormed())
+        me->GetMotionMaster()->MoveIdle(); // wait the order of leader
 }
 
 void SmartAI::JustEngagedWith(Unit* enemy)
 {
-    // Xinef: Interrupt channeled spells
     if (IsAIControlled())
-        me->InterruptSpell(CURRENT_CHANNELED_SPELL, true, true);
+        me->InterruptNonMeleeSpells(false); // must be before ProcessEvents
+
     GetScript()->ProcessEventsFor(SMART_EVENT_AGGRO, enemy);
 }
 
 void SmartAI::JustDied(Unit* killer)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_DEATH, killer);
     if (HasEscortState(SMART_ESCORT_ESCORTING))
         EndPath(true);
+
+    GetScript()->ProcessEventsFor(SMART_EVENT_DEATH, killer);
 }
 
 void SmartAI::KilledUnit(Unit* victim)
@@ -815,7 +561,6 @@ void SmartAI::KilledUnit(Unit* victim)
 void SmartAI::JustSummoned(Creature* creature)
 {
     GetScript()->ProcessEventsFor(SMART_EVENT_SUMMONED_UNIT, creature);
-    GetScript()->AddCreatureSummon(creature->GetGUID());
 }
 
 void SmartAI::SummonedCreatureDies(Creature* summon, Unit* /*killer*/)
@@ -823,59 +568,63 @@ void SmartAI::SummonedCreatureDies(Creature* summon, Unit* /*killer*/)
     GetScript()->ProcessEventsFor(SMART_EVENT_SUMMONED_UNIT_DIES, summon);
 }
 
-void SmartAI::SummonedCreatureEvade(Creature* summon)
-{
-    GetScript()->ProcessEventsFor(SMART_EVENT_SUMMONED_UNIT_EVADE, summon);
-}
-
 void SmartAI::AttackStart(Unit* who)
 {
-    // xinef: dont allow charmed npcs to act on their own
-    if (me->HasUnitFlag(UNIT_FLAG_POSSESSED))
+    // dont allow charmed npcs to act on their own
+    if (!IsAIControlled())
     {
         if (who)
-            me->Attack(who, mCanAutoAttack);
+            me->Attack(who, true);
         return;
     }
 
-    if (who && me->Attack(who, me->IsWithinMeleeRange(who)))
+    if (who && me->Attack(who, true))
     {
-        if (mCanCombatMove)
-        {
-            SetRun(mRun);
-            MovementGeneratorType type = me->GetMotionMaster()->GetMotionSlotType(MOTION_SLOT_ACTIVE);
-            if (type == ESCORT_MOTION_TYPE || type == POINT_MOTION_TYPE)
-            {
-                me->GetMotionMaster()->MovementExpired();
-                me->StopMoving();
-            }
+        me->GetMotionMaster()->Clear(MOTION_PRIORITY_NORMAL);
+        me->PauseMovement();
 
+        if (_canCombatMove)
+        {
+            SetRun(_run);
             me->GetMotionMaster()->MoveChase(who);
         }
     }
 }
 
-void SmartAI::SpellHit(Unit* unit, SpellInfo const* spellInfo)
+void SmartAI::SpellHit(WorldObject* caster, SpellInfo const* spellInfo)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_SPELLHIT, unit, 0, 0, false, spellInfo);
+    GetScript()->ProcessEventsFor(SMART_EVENT_SPELLHIT, caster->ToUnit(), 0, 0, false, spellInfo, caster->ToGameObject());
 }
 
-void SmartAI::SpellHitTarget(Unit* target, SpellInfo const* spellInfo)
+void SmartAI::SpellHitTarget(WorldObject* target, SpellInfo const* spellInfo)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_SPELLHIT_TARGET, target, 0, 0, false, spellInfo);
+    GetScript()->ProcessEventsFor(SMART_EVENT_SPELLHIT_TARGET, target->ToUnit(), 0, 0, false, spellInfo, target->ToGameObject());
 }
 
-void SmartAI::DamageTaken(Unit* doneBy, uint32& damage, DamageEffectType damagetype, SpellSchoolMask /*damageSchoolMask*/)
+void SmartAI::OnSpellCast(SpellInfo const* spellInfo)
 {
-    if (doneBy)
-        GetScript()->ProcessEventsFor(SMART_EVENT_DAMAGED, doneBy, damage);
+    GetScript()->ProcessEventsFor(SMART_EVENT_ON_SPELL_CAST, nullptr, 0, 0, false, spellInfo);
+}
+
+void SmartAI::OnSpellFailed(SpellInfo const* spellInfo)
+{
+    GetScript()->ProcessEventsFor(SMART_EVENT_ON_SPELL_FAILED, nullptr, 0, 0, false, spellInfo);
+}
+
+void SmartAI::OnSpellStart(SpellInfo const* spellInfo)
+{
+    GetScript()->ProcessEventsFor(SMART_EVENT_ON_SPELL_START, nullptr, 0, 0, false, spellInfo);
+}
+
+void SmartAI::DamageTaken(Unit* doneBy, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/)
+{
+    GetScript()->ProcessEventsFor(SMART_EVENT_DAMAGED, doneBy, damage);
 
     if (!IsAIControlled()) // don't allow players to use unkillable units
         return;
 
-    // Xinef: skip nodamage type (eg. instakill effect)
-    if (damagetype != NODAMAGE && mInvincibilityHpLevel && (damage >= me->GetHealth() - mInvincibilityHpLevel))
-        damage = me->GetHealth() - mInvincibilityHpLevel; // damage should not be nullified, because of player damage req.
+    if (_invincibilityHPLevel && (damage >= me->GetHealth() - _invincibilityHPLevel))
+        damage = me->GetHealth() - _invincibilityHPLevel; // damage should not be nullified, because of player damage req.
 }
 
 void SmartAI::HealReceived(Unit* doneBy, uint32& addhealth)
@@ -900,17 +649,17 @@ void SmartAI::DamageDealt(Unit* doneTo, uint32& damage, DamageEffectType /*damag
 
 void SmartAI::SummonedCreatureDespawn(Creature* unit)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_SUMMON_DESPAWNED, unit);
-    GetScript()->RemoveCreatureSummon(unit->GetGUID());
+    GetScript()->ProcessEventsFor(SMART_EVENT_SUMMON_DESPAWNED, unit, unit->GetEntry());
 }
 
 void SmartAI::CorpseRemoved(uint32& respawnDelay)
 {
     GetScript()->ProcessEventsFor(SMART_EVENT_CORPSE_REMOVED, nullptr, respawnDelay);
+}
 
-    // xinef: end escort upon corpse remove, safe check in case of immediate despawn
-    if (IsEscorted())
-        EndPath(true);
+void SmartAI::OnDespawn()
+{
+    GetScript()->ProcessEventsFor(SMART_EVENT_ON_DESPAWN);
 }
 
 void SmartAI::PassengerBoarded(Unit* who, int8 seatId, bool apply)
@@ -918,18 +667,7 @@ void SmartAI::PassengerBoarded(Unit* who, int8 seatId, bool apply)
     GetScript()->ProcessEventsFor(apply ? SMART_EVENT_PASSENGER_BOARDED : SMART_EVENT_PASSENGER_REMOVED, who, uint32(seatId), 0, apply);
 }
 
-void SmartAI::InitializeAI()
-{
-    GetScript()->OnInitialize(me);
-    if (!me->isDead())
-    {
-        mJustReset = true;
-        JustReachedHome();
-        GetScript()->ProcessEventsFor(SMART_EVENT_RESPAWN);
-    }
-}
-
-void SmartAI::OnCharmed(bool /* apply */)
+void SmartAI::OnCharmed(bool isNew)
 {
     bool const charmed = me->IsCharmed();
     if (charmed) // do this before we change charmed state, as charmed state might prevent these things from processing
@@ -938,20 +676,34 @@ void SmartAI::OnCharmed(bool /* apply */)
             EndPath(true);
     }
 
-    mIsCharmed = charmed;
+    _charmed = charmed;
+
+    if (charmed && !me->isPossessed() && !me->IsVehicle())
+        me->GetMotionMaster()->MoveFollow(me->GetCharmer(), PET_FOLLOW_DIST, me->GetFollowAngle());
 
     if (!charmed && !me->IsInEvadeMode())
     {
-        if (mCanRepeatPath)
-            StartPath(mRun, GetScript()->GetPathId(), true);
+        if (_repeatWaypointPath)
+            StartPath(GetScript()->GetPathId(), true);
         else
-            me->SetWalk(!mRun);
+            me->SetWalk(!_run);
 
-        if (Unit* charmer = me->GetCharmer())
-            AttackStart(charmer);
+        if (!me->LastCharmerGUID.IsEmpty())
+        {
+            if (!me->HasReactState(REACT_PASSIVE))
+                if (Unit* lastCharmer = ObjectAccessor::GetUnit(*me, me->LastCharmerGUID))
+                    me->EngageWithTarget(lastCharmer);
+            me->LastCharmerGUID.Clear();
+
+            if (!me->IsInCombat())
+                EnterEvadeMode(EvadeReason::NoHostiles);
+        }
     }
 
     GetScript()->ProcessEventsFor(SMART_EVENT_CHARMED, nullptr, 0, 0, charmed);
+
+    if (!GetScript()->HasAnyEventWithFlag(SMART_EVENT_FLAG_WHILE_CHARMED)) // we can change AI if there are no events with this flag
+        UnitAI::OnCharmed(isNew);
 }
 
 void SmartAI::DoAction(int32 param)
@@ -964,24 +716,12 @@ uint32 SmartAI::GetData(uint32 /*id*/) const
     return 0;
 }
 
-void SmartAI::SetData(uint32 id, uint32 value, WorldObject* invoker)
+void SmartAI::SetData(uint32 id, uint32 value, Unit* invoker)
 {
-    Unit* unit = nullptr;
-    GameObject* gob = nullptr;
-
-    if (invoker)
-    {
-        unit = invoker->ToUnit();
-        if (!unit)
-            gob = invoker->ToGameObject();
-    }
-
-    GetScript()->ProcessEventsFor(SMART_EVENT_DATA_SET, unit, id, value, false, nullptr, gob);
+    GetScript()->ProcessEventsFor(SMART_EVENT_DATA_SET, invoker, id, value);
 }
 
-void SmartAI::SetGUID(ObjectGuid /*guid*/, int32 /*id*/)
-{
-}
+void SmartAI::SetGUID(ObjectGuid const& /*guid*/, int32 /*id*/) { }
 
 ObjectGuid SmartAI::GetGUID(int32 /*id*/) const
 {
@@ -991,82 +731,84 @@ ObjectGuid SmartAI::GetGUID(int32 /*id*/) const
 void SmartAI::SetRun(bool run)
 {
     me->SetWalk(!run);
-    mRun = run;
+    _run = run;
 }
 
-void SmartAI::SetFly(bool fly)
+void SmartAI::SetDisableGravity(bool fly)
 {
-    // xinef: set proper flag!
-    //me->SetDisableGravity(fly);
-    me->SetCanFly(fly);
-}
-
-void SmartAI::SetSwim(bool swim)
-{
-    me->SetSwim(swim);
+    me->SetDisableGravity(fly);
 }
 
 void SmartAI::SetEvadeDisabled(bool disable)
 {
-    mEvadeDisabled = disable;
+    _evadeDisabled = disable;
 }
 
-void SmartAI::sGossipHello(Player* player)
+bool SmartAI::OnGossipHello(Player* player)
 {
+    _gossipReturn = false;
     GetScript()->ProcessEventsFor(SMART_EVENT_GOSSIP_HELLO, player);
+    return _gossipReturn;
 }
 
-void SmartAI::sGossipSelect(Player* player, uint32 sender, uint32 action)
+bool SmartAI::OnGossipSelect(Player* player, uint32 menuId, uint32 gossipListId)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_GOSSIP_SELECT, player, sender, action);
+    _gossipReturn = false;
+    GetScript()->ProcessEventsFor(SMART_EVENT_GOSSIP_SELECT, player, menuId, gossipListId);
+    return _gossipReturn;
 }
 
-void SmartAI::sGossipSelectCode(Player* /*player*/, uint32 /*sender*/, uint32 /*action*/, const char* /*code*/)
+bool SmartAI::OnGossipSelectCode(Player* /*player*/, uint32 /*menuId*/, uint32 /*gossipListId*/, char const* /*code*/)
 {
+    return false;
 }
 
-void SmartAI::sQuestAccept(Player* player, Quest const* quest)
+void SmartAI::OnQuestAccept(Player* player, Quest const* quest)
 {
     GetScript()->ProcessEventsFor(SMART_EVENT_ACCEPTED_QUEST, player, quest->GetQuestId());
 }
 
-void SmartAI::sQuestReward(Player* player, Quest const* quest, uint32 opt)
+void SmartAI::OnQuestReward(Player* player, Quest const* quest, LootItemType /*type*/, uint32 opt)
 {
     GetScript()->ProcessEventsFor(SMART_EVENT_REWARD_QUEST, player, quest->GetQuestId(), opt);
 }
 
-void SmartAI::SetCombatMove(bool on, float chaseRange)
+void SmartAI::SetCombatMove(bool on, bool stopMoving)
 {
-    if (mCanCombatMove == on)
+    if (_canCombatMove == on)
         return;
 
-    mCanCombatMove = on;
+    _canCombatMove = on;
 
     if (!IsAIControlled())
         return;
 
-    if (!HasEscortState(SMART_ESCORT_ESCORTING))
+    if (me->IsEngaged())
     {
-        if (on && me->GetVictim())
+        if (on)
         {
-            if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() == IDLE_MOTION_TYPE)
+            if (!me->HasReactState(REACT_PASSIVE) && me->GetVictim() && !me->GetMotionMaster()->HasMovementGenerator([](MovementGenerator const* movement) -> bool
+                {
+                    return movement->GetMovementGeneratorType() == CHASE_MOTION_TYPE && movement->Mode == MOTION_MODE_DEFAULT && movement->Priority == MOTION_PRIORITY_NORMAL;
+                }))
             {
-                SetRun(mRun);
-                me->GetMotionMaster()->MoveChase(me->GetVictim(), chaseRange);
-                me->CastStop();
+                SetRun(_run);
+                me->GetMotionMaster()->MoveChase(me->GetVictim());
             }
         }
-        else
+        else if (MovementGenerator* movement = me->GetMotionMaster()->GetMovementGenerator([](MovementGenerator const* a) -> bool
+            {
+                return a->GetMovementGeneratorType() == CHASE_MOTION_TYPE && a->Mode == MOTION_MODE_DEFAULT && a->Priority == MOTION_PRIORITY_NORMAL;
+            }))
         {
-            me->StopMoving();
-            if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() == CHASE_MOTION_TYPE)
-                me->GetMotionMaster()->Clear(false);
-            me->GetMotionMaster()->MoveIdle();
+            me->GetMotionMaster()->Remove(movement);
+            if (stopMoving)
+                me->StopMoving();
         }
     }
 }
 
-void SmartAI::SetFollow(Unit* target, float dist, float angle, uint32 credit, uint32 end, uint32 creditType, bool aliveState)
+void SmartAI::SetFollow(Unit* target, float dist, float angle, uint32 credit, uint32 end, uint32 creditType)
 {
     if (!target)
     {
@@ -1074,111 +816,182 @@ void SmartAI::SetFollow(Unit* target, float dist, float angle, uint32 credit, ui
         return;
     }
 
-    mFollowGuid = target->GetGUID();
-    mFollowDist = dist;
-    mFollowAngle = angle;
-    mFollowArrivedTimer = 1000;
-    mFollowCredit = credit;
-    mFollowArrivedEntry = end;
-    mFollowArrivedAlive = !aliveState; // negate - 0 is alive
-    mFollowCreditType = creditType;
-    SetRun(mRun);
-    me->GetMotionMaster()->MoveFollow(target, mFollowDist, mFollowAngle);
+    _followGUID = target->GetGUID();
+    _followDistance = dist;
+    _followAngle = angle;
+    _followArrivedTimer = 1000;
+    _followCredit = credit;
+    _followArrivedEntry = end;
+    _followCreditType = creditType;
+    SetRun(_run);
+    me->GetMotionMaster()->MoveFollow(target, _followDistance, _followAngle);
 }
 
 void SmartAI::StopFollow(bool complete)
 {
-    mFollowGuid.Clear();
-    mFollowDist = 0;
-    mFollowAngle = 0;
-    mFollowCredit = 0;
-    mFollowArrivedTimer = 1000;
-    mFollowArrivedEntry = 0;
-    mFollowCreditType = 0;
-
-    me->GetMotionMaster()->Clear(false);
-    me->StopMoving();
+    _followGUID.Clear();
+    _followDistance = 0;
+    _followAngle = 0;
+    _followCredit = 0;
+    _followArrivedTimer = 1000;
+    _followArrivedEntry = 0;
+    _followCreditType = 0;
+    me->GetMotionMaster()->Clear();
     me->GetMotionMaster()->MoveIdle();
 
     if (!complete)
         return;
 
-    Player* player = ObjectAccessor::GetPlayer(*me, mFollowGuid);
+    Player* player = ObjectAccessor::GetPlayer(*me, _followGUID);
     if (player)
     {
-        if (!mFollowCreditType)
-            player->RewardPlayerAndGroupAtEvent(mFollowCredit, me);
+        if (!_followCreditType)
+            player->RewardPlayerAndGroupAtEvent(_followCredit, me);
         else
-            player->GroupEventHappens(mFollowCredit, me);
+            player->GroupEventHappens(_followCredit, me);
     }
 
     SetDespawnTime(5000);
     StartDespawn();
-
     GetScript()->ProcessEventsFor(SMART_EVENT_FOLLOW_COMPLETED, player);
 }
 
-void SmartAI::MoveAway(float distance)
+void SmartAI::SetTimedActionList(SmartScriptHolder& e, uint32 entry, Unit* invoker, uint32 startFromEventId)
 {
-    if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() == POINT_MOTION_TYPE)
-        return;
-
-    mCanCombatMove = false;
-
-    if (!IsAIControlled())
-        return;
-
-    if (!HasEscortState(SMART_ESCORT_ESCORTING))
-    {
-        if (me->GetVictim())
-        {
-            me->StopMoving();
-            if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() == CHASE_MOTION_TYPE)
-                me->GetMotionMaster()->Clear(false);
-
-            float x, y, z;
-            me->GetClosePoint(x, y, z, me->GetObjectSize(), distance, M_PI);
-            if (me->GetVictim()->IsWithinLOS(x, y, z))
-                me->GetMotionMaster()->MovePoint(SMART_RANDOM_POINT, x, y, z);
-        }
-    }
+    GetScript()->SetTimedActionList(e, entry, invoker, startFromEventId);
 }
 
-void SmartAI::SetScript9(SmartScriptHolder& e, uint32 entry, WorldObject* invoker)
-{
-    if (invoker)
-        GetScript()->mLastInvoker = invoker->GetGUID();
-    GetScript()->SetScript9(e, entry);
-}
-
-void SmartAI::sOnGameEvent(bool start, uint16 eventId)
+void SmartAI::OnGameEvent(bool start, uint16 eventId)
 {
     GetScript()->ProcessEventsFor(start ? SMART_EVENT_GAME_EVENT_START : SMART_EVENT_GAME_EVENT_END, nullptr, eventId);
 }
 
-void SmartAI::OnSpellClick(Unit* clicker, bool&  /*result*/)
+void SmartAI::OnSpellClick(Unit* clicker, bool spellClickHandled)
 {
-    // Xinef: i dont think this is necessery (can be made as event parameter)
-    //if (!result)
-    //    return;
+    if (!spellClickHandled)
+        return;
 
     GetScript()->ProcessEventsFor(SMART_EVENT_ON_SPELLCLICK, clicker);
 }
 
-void SmartAI::PathEndReached(uint32 /*pathId*/)
+void SmartAI::CheckConditions(uint32 diff)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_WAYPOINT_DATA_ENDED, nullptr, 0, me->GetWaypointPath());
-    me->LoadPath(0);
+    if (!_vehicleConditions)
+        return;
+
+    if (_vehicleConditionsTimer <= diff)
+    {
+        if (Vehicle* vehicleKit = me->GetVehicleKit())
+        {
+            for (std::pair<int8 const, VehicleSeat>& seat : vehicleKit->Seats)
+                if (Unit* passenger = ObjectAccessor::GetUnit(*me, seat.second.Passenger.Guid))
+                {
+                    if (Player* player = passenger->ToPlayer())
+                    {
+                        if (!sConditionMgr->IsObjectMeetingNotGroupedConditions(CONDITION_SOURCE_TYPE_CREATURE_TEMPLATE_VEHICLE, me->GetEntry(), player, me))
+                        {
+                            player->ExitVehicle();
+                            return; // check other pessanger in next tick
+                        }
+                    }
+                }
+        }
+
+        _vehicleConditionsTimer = 1000;
+    }
+    else
+        _vehicleConditionsTimer -= diff;
 }
 
-void SmartGameObjectAI::SummonedCreatureDies(Creature* summon, Unit* /*killer*/)
+void SmartAI::UpdatePath(uint32 diff)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_SUMMONED_UNIT_DIES, summon);
+    if (!HasEscortState(SMART_ESCORT_ESCORTING))
+        return;
+
+    if (_escortInvokerCheckTimer < diff)
+    {
+        if (!IsEscortInvokerInRange())
+        {
+            StopPath(0, _escortQuestId, true);
+
+            // allow to properly hook out of range despawn action, which in most cases should perform the same operation as dying
+            GetScript()->ProcessEventsFor(SMART_EVENT_DEATH, me);
+            me->DespawnOrUnsummon();
+            return;
+        }
+        _escortInvokerCheckTimer = 1000;
+    }
+    else
+        _escortInvokerCheckTimer -= diff;
+
+    // handle pause
+    if (HasEscortState(SMART_ESCORT_PAUSED) && (_waypointReached || _waypointPauseForced))
+    {
+        // Resume only if there was a pause timer set
+        if (_waypointPauseTimer && !me->IsInCombat() && !HasEscortState(SMART_ESCORT_RETURNING))
+        {
+            if (_waypointPauseTimer <= diff)
+                ResumePath();
+            else
+                _waypointPauseTimer -= diff;
+        }
+    }
+    else if (_waypointPathEnded) // end path
+    {
+        _waypointPathEnded = false;
+        StopPath();
+        return;
+    }
+
+    if (HasEscortState(SMART_ESCORT_RETURNING))
+    {
+        if (_OOCReached) // reached OOC WP
+        {
+            _OOCReached = false;
+            RemoveEscortState(SMART_ESCORT_RETURNING);
+            if (!HasEscortState(SMART_ESCORT_PAUSED))
+                ResumePath();
+        }
+    }
 }
 
-void SmartGameObjectAI::SummonedCreatureEvade(Creature* summon)
+void SmartAI::UpdateFollow(uint32 diff)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_SUMMONED_UNIT_EVADE, summon);
+    if (!_followGUID.IsEmpty())
+    {
+        if (_followArrivedTimer < diff)
+        {
+            if (me->FindNearestCreature(_followArrivedEntry, INTERACTION_DISTANCE, true))
+            {
+                StopFollow(true);
+                return;
+            }
+
+            _followArrivedTimer = 1000;
+        }
+        else
+            _followArrivedTimer -= diff;
+    }
+}
+
+void SmartAI::UpdateDespawn(uint32 diff)
+{
+    if (_despawnState <= 1 || _despawnState > 3)
+        return;
+
+    if (_despawnTime < diff)
+    {
+        if (_despawnState == 2)
+        {
+            me->SetVisible(false);
+            _despawnTime = 5000;
+            _despawnState++;
+        }
+        else
+            me->DespawnOrUnsummon();
+    }
+    else
+        _despawnTime -= diff;
 }
 
 void SmartGameObjectAI::UpdateAI(uint32 diff)
@@ -1189,8 +1002,7 @@ void SmartGameObjectAI::UpdateAI(uint32 diff)
 void SmartGameObjectAI::InitializeAI()
 {
     GetScript()->OnInitialize(me);
-
-    // Xinef: do not call respawn event if go is not spawned
+    // do not call respawn event if go is not spawned
     if (me->isSpawned())
         GetScript()->ProcessEventsFor(SMART_EVENT_RESPAWN);
     //Reset();
@@ -1198,73 +1010,64 @@ void SmartGameObjectAI::InitializeAI()
 
 void SmartGameObjectAI::Reset()
 {
-    // Xinef: call respawn event on reset
-    GetScript()->ProcessEventsFor(SMART_EVENT_RESPAWN);
-
     GetScript()->OnReset();
 }
 
 // Called when a player opens a gossip dialog with the gameobject.
-bool SmartGameObjectAI::GossipHello(Player* player, bool reportUse)
+bool SmartGameObjectAI::OnGossipHello(Player* player)
 {
-    LOG_DEBUG("sql.sql", "SmartGameObjectAI::GossipHello");
-    GetScript()->ProcessEventsFor(SMART_EVENT_GOSSIP_HELLO, player, (uint32)reportUse, 0, false, nullptr, me);
-    return false;
+    _gossipReturn = false;
+    GetScript()->ProcessEventsFor(SMART_EVENT_GOSSIP_HELLO, player, 0, 0, false, nullptr, me);
+    return _gossipReturn;
 }
 
 // Called when a player selects a gossip item in the gameobject's gossip menu.
-bool SmartGameObjectAI::GossipSelect(Player* player, uint32 sender, uint32 action)
+bool SmartGameObjectAI::OnGossipSelect(Player* player, uint32 sender, uint32 action)
 {
+    _gossipReturn = false;
     GetScript()->ProcessEventsFor(SMART_EVENT_GOSSIP_SELECT, player, sender, action, false, nullptr, me);
-    return false;
+    return _gossipReturn;
 }
 
 // Called when a player selects a gossip with a code in the gameobject's gossip menu.
-bool SmartGameObjectAI::GossipSelectCode(Player* /*player*/, uint32 /*sender*/, uint32 /*action*/, const char* /*code*/)
+bool SmartGameObjectAI::OnGossipSelectCode(Player* /*player*/, uint32 /*menuId*/, uint32 /*gossipListId*/, char const* /*code*/)
 {
     return false;
 }
 
 // Called when a player accepts a quest from the gameobject.
-bool SmartGameObjectAI::QuestAccept(Player* player, Quest const* quest)
+void SmartGameObjectAI::OnQuestAccept(Player* player, Quest const* quest)
 {
     GetScript()->ProcessEventsFor(SMART_EVENT_ACCEPTED_QUEST, player, quest->GetQuestId(), 0, false, nullptr, me);
-    return false;
 }
 
 // Called when a player selects a quest reward.
-bool SmartGameObjectAI::QuestReward(Player* player, Quest const* quest, uint32 opt)
+void SmartGameObjectAI::OnQuestReward(Player* player, Quest const* quest, LootItemType /*type*/, uint32 opt)
 {
     GetScript()->ProcessEventsFor(SMART_EVENT_REWARD_QUEST, player, quest->GetQuestId(), opt, false, nullptr, me);
-    return false;
+}
+
+bool SmartGameObjectAI::OnReportUse(Player* player)
+{
+    _gossipReturn = false;
+    GetScript()->ProcessEventsFor(SMART_EVENT_GOSSIP_HELLO, player, 1, 0, false, nullptr, me);
+    return _gossipReturn;
 }
 
 // Called when the gameobject is destroyed (destructible buildings only).
-void SmartGameObjectAI::Destroyed(Player* player, uint32 eventId)
+void SmartGameObjectAI::Destroyed(WorldObject* attacker, uint32 eventId)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_DEATH, player, eventId, 0, false, nullptr, me);
+    GetScript()->ProcessEventsFor(SMART_EVENT_DEATH, attacker ? attacker->ToUnit() : nullptr, eventId, 0, false, nullptr, me);
 }
 
-void SmartGameObjectAI::SetData(uint32 id, uint32 value, WorldObject* invoker)
+void SmartGameObjectAI::SetData(uint32 id, uint32 value, Unit* invoker)
 {
-    Unit* unit = nullptr;
-    GameObject* gob = nullptr;
-
-    if (invoker)
-    {
-        unit = invoker->ToUnit();
-        if (!unit)
-            gob = invoker->ToGameObject();
-    }
-
-    GetScript()->ProcessEventsFor(SMART_EVENT_DATA_SET, unit, id, value, false, nullptr, gob);
+    GetScript()->ProcessEventsFor(SMART_EVENT_DATA_SET, invoker, id, value);
 }
 
-void SmartGameObjectAI::SetScript9(SmartScriptHolder& e, uint32 entry, WorldObject* invoker)
+void SmartGameObjectAI::SetTimedActionList(SmartScriptHolder& e, uint32 entry, Unit* invoker)
 {
-    if (invoker)
-        GetScript()->mLastInvoker = invoker->GetGUID();
-    GetScript()->SetScript9(e, entry);
+    GetScript()->SetTimedActionList(e, entry, invoker);
 }
 
 void SmartGameObjectAI::OnGameEvent(bool start, uint16 eventId)
@@ -1272,9 +1075,9 @@ void SmartGameObjectAI::OnGameEvent(bool start, uint16 eventId)
     GetScript()->ProcessEventsFor(start ? SMART_EVENT_GAME_EVENT_START : SMART_EVENT_GAME_EVENT_END, nullptr, eventId);
 }
 
-void SmartGameObjectAI::OnStateChanged(uint32 state, Unit* unit)
+void SmartGameObjectAI::OnLootStateChanged(uint32 state, Unit* unit)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_GO_STATE_CHANGED, unit, state);
+    GetScript()->ProcessEventsFor(SMART_EVENT_GO_LOOT_STATE_CHANGED, unit, state);
 }
 
 void SmartGameObjectAI::EventInform(uint32 eventId)
@@ -1282,14 +1085,19 @@ void SmartGameObjectAI::EventInform(uint32 eventId)
     GetScript()->ProcessEventsFor(SMART_EVENT_GO_EVENT_INFORM, nullptr, eventId);
 }
 
-void SmartGameObjectAI::SpellHit(Unit* unit, SpellInfo const* spellInfo)
+void SmartGameObjectAI::SpellHit(WorldObject* caster, SpellInfo const* spellInfo)
 {
-    GetScript()->ProcessEventsFor(SMART_EVENT_SPELLHIT, unit, 0, 0, false, spellInfo);
+    GetScript()->ProcessEventsFor(SMART_EVENT_SPELLHIT, caster->ToUnit(), 0, 0, false, spellInfo);
 }
 
 void SmartGameObjectAI::JustSummoned(Creature* creature)
 {
     GetScript()->ProcessEventsFor(SMART_EVENT_SUMMONED_UNIT, creature);
+}
+
+void SmartGameObjectAI::SummonedCreatureDies(Creature* summon, Unit* /*killer*/)
+{
+    GetScript()->ProcessEventsFor(SMART_EVENT_SUMMONED_UNIT_DIES, summon);
 }
 
 void SmartGameObjectAI::SummonedCreatureDespawn(Creature* unit)
@@ -1299,23 +1107,153 @@ void SmartGameObjectAI::SummonedCreatureDespawn(Creature* unit)
 
 class SmartTrigger : public AreaTriggerScript
 {
+    public:
+
+        SmartTrigger() : AreaTriggerScript("SmartTrigger") { }
+
+        bool OnTrigger(Player* player, AreaTriggerEntry const* trigger) override
+        {
+            if (!player->IsAlive())
+                return false;
+
+            TC_LOG_DEBUG("scripts.ai", "AreaTrigger {} is using SmartTrigger script", trigger->ID);
+            SmartScript script;
+            script.OnInitialize(player, trigger);
+            script.ProcessEventsFor(SMART_EVENT_AREATRIGGER_ONTRIGGER, player, trigger->ID);
+            return true;
+        }
+};
+
+void SmartAreaTriggerAI::OnInitialize()
+{
+    GetScript()->OnInitialize(at);
+}
+
+void SmartAreaTriggerAI::OnUpdate(uint32 diff)
+{
+    GetScript()->OnUpdate(diff);
+}
+
+void SmartAreaTriggerAI::OnUnitEnter(Unit* unit)
+{
+    GetScript()->ProcessEventsFor(SMART_EVENT_AREATRIGGER_ONTRIGGER, unit);
+}
+
+void SmartAreaTriggerAI::SetTimedActionList(SmartScriptHolder& e, uint32 entry, Unit* invoker)
+{
+    GetScript()->SetTimedActionList(e, entry, invoker);
+}
+
+class SmartAreaTriggerEntityScript : public AreaTriggerEntityScript
+{
 public:
-    SmartTrigger() : AreaTriggerScript("SmartTrigger") {}
-
-    bool OnTrigger(Player* player, AreaTrigger const* trigger) override
+    SmartAreaTriggerEntityScript() : AreaTriggerEntityScript("SmartAreaTriggerAI")
     {
-        if (!player->IsAlive())
-            return false;
+    }
 
-        LOG_DEBUG("sql.sql", "AreaTrigger {} is using SmartTrigger script", trigger->entry);
+    AreaTriggerAI* GetAI(AreaTrigger* areaTrigger) const override
+    {
+        return new SmartAreaTriggerAI(areaTrigger);
+    }
+};
+
+class SmartScene : public SceneScript
+{
+public:
+    SmartScene() : SceneScript("SmartScene") { }
+
+    void OnSceneStart(Player* player, uint32 /*sceneInstanceID*/, SceneTemplate const* sceneTemplate) override
+    {
+        SmartScript smartScript;
+        smartScript.OnInitialize(player, nullptr, sceneTemplate);
+        smartScript.ProcessEventsFor(SMART_EVENT_SCENE_START, player);
+    }
+
+    void OnSceneTriggerEvent(Player* player, uint32 /*sceneInstanceID*/, SceneTemplate const* sceneTemplate, std::string const& triggerName) override
+    {
+        SmartScript smartScript;
+        smartScript.OnInitialize(player, nullptr, sceneTemplate);
+        smartScript.ProcessEventsFor(SMART_EVENT_SCENE_TRIGGER, player, 0, 0, false, nullptr, nullptr, triggerName);
+    }
+
+    void OnSceneCancel(Player* player, uint32 /*sceneInstanceID*/, SceneTemplate const* sceneTemplate) override
+    {
+        SmartScript smartScript;
+        smartScript.OnInitialize(player, nullptr, sceneTemplate);
+        smartScript.ProcessEventsFor(SMART_EVENT_SCENE_CANCEL, player);
+    }
+
+    void OnSceneComplete(Player* player, uint32 /*sceneInstanceID*/, SceneTemplate const* sceneTemplate) override
+    {
+        SmartScript smartScript;
+        smartScript.OnInitialize(player, nullptr, sceneTemplate);
+        smartScript.ProcessEventsFor(SMART_EVENT_SCENE_COMPLETE, player);
+    }
+};
+
+class SmartQuest : public QuestScript
+{
+public:
+    SmartQuest() : QuestScript("SmartQuest") { }
+
+    // Called when a quest status change
+    void OnQuestStatusChange(Player* player, Quest const* quest, QuestStatus /*oldStatus*/, QuestStatus newStatus) override
+    {
+        SmartScript smartScript;
+        smartScript.OnInitialize(player, nullptr, nullptr, quest);
+        switch (newStatus)
+        {
+            case QUEST_STATUS_INCOMPLETE:
+                smartScript.ProcessEventsFor(SMART_EVENT_QUEST_ACCEPTED, player);
+                break;
+            case QUEST_STATUS_COMPLETE:
+                smartScript.ProcessEventsFor(SMART_EVENT_QUEST_COMPLETION, player);
+                break;
+            case QUEST_STATUS_FAILED:
+                smartScript.ProcessEventsFor(SMART_EVENT_QUEST_FAIL, player);
+                break;
+            case QUEST_STATUS_REWARDED:
+                smartScript.ProcessEventsFor(SMART_EVENT_QUEST_REWARDED, player);
+                break;
+            case QUEST_STATUS_NONE:
+            default:
+                break;
+        }
+    }
+
+    // Called when a quest objective data change
+    void OnQuestObjectiveChange(Player* player, Quest const* quest, QuestObjective const& objective, int32 /*oldAmount*/, int32 /*newAmount*/) override
+    {
+        uint16 slot = player->FindQuestSlot(quest->GetQuestId());
+        if (slot < MAX_QUEST_LOG_SIZE && player->IsQuestObjectiveComplete(slot, quest, objective))
+        {
+            SmartScript smartScript;
+            smartScript.OnInitialize(player, nullptr, nullptr, quest);
+            smartScript.ProcessEventsFor(SMART_EVENT_QUEST_OBJ_COMPLETION, player, objective.ID);
+        }
+    }
+};
+
+class SmartEventTrigger : public EventScript
+{
+public:
+    SmartEventTrigger() : EventScript("SmartEventTrigger") { }
+
+    void OnTrigger(WorldObject* object, WorldObject* invoker, uint32 eventId) override
+    {
+        TC_LOG_DEBUG("scripts.ai", "Event {} is using SmartEventTrigger script", eventId);
         SmartScript script;
-        script.OnInitialize(nullptr, trigger);
-        script.ProcessEventsFor(SMART_EVENT_AREATRIGGER_ONTRIGGER, player, trigger->entry);
-        return true;
+        // Set invoker as BaseObject if there isn't target for GameEvents::Trigger
+        script.OnInitialize(Coalesce<WorldObject>(object, invoker), nullptr, nullptr, nullptr, eventId);
+        script.ProcessEventsFor(SMART_EVENT_SEND_EVENT_TRIGGER, invoker->ToUnit(), 0, 0, false, nullptr, invoker->ToGameObject());
     }
 };
 
 void AddSC_SmartScripts()
 {
     new SmartTrigger();
+    new SmartAreaTriggerEntityScript();
+    new SmartScene();
+    new SmartQuest();
+    new SmartEventTrigger();
 }

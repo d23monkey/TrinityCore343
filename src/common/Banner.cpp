@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -19,28 +19,20 @@
 #include "GitRevision.h"
 #include "StringFormat.h"
 
-void Acore::Banner::Show(std::string_view applicationName, void(*log)(std::string_view text), void(*logExtraInfo)())
+void Trinity::Banner::Show(char const* applicationName, void(*log)(char const* text), void(*logExtraInfo)())
 {
-    log(Acore::StringFormat("{} ({})", GitRevision::GetFullVersion(), applicationName));
-    log("<Ctrl-C> to stop.\n");
-    log("   █████╗ ███████╗███████╗██████╗  ██████╗ ████████╗██╗  ██╗");
-    log("  ██╔══██╗╚══███╔╝██╔════╝██╔══██╗██╔═══██╗╚══██╔══╝██║  ██║");
-    log("  ███████║  ███╔╝ █████╗  ██████╔╝██║   ██║   ██║   ███████║");
-    log("  ██╔══██║ ███╔╝  ██╔══╝  ██╔══██╗██║   ██║   ██║   ██╔══██║");
-    log("  ██║  ██║███████╗███████╗██║  ██║╚██████╔╝   ██║   ██║  ██║");
-    log("  ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚═╝  ╚═╝");
-    log("                                 ██████╗ ██████╗ ██████╗ ███████╗");
-    log("                                ██╔════╝██╔═══██╗██╔══██╗██╔════╝");
-    log("                                ██║     ██║   ██║██████╔╝█████╗");
-    log("                                ██║     ██║   ██║██╔══██╗██╔══╝");
-    log("                                ╚██████╗╚██████╔╝██║  ██║███████╗");
-    log("                                 ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝\n");
-    log("     AzerothCore 3.3.5a  -  www.azerothcore.org\n");
+    log(Trinity::StringFormat("{} ({})", GitRevision::GetFullVersion(), applicationName).c_str());
+    log(R"(<Ctrl-C> to stop.)" "\n");
+    log(R"( ______                       __)");
+    log(R"(/\__  _\       __          __/\ \__)");
+    log(R"(\/_/\ \/ _ __ /\_\    ___ /\_\ \, _\  __  __)");
+    log(R"(   \ \ \/\`'__\/\ \ /' _ `\/\ \ \ \/ /\ \/\ \)");
+    log(R"(    \ \ \ \ \/ \ \ \/\ \/\ \ \ \ \ \_\ \ \_\ \)");
+    log(R"(     \ \_\ \_\  \ \_\ \_\ \_\ \_\ \__\\/`____ \)");
+    log(R"(      \/_/\/_/   \/_/\/_/\/_/\/_/\/__/ `/___/> \)");
+    log(R"(                                 C O R E  /\___/)");
+    log(R"(http://TrinityCore.org                    \/__/)" "\n");
 
     if (logExtraInfo)
-    {
         logExtraInfo();
-    }
-
-    log(" ");
 }

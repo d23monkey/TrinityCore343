@@ -1,37 +1,41 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "TradeData.h"
+#include "Item.h"
 #include "Player.h"
+#include "Random.h"
+#include "TradePackets.h"
 #include "WorldSession.h"
 
 TradeData* TradeData::GetTraderData() const
 {
-    return m_trader->GetTradeData();
+    return _trader->GetTradeData();
 }
 
 Item* TradeData::GetItem(TradeSlots slot) const
 {
-    return m_items[slot] ? m_player->GetItemByGuid(m_items[slot]) : nullptr;
+    return !_items[slot].IsEmpty() ? _player->GetItemByGuid(_items[slot]) : nullptr;
 }
 
 bool TradeData::HasItem(ObjectGuid itemGuid) const
 {
     for (uint8 i = 0; i < TRADE_SLOT_COUNT; ++i)
-        if (m_items[i] == itemGuid)
+        if (_items[i] == itemGuid)
             return true;
 
     return false;
@@ -40,7 +44,7 @@ bool TradeData::HasItem(ObjectGuid itemGuid) const
 TradeSlots TradeData::GetTradeSlotForItem(ObjectGuid itemGuid) const
 {
     for (uint8 i = 0; i < TRADE_SLOT_COUNT; ++i)
-        if (m_items[i] == itemGuid)
+        if (_items[i] == itemGuid)
             return TradeSlots(i);
 
     return TRADE_SLOT_INVALID;
@@ -48,20 +52,24 @@ TradeSlots TradeData::GetTradeSlotForItem(ObjectGuid itemGuid) const
 
 Item* TradeData::GetSpellCastItem() const
 {
-    return m_spellCastItem ? m_player->GetItemByGuid(m_spellCastItem) : nullptr;
+    return !_spellCastItem.IsEmpty() ? _player->GetItemByGuid(_spellCastItem) : nullptr;
 }
 
-void TradeData::SetItem(TradeSlots slot, Item* item)
+void TradeData::SetItem(TradeSlots slot, Item* item, bool update /*= false*/)
 {
-    ObjectGuid itemGuid = item ? item->GetGUID() : ObjectGuid::Empty;
+    ObjectGuid itemGuid;
+    if (item)
+        itemGuid = item->GetGUID();
 
-    if (m_items[slot] == itemGuid)
+    if (_items[slot] == itemGuid && !update)
         return;
 
-    m_items[slot] = itemGuid;
+    _items[slot] = itemGuid;
 
     SetAccepted(false);
     GetTraderData()->SetAccepted(false);
+
+    UpdateServerStateIndex();
 
     Update();
 
@@ -77,55 +85,69 @@ void TradeData::SetSpell(uint32 spell_id, Item* castItem /*= nullptr*/)
 {
     ObjectGuid itemGuid = castItem ? castItem->GetGUID() : ObjectGuid::Empty;
 
-    if (m_spell == spell_id && m_spellCastItem == itemGuid)
+    if (_spell == spell_id && _spellCastItem == itemGuid)
         return;
 
-    m_spell = spell_id;
-    m_spellCastItem = itemGuid;
+    _spell = spell_id;
+    _spellCastItem = itemGuid;
 
     SetAccepted(false);
     GetTraderData()->SetAccepted(false);
+
+    UpdateServerStateIndex();
 
     Update(true);                                           // send spell info to item owner
     Update(false);                                          // send spell info to caster self
 }
 
-void TradeData::SetMoney(uint32 money)
+void TradeData::SetMoney(uint64 money)
 {
-    if (m_money == money)
+    if (_money == money)
         return;
 
-    if (!m_player->HasEnoughMoney(money))
+    if (!_player->HasEnoughMoney(money))
     {
-        m_player->GetSession()->SendTradeStatus(TRADE_STATUS_BUSY);
+        WorldPackets::Trade::TradeStatus info;
+        info.Status = TRADE_STATUS_FAILED;
+        info.BagResult = EQUIP_ERR_NOT_ENOUGH_MONEY;
+        _player->GetSession()->SendTradeStatus(info);
         return;
     }
 
-    m_money = money;
+    _money = money;
 
     SetAccepted(false);
     GetTraderData()->SetAccepted(false);
 
+    UpdateServerStateIndex();
+
     Update(true);
 }
 
-void TradeData::Update(bool forTarget /*= true*/)
+void TradeData::Update(bool forTrader /*= true*/) const
 {
-    if (forTarget)
-        m_trader->GetSession()->SendUpdateTrade(true);      // player state for trader
+    if (forTrader)
+        _trader->GetSession()->SendUpdateTrade(true);      // player state for trader
     else
-        m_player->GetSession()->SendUpdateTrade(false);     // player state for player
+        _player->GetSession()->SendUpdateTrade(false);     // player state for player
 }
 
-void TradeData::SetAccepted(bool state, bool crosssend /*= false*/)
+void TradeData::SetAccepted(bool state, bool forTrader /*= false*/)
 {
-    m_accepted = state;
+    _accepted = state;
 
     if (!state)
     {
-        if (crosssend)
-            m_trader->GetSession()->SendTradeStatus(TRADE_STATUS_BACK_TO_TRADE);
+        WorldPackets::Trade::TradeStatus info;
+        info.Status = TRADE_STATUS_UNACCEPTED;
+        if (forTrader)
+            _trader->GetSession()->SendTradeStatus(info);
         else
-            m_player->GetSession()->SendTradeStatus(TRADE_STATUS_BACK_TO_TRADE);
+            _player->GetSession()->SendTradeStatus(info);
     }
+}
+
+void TradeData::UpdateServerStateIndex()
+{
+    _serverStateIndex = rand32();
 }

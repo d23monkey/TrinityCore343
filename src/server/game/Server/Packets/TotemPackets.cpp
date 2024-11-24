@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,14 +20,27 @@
 void WorldPackets::Totem::TotemDestroyed::Read()
 {
     _worldPacket >> Slot;
+    _worldPacket >> TotemGUID;
 }
 
 WorldPacket const* WorldPackets::Totem::TotemCreated::Write()
 {
-    _worldPacket << Slot;
+    _worldPacket << uint8(Slot);
     _worldPacket << Totem;
     _worldPacket << Duration;
-    _worldPacket << SpellID;
+    _worldPacket << int32(SpellID);
+    _worldPacket << float(TimeMod);
+    _worldPacket.WriteBit(CannotDismiss);
+    _worldPacket.FlushBits();
+
+    return &_worldPacket;
+}
+
+WorldPacket const* WorldPackets::Totem::TotemMoved::Write()
+{
+    _worldPacket << uint8(Slot);
+    _worldPacket << uint8(NewSlot);
+    _worldPacket << Totem;
 
     return &_worldPacket;
 }

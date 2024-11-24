@@ -1,338 +1,400 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "AchievementCriteriaScript.h"
-#include "CreatureScript.h"
+/*
+ Achievement implementation requires additional research.
+ Telestra's clones are unkillable and only executes set of actions when damaged to full health. Those actions includes cast of
+ 'Telestra Clone Dies' aura which lands on boss(3 auras for 3 clones). Comments claims 'frost' clone can fail achievement due to
+ her Blizzard spell. Thing is action sets on retail cannot be started when creature casts spell(general mechanic or supported by flag or by
+ special action-check which can be used directly in action set as first action, preventing execution of next events until current cast is
+ finished. You can notice that everywhere - bosses don't enter in another phase while casting spells, for example).
+
+ But while actions clones executes surely has something related to achievement, Telestra Clone Dies auras probably aren't. The problem is those
+ auras are missiles and it may take seconds to hit boss, leaving a small chance to complete achievement. Speed of missiles is just 5 and unique
+ missile motion makes it slower. On top of that when clone dies, it can be not close enough to the boss.
+
+ That achievement is more trickier, some people claim it can be enough to kill clones only once, or it requires to kill clones twice. Or that
+ it is possible to get achievement even if she didn't summoned clones.
+ At least we can be sure auras are scripted to inform AI that all 3 clones are dead because once 3 auras are applied on boss, she casts a spell
+ which we can use later in SpellHit hook to perform merge sequence.
+
+ Currently we force clones to use SetData (in DB) to inform boss that clone is dead. And auras are used only to inform boss that
+ all clones are dead.
+ World Trigger spawned in front of boss may be related to something.
+ */
+
 #include "GameEventMgr.h"
-#include "GridNotifiers.h"
+#include "GameTime.h"
 #include "ScriptedCreature.h"
-#include "SpellScriptLoader.h"
-#include "nexus.h"
+#include "ScriptMgr.h"
 #include "SpellInfo.h"
 #include "SpellScript.h"
+#include "nexus.h"
+
+enum Texts
+{
+    SAY_AGGRO                        = 0,
+    SAY_KILL                         = 1,
+    SAY_DEATH                        = 2,
+    SAY_MERGE                        = 3,
+    SAY_SPLIT                        = 4
+};
 
 enum Spells
 {
-    // Main
-    SPELL_ICE_NOVA                  = 47772,
-    SPELL_FIREBOMB                  = 47773,
+    SPELL_ICE_NOVA                   = 47772,
+    SPELL_FIREBOMB                   = 47773,
+    SPELL_GRAVITY_WELL               = 47756,
 
-    SPELL_GRAVITY_WELL              = 47756,
-    SPELL_TELESTRA_BACK             = 47714,
-    SPELL_BURNING_WINDS             = 46308,
-    SPELL_START_SUMMON_CLONES       = 47710,
+    SPELL_SUMMON_CLONE_FIRE          = 47707,
+    SPELL_SUMMON_CLONE_ARCANE        = 47708,
+    SPELL_SUMMON_CLONE_FROST         = 47709,
+    SPELL_SUMMON_CLONES              = 47710,
 
-    SPELL_FIRE_MAGUS_SUMMON         = 47707,
-    SPELL_FROST_MAGUS_SUMMON        = 47709,
-    SPELL_ARCANE_MAGUS_SUMMON       = 47708,
+    SPELL_CLONE_DIES_FIRE            = 47711,
+    SPELL_CLONE_DIES_FROST           = 47712,
+    SPELL_CLONE_DIES_ARCANE          = 47713,
+    SPELL_TRIGGER_000                = 36294,
 
-    SPELL_FIRE_MAGUS_DEATH          = 47711,
-    SPELL_ARCANE_MAGUS_DEATH        = 47713,
+    SPELL_TELEPORT                   = 47754,
+    SPELL_SPAWN_BACK_IN              = 47714,
 
-    SPELL_WEAR_CHRISTMAS_HAT        = 61400
-};
-
-enum Yells
-{
-    SAY_AGGRO                       = 0,
-    SAY_KILL                        = 1,
-    SAY_DEATH                       = 2,
-    SAY_MERGE                       = 3,
-    SAY_SPLIT                       = 4
-};
-
-enum Misc
-{
-    NPC_FIRE_MAGUS                  = 26928,
-    NPC_FROST_MAGUS                 = 26930,
-    NPC_ARCANE_MAGUS                = 26929,
-
-    ACHIEVEMENT_SPLIT_PERSONALITY   = 2150,
-
-    GAME_EVENT_WINTER_VEIL          = 2,
+    SPELL_WEAR_CHRISTMAS_HAT         = 61400
 };
 
 enum Events
 {
-    EVENT_MAGUS_ICE_NOVA            = 1,
-    EVENT_MAGUS_FIREBOMB            = 2,
-    EVENT_MAGUS_GRAVITY_WELL        = 3,
-    EVENT_MAGUS_HEALTH1             = 4,
-    EVENT_MAGUS_HEALTH2             = 5,
-    EVENT_MAGUS_FAIL_ACHIEVEMENT    = 6,
-    EVENT_MAGUS_MERGED              = 7,
-    EVENT_MAGUS_RELOCATE            = 8,
-    EVENT_KILL_TALK                 = 9
+    EVENT_ICE_NOVA                   = 1,
+    EVENT_FIREBOMB,
+    EVENT_GRAVITY_WELL,
+
+    EVENT_SPLIT,
+    EVENT_SPLIT_2,
+    EVENT_SPLIT_3,
+
+    EVENT_MERGE,
+    EVENT_MERGE_2
 };
 
-class boss_magus_telestra : public CreatureScript
+enum Misc
 {
-public:
-    boss_magus_telestra() : CreatureScript("boss_magus_telestra") { }
+    ACTION_MAGUS_DEAD                = 1,
+    DATA_SPLIT_PERSONALITY           = 2,
 
-    CreatureAI* GetAI(Creature* creature) const override
-    {
-        return GetNexusAI<boss_magus_telestraAI>(creature);
-    }
-
-    struct boss_magus_telestraAI : public BossAI
-    {
-        boss_magus_telestraAI(Creature* creature) : BossAI(creature, DATA_MAGUS_TELESTRA_EVENT)
-        {
-        }
-
-        uint8 copiesDied;
-        bool achievement;
-
-        void Reset() override
-        {
-            BossAI::Reset();
-            copiesDied = 0;
-            achievement = true;
-
-            if (IsHeroic() && sGameEventMgr->IsActiveEvent(GAME_EVENT_WINTER_VEIL) && !me->HasAura(SPELL_WEAR_CHRISTMAS_HAT))
-                me->AddAura(SPELL_WEAR_CHRISTMAS_HAT, me);
-        }
-
-        uint32 GetData(uint32 data) const override
-        {
-            if (data == me->GetEntry())
-                return achievement;
-            return 0;
-        }
-
-        void JustEngagedWith(Unit* who) override
-        {
-            BossAI::JustEngagedWith(who);
-            Talk(SAY_AGGRO);
-
-            events.ScheduleEvent(EVENT_MAGUS_ICE_NOVA, 10s);
-            events.ScheduleEvent(EVENT_MAGUS_FIREBOMB, 0ms);
-            events.ScheduleEvent(EVENT_MAGUS_GRAVITY_WELL, 20s);
-            events.ScheduleEvent(EVENT_MAGUS_HEALTH1, 1s);
-            if (IsHeroic())
-                events.ScheduleEvent(EVENT_MAGUS_HEALTH2, 1s);
-        }
-
-        void AttackStart(Unit* who) override
-        {
-            if (who && me->Attack(who, true))
-                me->GetMotionMaster()->MoveChase(who, 20.0f);
-        }
-
-        void JustDied(Unit* killer) override
-        {
-            BossAI::JustDied(killer);
-            Talk(SAY_DEATH);
-        }
-
-        void KilledUnit(Unit*) override
-        {
-            if (events.GetNextEventTime(EVENT_KILL_TALK) == 0)
-            {
-                Talk(SAY_KILL);
-                events.ScheduleEvent(EVENT_KILL_TALK, 6s);
-            }
-        }
-
-        void JustSummoned(Creature* summon) override
-        {
-            summons.Summon(summon);
-            summon->SetInCombatWithZone();
-        }
-
-        void SpellHit(Unit* caster, SpellInfo const* spellInfo) override
-        {
-            if (spellInfo->Id >= SPELL_FIRE_MAGUS_DEATH && spellInfo->Id <= SPELL_ARCANE_MAGUS_DEATH && caster->ToCreature())
-            {
-                events.ScheduleEvent(EVENT_MAGUS_FAIL_ACHIEVEMENT, 5s);
-                caster->ToCreature()->DespawnOrUnsummon(1000);
-
-                if (++copiesDied >= 3)
-                {
-                    copiesDied = 0;
-                    events.CancelEvent(EVENT_MAGUS_FAIL_ACHIEVEMENT);
-                    events.ScheduleEvent(EVENT_MAGUS_MERGED, 5s);
-                    me->CastSpell(me, SPELL_BURNING_WINDS, true);
-                }
-            }
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
-            {
-                case EVENT_MAGUS_HEALTH1:
-                    if (me->HealthBelowPct(51))
-                    {
-                        me->CastSpell(me, SPELL_START_SUMMON_CLONES, false);
-                        events.ScheduleEvent(EVENT_MAGUS_RELOCATE, 3500ms);
-                        Talk(SAY_SPLIT);
-                        break;
-                    }
-                    events.ScheduleEvent(EVENT_MAGUS_HEALTH1, 1s);
-                    break;
-                case EVENT_MAGUS_HEALTH2:
-                    if (me->HealthBelowPct(11))
-                    {
-                        me->CastSpell(me, SPELL_START_SUMMON_CLONES, false);
-                        events.ScheduleEvent(EVENT_MAGUS_RELOCATE, 3500ms);
-                        Talk(SAY_SPLIT);
-                        break;
-                    }
-                    events.ScheduleEvent(EVENT_MAGUS_HEALTH2, 1s);
-                    break;
-                case EVENT_MAGUS_FIREBOMB:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
-                        me->CastSpell(target, SPELL_FIREBOMB, false);
-                    events.ScheduleEvent(EVENT_MAGUS_FIREBOMB, 3s);
-                    break;
-                case EVENT_MAGUS_ICE_NOVA:
-                    me->CastSpell(me, SPELL_ICE_NOVA, false);
-                    events.ScheduleEvent(EVENT_MAGUS_ICE_NOVA, 15s);
-                    break;
-                case EVENT_MAGUS_GRAVITY_WELL:
-                    me->CastSpell(me, SPELL_GRAVITY_WELL, false);
-                    events.ScheduleEvent(EVENT_MAGUS_GRAVITY_WELL, 15s);
-                    break;
-                case EVENT_MAGUS_FAIL_ACHIEVEMENT:
-                    achievement = false;
-                    break;
-                case EVENT_MAGUS_RELOCATE:
-                    me->NearTeleportTo(505.04f, 88.915f, -16.13f, 2.98f);
-                    break;
-                case EVENT_MAGUS_MERGED:
-                    me->CastSpell(me, SPELL_TELESTRA_BACK, true);
-                    me->RemoveAllAuras();
-                    Talk(SAY_MERGE);
-                    break;
-            }
-
-            DoMeleeAttackIfReady();
-        }
-    };
+    GAME_EVENT_WINTER_VEIL           = 2
 };
 
-class spell_boss_magus_telestra_summon_telestra_clones_aura : public AuraScript
+struct boss_magus_telestra : public BossAI
 {
-    PrepareAuraScript(spell_boss_magus_telestra_summon_telestra_clones_aura);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
+    boss_magus_telestra(Creature* creature) : BossAI(creature, DATA_MAGUS_TELESTRA),
+        _split1(false), _split2(false), _unkillable(false), _splitted(false)
     {
-        return ValidateSpellInfo({ SPELL_FIRE_MAGUS_SUMMON, SPELL_FROST_MAGUS_SUMMON, SPELL_ARCANE_MAGUS_SUMMON });
+        Initialize();
     }
 
-    bool Load() override
+    void Initialize()
     {
-        return GetUnitOwner()->IsCreature();
+        for (uint8 n = 0; n < 3; ++n)
+            time[n] = 0;
+
+        splitPersonality = 0;
     }
 
-    void HandleApply(AuraEffect const*  /*aurEff*/, AuraEffectHandleModes /*mode*/)
+    void Reset() override
     {
-        GetUnitOwner()->CastSpell(GetUnitOwner(), SPELL_FIRE_MAGUS_SUMMON, true);
-        GetUnitOwner()->CastSpell(GetUnitOwner(), SPELL_FROST_MAGUS_SUMMON, true);
-        GetUnitOwner()->CastSpell(GetUnitOwner(), SPELL_ARCANE_MAGUS_SUMMON, true);
+        _Reset();
+        _split1 = false;
+        _split2 = false;
+        _unkillable = false;
+        _splitted = false;
+        Initialize();
 
-        GetUnitOwner()->SetUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
-        GetUnitOwner()->SetControlled(true, UNIT_STATE_STUNNED);
-        GetUnitOwner()->ToCreature()->LoadEquipment(0, true);
+        me->SetReactState(REACT_AGGRESSIVE);
+        me->SetUninteractible(false);
+
+        if (IsHeroic() && sGameEventMgr->IsActiveEvent(GAME_EVENT_WINTER_VEIL) && !me->HasAura(SPELL_WEAR_CHRISTMAS_HAT))
+            me->AddAura(SPELL_WEAR_CHRISTMAS_HAT, me);
     }
 
-    void HandleRemove(AuraEffect const*  /*aurEff*/, AuraEffectHandleModes /*mode*/)
+    void JustEngagedWith(Unit* who) override
     {
-        GetUnitOwner()->RemoveUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
-        GetUnitOwner()->SetControlled(false, UNIT_STATE_STUNNED);
-        GetUnitOwner()->ToCreature()->LoadEquipment(1, true);
+        Talk(SAY_AGGRO);
+        BossAI::JustEngagedWith(who);
+
+        events.ScheduleEvent(EVENT_ICE_NOVA, 20s, 25s);
+        events.ScheduleEvent(EVENT_FIREBOMB, 0s);
+        events.ScheduleEvent(EVENT_GRAVITY_WELL, 10s, 15s);
     }
 
-    void Register() override
+    void AttackStart(Unit* who) override
     {
-        AfterEffectApply += AuraEffectApplyFn(spell_boss_magus_telestra_summon_telestra_clones_aura::HandleApply, EFFECT_1, SPELL_AURA_TRANSFORM, AURA_EFFECT_HANDLE_REAL);
-        AfterEffectRemove += AuraEffectRemoveFn(spell_boss_magus_telestra_summon_telestra_clones_aura::HandleRemove, EFFECT_1, SPELL_AURA_TRANSFORM, AURA_EFFECT_HANDLE_REAL);
-    }
-};
-
-class spell_boss_magus_telestra_gravity_well : public SpellScript
-{
-    PrepareSpellScript(spell_boss_magus_telestra_gravity_well);
-
-    void SelectTarget(std::list<WorldObject*>& targets)
-    {
-        targets.remove_if(Acore::RandomCheck(50));
+        ScriptedAI::AttackStartCaster(who, 40.0f);
     }
 
-    void HandlePull(SpellEffIndex effIndex)
+    void KilledUnit(Unit* who) override
     {
-        PreventHitDefaultEffect(effIndex);
-        Unit* target = GetHitUnit();
-        if (!target)
+        if (who->GetTypeId() == TYPEID_PLAYER)
+            Talk(SAY_KILL);
+    }
+
+    void DamageTaken(Unit* /*killer*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
+    {
+        if (damage >= me->GetHealth() && _unkillable)
+            damage = me->GetHealth() - 1;
+
+        // Boss can receive damage while being already splitted, prevent performing second split if already splitted
+        if (_splitted)
             return;
 
-        Position pos;
-        if (target->GetDistance(GetCaster()) < 5.0f)
+        // Once in normal
+        if (!_split1 && me->HealthBelowPctDamaged(50, damage) && !IsHeroic())
         {
-            pos.Relocate(GetCaster()->GetPositionX(), GetCaster()->GetPositionY(), GetCaster()->GetPositionZ() + 1.0f);
-            float o = frand(0, 2 * M_PI);
-            target->MovePositionToFirstCollision(pos, 20.0f, o);
-            pos.m_positionZ += frand(5.0f, 15.0f);
+            _split1 = true;
+            events.ScheduleEvent(EVENT_SPLIT, 0s);
         }
-        else
-            pos.Relocate(GetCaster()->GetPositionX(), GetCaster()->GetPositionY(), GetCaster()->GetPositionZ() + 1.0f);
 
-        float speedXY = float(GetSpellInfo()->Effects[effIndex].MiscValue) * 0.1f;
-        float speedZ = target->GetDistance(pos) / speedXY * 0.5f * Movement::gravity;
+        // Twice in heroic
+        if (!_split1 && me->HealthBelowPctDamaged(65, damage) && IsHeroic())
+        {
+            _split1 = true;
+            events.ScheduleEvent(EVENT_SPLIT, 0s);
+        }
 
-        target->GetMotionMaster()->MoveJump(pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), speedXY, speedZ);
+        if (!_split2 && me->HealthBelowPctDamaged(35, damage) && IsHeroic())
+        {
+            _split2 = true;
+            events.ScheduleEvent(EVENT_SPLIT, 0s);
+        }
+    }
+
+    void OnSpellCast(SpellInfo const* spell) override
+    {
+        if (spell->Id == SPELL_SUMMON_CLONES)
+            events.ScheduleEvent(EVENT_SPLIT_2, 0s);
+    }
+
+    void SpellHit(WorldObject* /*caster*/, SpellInfo const* spellInfo) override
+    {
+        if (spellInfo->Id == SPELL_TRIGGER_000)
+            events.ScheduleEvent(EVENT_MERGE, 5s);
+    }
+
+    void JustDied(Unit* /*killer*/) override
+    {
+        _JustDied();
+        Talk(SAY_DEATH);
+    }
+
+    void SetData(uint32 type, uint32 data) override
+    {
+        if (type == 0 && data == 1)
+            DoAction(ACTION_MAGUS_DEAD);
+    }
+
+    void DoAction(int32 action) override
+    {
+        if (action == ACTION_MAGUS_DEAD)
+        {
+            uint8 i = 0;
+            while (time[i] != 0)
+                ++i;
+
+            time[i] = GameTime::GetGameTime();
+            if (i == 2)
+            {
+                if ((time[2] - time[1] < 5) && (time[1] - time[0] < 5))
+                    ++splitPersonality;
+
+                // Reset time
+                for (uint8 n = 0; n < 3; ++n)
+                    time[n] = 0;
+            }
+        }
+    }
+
+    uint32 GetData(uint32 type) const override
+    {
+        if (type == DATA_SPLIT_PERSONALITY)
+            return splitPersonality;
+
+        return 0;
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                // Combat spells
+                case EVENT_ICE_NOVA:
+                    DoCastSelf(SPELL_ICE_NOVA);
+                    events.Repeat(20s, 25s);
+                    break;
+                case EVENT_FIREBOMB:
+                    DoCastVictim(SPELL_FIREBOMB);
+                    events.Repeat(1600ms, 2400ms);
+                    break;
+                case EVENT_GRAVITY_WELL:
+                    DoCastSelf(SPELL_GRAVITY_WELL);
+                    events.Repeat(20s, 25s);
+                    break;
+
+                // Split sequence, continues in OnSpellCast
+                case EVENT_SPLIT:
+                    _splitted = true;
+                    // Cancel combat spells
+                    events.Reset();
+                    Talk(SAY_SPLIT);
+                    me->SetReactState(REACT_PASSIVE);
+                    DoCastSelf(SPELL_SUMMON_CLONES);
+                    break;
+                case EVENT_SPLIT_2:
+                    _unkillable = true;
+                    // Hack, transform creature (from aura) has visible and invisible models and probability is NYI
+                    me->SetDisplayId(15435);
+                    me->SetUninteractible(true);
+                    // Not restored later, maybe after wipe
+                    SetEquipmentSlots(false, EQUIP_UNEQUIP);
+                    events.ScheduleEvent(EVENT_SPLIT_3, 4s);
+                    break;
+                case EVENT_SPLIT_3:
+                    DoCastSelf(SPELL_TELEPORT);
+                    break;
+
+                // Merge sequence
+                case EVENT_MERGE:
+                    DoCastSelf(SPELL_SPAWN_BACK_IN);
+                    me->RemoveAurasDueToSpell(SPELL_CLONE_DIES_FIRE);
+                    me->RemoveAurasDueToSpell(SPELL_CLONE_DIES_FROST);
+                    me->RemoveAurasDueToSpell(SPELL_CLONE_DIES_ARCANE);
+                    me->RemoveAurasDueToSpell(SPELL_SUMMON_CLONES);
+                    Talk(SAY_MERGE);
+                    me->SetUninteractible(false);
+                    _unkillable = false;
+                    events.ScheduleEvent(EVENT_MERGE_2, 3s);
+                    break;
+                case EVENT_MERGE_2:
+                    me->SetReactState(REACT_AGGRESSIVE);
+                    events.ScheduleEvent(EVENT_GRAVITY_WELL, 0s);
+                    events.ScheduleEvent(EVENT_ICE_NOVA, 6s);
+                    events.ScheduleEvent(EVENT_FIREBOMB, 8s);
+                    _splitted = false;
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+    }
+
+private:
+    bool _split1;
+    bool _split2;
+    bool _unkillable;
+    bool _splitted;
+    time_t time[3];
+    uint8 splitPersonality;
+};
+
+// 47710 - Summon Telestra Clones
+class spell_magus_telestra_summon_clones : public SpellScript
+{
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo(
+        {
+            SPELL_SUMMON_CLONE_FIRE,
+            SPELL_SUMMON_CLONE_ARCANE,
+            SPELL_SUMMON_CLONE_FROST
+        });
+    }
+
+    void HandleScript(SpellEffIndex /*effIndex*/)
+    {
+        Unit* caster = GetCaster();
+        caster->CastSpell(caster, SPELL_SUMMON_CLONE_FIRE);
+        caster->CastSpell(caster, SPELL_SUMMON_CLONE_ARCANE);
+        caster->CastSpell(caster, SPELL_SUMMON_CLONE_FROST);
     }
 
     void Register() override
     {
-        OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_boss_magus_telestra_gravity_well::SelectTarget, EFFECT_0, TARGET_UNIT_SRC_AREA_ENEMY);
-        OnEffectHitTarget += SpellEffectFn(spell_boss_magus_telestra_gravity_well::HandlePull, EFFECT_0, SPELL_EFFECT_PULL_TOWARDS_DEST);
+        OnEffectHit += SpellEffectFn(spell_magus_telestra_summon_clones::HandleScript, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
+    }
+};
+
+// 47711 - Telestra Clone Dies (Fire)
+// 47712 - Telestra Clone Dies (Frost)
+// 47713 - Telestra Clone Dies (Arcane)
+class spell_magus_telestra_clone_dies : public AuraScript
+{
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo({ SPELL_TRIGGER_000 });
+    }
+
+    void AfterApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
+    {
+        Unit* target = GetTarget();
+        if (target->HasAura(SPELL_CLONE_DIES_FIRE) && target->HasAura(SPELL_CLONE_DIES_FROST) && target->HasAura(SPELL_CLONE_DIES_ARCANE))
+            target->CastSpell(target, SPELL_TRIGGER_000);
+    }
+
+    void Register() override
+    {
+        AfterEffectApply += AuraEffectApplyFn(spell_magus_telestra_clone_dies::AfterApply, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
     }
 };
 
 class achievement_split_personality : public AchievementCriteriaScript
 {
-public:
-    achievement_split_personality() : AchievementCriteriaScript("achievement_split_personality")
-    {
-    }
+    public:
+        achievement_split_personality() : AchievementCriteriaScript("achievement_split_personality")
+        {
+        }
 
-    bool OnCheck(Player* /*player*/, Unit* target, uint32 /*criteria_id*/) override
-    {
-        if (!target)
+        bool OnCheck(Player* /*player*/, Unit* target) override
+        {
+            if (!target)
+                return false;
+
+            if (Creature* Telestra = target->ToCreature())
+                if (Telestra->AI()->GetData(DATA_SPLIT_PERSONALITY) == 2)
+                    return true;
+
             return false;
-
-        return target->GetAI()->GetData(target->GetEntry());
-    }
+        }
 };
 
 void AddSC_boss_magus_telestra()
 {
-    new boss_magus_telestra();
-    RegisterSpellScript(spell_boss_magus_telestra_summon_telestra_clones_aura);
-    RegisterSpellScript(spell_boss_magus_telestra_gravity_well);
+    RegisterNexusCreatureAI(boss_magus_telestra);
+    RegisterSpellScript(spell_magus_telestra_summon_clones);
+    RegisterSpellScript(spell_magus_telestra_clone_dies);
     new achievement_split_personality();
 }

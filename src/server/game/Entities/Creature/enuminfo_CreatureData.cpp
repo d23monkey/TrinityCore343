@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,14 +20,14 @@
 #include "SmartEnum.h"
 #include <stdexcept>
 
-namespace Acore::Impl::EnumUtilsImpl
+namespace Trinity::Impl::EnumUtilsImpl
 {
 
 /*************************************************************************\
 |* data for enum 'CreatureFlagsExtra' in 'CreatureData.h' auto-generated *|
 \*************************************************************************/
 template <>
-AC_API_EXPORT EnumText EnumUtils<CreatureFlagsExtra>::ToString(CreatureFlagsExtra value)
+TC_API_EXPORT EnumText EnumUtils<CreatureFlagsExtra>::ToString(CreatureFlagsExtra value)
 {
     switch (value)
     {
@@ -42,9 +42,9 @@ AC_API_EXPORT EnumText EnumUtils<CreatureFlagsExtra>::ToString(CreatureFlagsExtr
         case CREATURE_FLAG_EXTRA_NO_TAUNT: return { "CREATURE_FLAG_EXTRA_NO_TAUNT", "CREATURE_FLAG_EXTRA_NO_TAUNT", "creature is immune to taunt auras and 'attack me' effects" };
         case CREATURE_FLAG_EXTRA_NO_MOVE_FLAGS_UPDATE: return { "CREATURE_FLAG_EXTRA_NO_MOVE_FLAGS_UPDATE", "CREATURE_FLAG_EXTRA_NO_MOVE_FLAGS_UPDATE", "creature won't update movement flags" };
         case CREATURE_FLAG_EXTRA_GHOST_VISIBILITY: return { "CREATURE_FLAG_EXTRA_GHOST_VISIBILITY", "CREATURE_FLAG_EXTRA_GHOST_VISIBILITY", "creature will only be visible to dead players" };
-        case CREATURE_FLAG_EXTRA_USE_OFFHAND_ATTACK: return { "CREATURE_FLAG_EXTRA_USE_OFFHAND_ATTACK", "CREATURE_FLAG_EXTRA_USE_OFFHAND_ATTACK", "/ @todo: Implement CREATURE_FLAG_EXTRA_USE_OFFHAND_ATTACK (creature will use offhand attacks)" };
+        case CREATURE_FLAG_EXTRA_USE_OFFHAND_ATTACK: return { "CREATURE_FLAG_EXTRA_USE_OFFHAND_ATTACK", "CREATURE_FLAG_EXTRA_USE_OFFHAND_ATTACK", "creature will use offhand attacks" };
         case CREATURE_FLAG_EXTRA_NO_SELL_VENDOR: return { "CREATURE_FLAG_EXTRA_NO_SELL_VENDOR", "CREATURE_FLAG_EXTRA_NO_SELL_VENDOR", "players can't sell items to this vendor" };
-        case CREATURE_FLAG_EXTRA_IGNORE_COMBAT: return { "CREATURE_FLAG_EXTRA_IGNORE_COMBAT", "CREATURE_FLAG_EXTRA_IGNORE_COMBAT", "" };
+        case CREATURE_FLAG_EXTRA_CANNOT_ENTER_COMBAT: return { "CREATURE_FLAG_EXTRA_CANNOT_ENTER_COMBAT", "CREATURE_FLAG_EXTRA_CANNOT_ENTER_COMBAT", "creature is not allowed to enter combat" };
         case CREATURE_FLAG_EXTRA_WORLDEVENT: return { "CREATURE_FLAG_EXTRA_WORLDEVENT", "CREATURE_FLAG_EXTRA_WORLDEVENT", "custom flag for world event creatures (left room for merging)" };
         case CREATURE_FLAG_EXTRA_GUARD: return { "CREATURE_FLAG_EXTRA_GUARD", "CREATURE_FLAG_EXTRA_GUARD", "Creature is guard" };
         case CREATURE_FLAG_EXTRA_IGNORE_FEIGN_DEATH: return { "CREATURE_FLAG_EXTRA_IGNORE_FEIGN_DEATH", "CREATURE_FLAG_EXTRA_IGNORE_FEIGN_DEATH", "creature ignores feign death" };
@@ -53,25 +53,25 @@ AC_API_EXPORT EnumText EnumUtils<CreatureFlagsExtra>::ToString(CreatureFlagsExtr
         case CREATURE_FLAG_EXTRA_OBEYS_TAUNT_DIMINISHING_RETURNS: return { "CREATURE_FLAG_EXTRA_OBEYS_TAUNT_DIMINISHING_RETURNS", "CREATURE_FLAG_EXTRA_OBEYS_TAUNT_DIMINISHING_RETURNS", "Taunt is subject to diminishing returns on this creature" };
         case CREATURE_FLAG_EXTRA_ALL_DIMINISH: return { "CREATURE_FLAG_EXTRA_ALL_DIMINISH", "CREATURE_FLAG_EXTRA_ALL_DIMINISH", "creature is subject to all diminishing returns as players are" };
         case CREATURE_FLAG_EXTRA_NO_PLAYER_DAMAGE_REQ: return { "CREATURE_FLAG_EXTRA_NO_PLAYER_DAMAGE_REQ", "CREATURE_FLAG_EXTRA_NO_PLAYER_DAMAGE_REQ", "creature does not need to take player damage for kill credit" };
-        case CREATURE_FLAG_EXTRA_AVOID_AOE: return { "CREATURE_FLAG_EXTRA_AVOID_AOE", "CREATURE_FLAG_EXTRA_AVOID_AOE", "pussywizard: ignored by aoe attacks (for icc blood prince council npc - Dark Nucleus)" };
-        case CREATURE_FLAG_EXTRA_NO_DODGE: return { "CREATURE_FLAG_EXTRA_NO_DODGE", "CREATURE_FLAG_EXTRA_NO_DODGE", "xinef: target cannot dodge" };
-        case CREATURE_FLAG_EXTRA_MODULE: return { "CREATURE_FLAG_EXTRA_MODULE", "CREATURE_FLAG_EXTRA_MODULE", "" };
-        case CREATURE_FLAG_EXTRA_DONT_CALL_ASSISTANCE: return { "CREATURE_FLAG_EXTRA_DONT_CALL_ASSISTANCE", "CREATURE_FLAG_EXTRA_DONT_CALL_ASSISTANCE", "Prevent creatures from calling for assistance on initial aggro" };
-        case CREATURE_FLAG_EXTRA_IGNORE_ALL_ASSISTANCE_CALLS: return { "CREATURE_FLAG_EXTRA_IGNORE_ALL_ASSISTANCE_CALLS", "CREATURE_FLAG_EXTRA_IGNORE_ALL_ASSISTANCE_CALLS", "Prevents creature from responding to assistance calls" };
-        case CREATURE_FLAG_EXTRA_DONT_OVERRIDE_ENTRY_SAI: return { "CREATURE_FLAG_EXTRA_DONT_OVERRIDE_ENTRY_SAI", "CREATURE_FLAG_EXTRA_DONT_OVERRIDE_ENTRY_SAI", "Load both ENTRY and GUID specific SAI" };
-        case CREATURE_FLAG_EXTRA_DUNGEON_BOSS: return { "CREATURE_FLAG_EXTRA_DUNGEON_BOSS", "CREATURE_FLAG_EXTRA_DUNGEON_BOSS", "creature is a dungeon boss (SET DYNAMICALLY, DO NOT ADD IN DB)" };
+        case CREATURE_FLAG_EXTRA_UNUSED_22: return { "CREATURE_FLAG_EXTRA_UNUSED_22", "CREATURE_FLAG_EXTRA_UNUSED_22", "" };
+        case CREATURE_FLAG_EXTRA_UNUSED_23: return { "CREATURE_FLAG_EXTRA_UNUSED_23", "CREATURE_FLAG_EXTRA_UNUSED_23", "" };
+        case CREATURE_FLAG_EXTRA_UNUSED_24: return { "CREATURE_FLAG_EXTRA_UNUSED_24", "CREATURE_FLAG_EXTRA_UNUSED_24", "" };
+        case CREATURE_FLAG_EXTRA_UNUSED_25: return { "CREATURE_FLAG_EXTRA_UNUSED_25", "CREATURE_FLAG_EXTRA_UNUSED_25", "" };
+        case CREATURE_FLAG_EXTRA_UNUSED_26: return { "CREATURE_FLAG_EXTRA_UNUSED_26", "CREATURE_FLAG_EXTRA_UNUSED_26", "" };
+        case CREATURE_FLAG_EXTRA_UNUSED_27: return { "CREATURE_FLAG_EXTRA_UNUSED_27", "CREATURE_FLAG_EXTRA_UNUSED_27", "" };
+        case CREATURE_FLAG_EXTRA_DUNGEON_BOSS: return { "CREATURE_FLAG_EXTRA_DUNGEON_BOSS", "CREATURE_FLAG_EXTRA_DUNGEON_BOSS", "creature is a dungeon boss" };
         case CREATURE_FLAG_EXTRA_IGNORE_PATHFINDING: return { "CREATURE_FLAG_EXTRA_IGNORE_PATHFINDING", "CREATURE_FLAG_EXTRA_IGNORE_PATHFINDING", "creature ignore pathfinding" };
         case CREATURE_FLAG_EXTRA_IMMUNITY_KNOCKBACK: return { "CREATURE_FLAG_EXTRA_IMMUNITY_KNOCKBACK", "CREATURE_FLAG_EXTRA_IMMUNITY_KNOCKBACK", "creature is immune to knockback effects" };
-        case CREATURE_FLAG_EXTRA_HARD_RESET: return { "CREATURE_FLAG_EXTRA_HARD_RESET", "CREATURE_FLAG_EXTRA_HARD_RESET", "" };
+        case CREATURE_FLAG_EXTRA_UNUSED_31: return { "CREATURE_FLAG_EXTRA_UNUSED_31", "CREATURE_FLAG_EXTRA_UNUSED_31", "" };
         default: throw std::out_of_range("value");
     }
 }
 
 template <>
-AC_API_EXPORT std::size_t EnumUtils<CreatureFlagsExtra>::Count() { return 32; }
+TC_API_EXPORT size_t EnumUtils<CreatureFlagsExtra>::Count() { return 32; }
 
 template <>
-AC_API_EXPORT CreatureFlagsExtra EnumUtils<CreatureFlagsExtra>::FromIndex(std::size_t index)
+TC_API_EXPORT CreatureFlagsExtra EnumUtils<CreatureFlagsExtra>::FromIndex(size_t index)
 {
     switch (index)
     {
@@ -88,7 +88,7 @@ AC_API_EXPORT CreatureFlagsExtra EnumUtils<CreatureFlagsExtra>::FromIndex(std::s
         case 10: return CREATURE_FLAG_EXTRA_GHOST_VISIBILITY;
         case 11: return CREATURE_FLAG_EXTRA_USE_OFFHAND_ATTACK;
         case 12: return CREATURE_FLAG_EXTRA_NO_SELL_VENDOR;
-        case 13: return CREATURE_FLAG_EXTRA_IGNORE_COMBAT;
+        case 13: return CREATURE_FLAG_EXTRA_CANNOT_ENTER_COMBAT;
         case 14: return CREATURE_FLAG_EXTRA_WORLDEVENT;
         case 15: return CREATURE_FLAG_EXTRA_GUARD;
         case 16: return CREATURE_FLAG_EXTRA_IGNORE_FEIGN_DEATH;
@@ -97,22 +97,22 @@ AC_API_EXPORT CreatureFlagsExtra EnumUtils<CreatureFlagsExtra>::FromIndex(std::s
         case 19: return CREATURE_FLAG_EXTRA_OBEYS_TAUNT_DIMINISHING_RETURNS;
         case 20: return CREATURE_FLAG_EXTRA_ALL_DIMINISH;
         case 21: return CREATURE_FLAG_EXTRA_NO_PLAYER_DAMAGE_REQ;
-        case 22: return CREATURE_FLAG_EXTRA_AVOID_AOE;
-        case 23: return CREATURE_FLAG_EXTRA_NO_DODGE;
-        case 24: return CREATURE_FLAG_EXTRA_MODULE;
-        case 25: return CREATURE_FLAG_EXTRA_DONT_CALL_ASSISTANCE;
-        case 26: return CREATURE_FLAG_EXTRA_IGNORE_ALL_ASSISTANCE_CALLS;
-        case 27: return CREATURE_FLAG_EXTRA_DONT_OVERRIDE_ENTRY_SAI;
+        case 22: return CREATURE_FLAG_EXTRA_UNUSED_22;
+        case 23: return CREATURE_FLAG_EXTRA_UNUSED_23;
+        case 24: return CREATURE_FLAG_EXTRA_UNUSED_24;
+        case 25: return CREATURE_FLAG_EXTRA_UNUSED_25;
+        case 26: return CREATURE_FLAG_EXTRA_UNUSED_26;
+        case 27: return CREATURE_FLAG_EXTRA_UNUSED_27;
         case 28: return CREATURE_FLAG_EXTRA_DUNGEON_BOSS;
         case 29: return CREATURE_FLAG_EXTRA_IGNORE_PATHFINDING;
         case 30: return CREATURE_FLAG_EXTRA_IMMUNITY_KNOCKBACK;
-        case 31: return CREATURE_FLAG_EXTRA_HARD_RESET;
+        case 31: return CREATURE_FLAG_EXTRA_UNUSED_31;
         default: throw std::out_of_range("index");
     }
 }
 
 template <>
-AC_API_EXPORT std::size_t EnumUtils<CreatureFlagsExtra>::ToIndex(CreatureFlagsExtra value)
+TC_API_EXPORT size_t EnumUtils<CreatureFlagsExtra>::ToIndex(CreatureFlagsExtra value)
 {
     switch (value)
     {
@@ -129,7 +129,7 @@ AC_API_EXPORT std::size_t EnumUtils<CreatureFlagsExtra>::ToIndex(CreatureFlagsEx
         case CREATURE_FLAG_EXTRA_GHOST_VISIBILITY: return 10;
         case CREATURE_FLAG_EXTRA_USE_OFFHAND_ATTACK: return 11;
         case CREATURE_FLAG_EXTRA_NO_SELL_VENDOR: return 12;
-        case CREATURE_FLAG_EXTRA_IGNORE_COMBAT: return 13;
+        case CREATURE_FLAG_EXTRA_CANNOT_ENTER_COMBAT: return 13;
         case CREATURE_FLAG_EXTRA_WORLDEVENT: return 14;
         case CREATURE_FLAG_EXTRA_GUARD: return 15;
         case CREATURE_FLAG_EXTRA_IGNORE_FEIGN_DEATH: return 16;
@@ -138,16 +138,16 @@ AC_API_EXPORT std::size_t EnumUtils<CreatureFlagsExtra>::ToIndex(CreatureFlagsEx
         case CREATURE_FLAG_EXTRA_OBEYS_TAUNT_DIMINISHING_RETURNS: return 19;
         case CREATURE_FLAG_EXTRA_ALL_DIMINISH: return 20;
         case CREATURE_FLAG_EXTRA_NO_PLAYER_DAMAGE_REQ: return 21;
-        case CREATURE_FLAG_EXTRA_AVOID_AOE: return 22;
-        case CREATURE_FLAG_EXTRA_NO_DODGE: return 23;
-        case CREATURE_FLAG_EXTRA_MODULE: return 24;
-        case CREATURE_FLAG_EXTRA_DONT_CALL_ASSISTANCE: return 25;
-        case CREATURE_FLAG_EXTRA_IGNORE_ALL_ASSISTANCE_CALLS: return 26;
-        case CREATURE_FLAG_EXTRA_DONT_OVERRIDE_ENTRY_SAI: return 27;
+        case CREATURE_FLAG_EXTRA_UNUSED_22: return 22;
+        case CREATURE_FLAG_EXTRA_UNUSED_23: return 23;
+        case CREATURE_FLAG_EXTRA_UNUSED_24: return 24;
+        case CREATURE_FLAG_EXTRA_UNUSED_25: return 25;
+        case CREATURE_FLAG_EXTRA_UNUSED_26: return 26;
+        case CREATURE_FLAG_EXTRA_UNUSED_27: return 27;
         case CREATURE_FLAG_EXTRA_DUNGEON_BOSS: return 28;
         case CREATURE_FLAG_EXTRA_IGNORE_PATHFINDING: return 29;
         case CREATURE_FLAG_EXTRA_IMMUNITY_KNOCKBACK: return 30;
-        case CREATURE_FLAG_EXTRA_HARD_RESET: return 31;
+        case CREATURE_FLAG_EXTRA_UNUSED_31: return 31;
         default: throw std::out_of_range("value");
     }
 }

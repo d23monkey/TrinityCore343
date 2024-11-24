@@ -1,87 +1,134 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef ACORE_GAMEOBJECTAI_H
-#define ACORE_GAMEOBJECTAI_H
+#ifndef TRINITY_GAMEOBJECTAI_H
+#define TRINITY_GAMEOBJECTAI_H
 
-#include "CreatureAI.h"
 #include "Define.h"
-#include "GameObject.h"
-#include "Object.h"
-#include "QuestDef.h"
+#include "LootItemType.h"
+#include "ObjectGuid.h"
+#include "Optional.h"
 
 class Creature;
 class GameObject;
-class Unit;
+class Player;
+class Quest;
 class SpellInfo;
+class Unit;
+class WorldObject;
+enum class QuestGiverStatus : uint64;
 
-class AC_GAME_API GameObjectAI
+namespace WorldPackets
 {
-protected:
-    GameObject* const me;
+    namespace Battleground
+    {
+        enum class BattlegroundCapturePointState : uint8;
+    }
+}
 
-public:
-    explicit GameObjectAI(GameObject* go) : me(go) {}
-    virtual ~GameObjectAI() {}
+class TC_GAME_API GameObjectAI
+{
+    private:
+        // Script Id
+        uint32 const _scriptId;
 
-    virtual void UpdateAI(uint32 /*diff*/) {}
+    protected:
+        GameObject* const me;
 
-    virtual void InitializeAI() { Reset(); }
+    public:
+        explicit GameObjectAI(GameObject* go, uint32 scriptId = {});
+        virtual ~GameObjectAI() { }
 
-    virtual void Reset() { }
+        // Gets the id of the AI (script id)
+        uint32 GetId() const { return _scriptId; }
 
-    // Pass parameters between AI
-    virtual void DoAction(int32 /*param = 0 */) {}
-    virtual void SetGUID(ObjectGuid /*guid*/, int32 /*id = 0 */) {}
-    virtual ObjectGuid GetGUID(int32 /*id = 0 */) const { return ObjectGuid::Empty; }
+        virtual void UpdateAI(uint32 /*diff*/) { }
 
-    static int32 Permissible(GameObject const* go);
+        virtual void InitializeAI() { Reset(); }
 
-    virtual bool GossipHello(Player* /*player*/, bool /*reportUse*/) { return false; }
-    virtual bool GossipSelect(Player* /*player*/, uint32 /*sender*/, uint32 /*action*/) { return false; }
-    virtual bool GossipSelectCode(Player* /*player*/, uint32 /*sender*/, uint32 /*action*/, char const* /*code*/) { return false; }
-    virtual bool QuestAccept(Player* /*player*/, Quest const* /*quest*/) { return false; }
-    virtual bool QuestReward(Player* /*player*/, Quest const* /*quest*/, uint32 /*opt*/) { return false; }
-    virtual uint32 GetDialogStatus(Player* /*player*/) { return DIALOG_STATUS_SCRIPTED_NO_STATUS; }
-    virtual void Destroyed(Player* /*player*/, uint32 /*eventId*/) {}
-    virtual uint32 GetData(uint32 /*id*/) const { return 0; }
-    virtual void SetData(uint32 /*id*/, uint32 /*value*/) {}
-    virtual void OnGameEvent(bool /*start*/, uint16 /*eventId*/) {}
-    virtual void OnStateChanged(uint32 /*state*/, Unit* /*unit*/) {}
-    virtual void EventInform(uint32 /*eventId*/) {}
-    virtual void SpellHit(Unit* /*unit*/, SpellInfo const* /*spellInfo*/) {}
-    virtual bool CanBeSeen(Player const* /*seer*/) { return true; }
+        virtual void Reset() { }
 
-    // Called when the gameobject summon successfully other creature
-    virtual void JustSummoned(Creature* /*summon*/) {}
-    virtual void SummonedCreatureDespawn(Creature* /*summon*/) {}
+        // Pass parameters between AI
+        virtual void DoAction(int32 /*param = 0 */) { }
+        virtual void SetGUID(ObjectGuid const& /*guid*/, int32 /*id = 0 */) { }
+        virtual ObjectGuid GetGUID(int32 /*id = 0 */) const { return ObjectGuid::Empty; }
 
-    virtual void SummonedCreatureDies(Creature* /*summon*/, Unit* /*killer*/) {}
+        static int32 Permissible(GameObject const* go);
 
-    virtual void SummonedCreatureEvade(Creature* /*summon*/) {}
+        // Called when the dialog status between a player and the gameobject is requested.
+        virtual Optional<QuestGiverStatus> GetDialogStatus(Player const* player);
+
+        // Called when a player opens a gossip dialog with the gameobject.
+        virtual bool OnGossipHello(Player* /*player*/) { return false; }
+
+        // Called when a player selects a gossip item in the gameobject's gossip menu.
+        virtual bool OnGossipSelect(Player* /*player*/, uint32 /*menuId*/, uint32 /*gossipListId*/) { return false; }
+
+        // Called when a player selects a gossip with a code in the gameobject's gossip menu.
+        virtual bool OnGossipSelectCode(Player* /*player*/, uint32 /*menuId*/, uint32 /*gossipListId*/, char const* /*code*/) { return false; }
+
+        // Called when a player accepts a quest from the gameobject.
+        virtual void OnQuestAccept(Player* /*player*/, Quest const* /*quest*/) { }
+
+        // Called when a player completes a quest and is rewarded, opt is the selected item's index or 0
+        virtual void OnQuestReward(Player* /*player*/, Quest const* /*quest*/, LootItemType /*type*/, uint32 /*opt*/) { }
+
+        // Called when a Player clicks a GameObject, before GossipHello
+        // prevents achievement tracking if returning true
+        virtual bool OnReportUse(Player* /*player*/) { return false; }
+
+        virtual void Destroyed(WorldObject* /*attacker*/, uint32 /*eventId*/) { }
+        virtual void Damaged(WorldObject* /*attacker*/, uint32 /*eventId*/) { }
+
+        virtual uint32 GetData(uint32 /*id*/) const { return 0; }
+        virtual void SetData64(uint32 /*id*/, uint64 /*value*/) { }
+        virtual uint64 GetData64(uint32 /*id*/) const { return 0; }
+        virtual void SetData(uint32 /*id*/, uint32 /*value*/) { }
+
+        virtual void OnGameEvent(bool /*start*/, uint16 /*eventId*/) { }
+        virtual void OnLootStateChanged(uint32 /*state*/, Unit* /*unit*/) { }
+        virtual void OnStateChanged(uint32 /*state*/) { }
+        virtual void EventInform(uint32 /*eventId*/) { }
+
+        // Called when hit by a spell
+        virtual void SpellHit(WorldObject* /*caster*/, SpellInfo const* /*spellInfo*/) { }
+
+        // Called when spell hits a target
+        virtual void SpellHitTarget(WorldObject* /*target*/, SpellInfo const* /*spellInfo*/) { }
+
+        // Called when the gameobject summon successfully other creature
+        virtual void JustSummoned(Creature* /*summon*/) { }
+
+        virtual void SummonedCreatureDespawn(Creature* /*summon*/) { }
+        virtual void SummonedCreatureDies(Creature* /*summon*/, Unit* /*killer*/) { }
+
+        // Called when the capture point gets assaulted by a player. Return true to disable default behaviour.
+        virtual bool OnCapturePointAssaulted(Player* /*player*/) { return false; }
+        // Called when the capture point state gets updated. Return true to disable default behaviour.
+        virtual bool OnCapturePointUpdated(WorldPackets::Battleground::BattlegroundCapturePointState /*state*/) { return false; }
 };
 
-class NullGameObjectAI : public GameObjectAI
+class TC_GAME_API NullGameObjectAI : public GameObjectAI
 {
-public:
-    explicit NullGameObjectAI(GameObject* go);
+    public:
+        using GameObjectAI::GameObjectAI;
 
-    void UpdateAI(uint32 /*diff*/) override {}
+        void UpdateAI(uint32 /*diff*/) override { }
 
-    static int32 Permissible(GameObject const* go);
+        static int32 Permissible(GameObject const* go);
 };
 #endif

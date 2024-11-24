@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,91 +18,110 @@
 #ifndef DEF_STRATHOLME_H
 #define DEF_STRATHOLME_H
 
-#define DataHeader "STR"
+#include "CreatureAIImpl.h"
+
 #define StratholmeScriptName "instance_stratholme"
+#define DataHeader "STR"
 
-enum DataTypes
+enum STRBossIds
 {
-    TYPE_BARON_RUN                      = 0,
-    TYPE_ZIGGURAT1                      = 1,
-    TYPE_ZIGGURAT2                      = 2,
-    TYPE_ZIGGURAT3                      = 3,
-    TYPE_BARON_FIGHT                    = 4,
-    TYPE_MALLOW                         = 5,
-    TYPE_BARTHILAS_RUN                  = 6,
+    BOSS_HEARTHSINGER_FORRESTEN = 0,
+    BOSS_TIMMY_THE_CRUEL        = 1,
+    BOSS_COMMANDER_MALOR        = 2,
+    BOSS_WILLEY_HOPEBREAKER     = 3,
+    BOSS_INSTRUCTOR_GALFORD     = 4,
+    BOSS_BALNAZZAR              = 5,
+    BOSS_THE_UNFORGIVEN         = 6,
+    BOSS_BARONESS_ANASTARI      = 7,
+    BOSS_NERUB_ENKAN            = 8,
+    BOSS_MALEKI_THE_PALLID      = 9,
+    BOSS_MAGISTRATE_BARTHILAS   = 10,
+    BOSS_RAMSTEIN_THE_GORGER    = 11,
+    BOSS_RIVENDARE              = 12,
+    BOSS_POSTMASTER_MALOWN      = 13,
 
-    DATA_BARON_RUN_NONE                 = 0,
-    DATA_BARON_RUN_GATE                 = 1,
-    DATA_JARIEN                         = 2,
-    DATA_SOTHOS                         = 3
+    MAX_ENCOUNTER
 };
 
-enum CreatureIds
+enum STRDataTypes
 {
-    NPC_BARTHILAS                       = 10435,
-    NPC_BARON_RIVENDARE                 = 10440,
-    NPC_BILE_SPEWER                     = 10416,
-    NPC_VENOM_BELCHER                   = 10417,
-    NPC_RAMSTEIN_THE_GORGER             = 10439,
-    NPC_MINDLESS_UNDEAD                 = 11030,
+    TYPE_BARON_RUN                      = 1,
+    TYPE_BARONESS                       = 2,
+    TYPE_NERUB                          = 3,
+    TYPE_PALLID                         = 4,
+    TYPE_RAMSTEIN                       = 5,
+    TYPE_BARON                          = 6,
+
+    DATA_BARON                          = 10,
+    DATA_YSIDA_TRIGGER                  = 11,
+
+    TYPE_SH_QUEST                       = 20,
+    TYPE_SH_CATHELA                     = 21,
+    TYPE_SH_GREGOR                      = 22,
+    TYPE_SH_NEMAS                       = 23,
+    TYPE_SH_VICAR                       = 24,
+    TYPE_SH_AELMAR                      = 25
+};
+
+enum STRCreatureIds
+{
+    NPC_HEARTHSINGER_FORRESTEN          = 10558,
+    NPC_COMMANDER_MALOR                 = 11032,
+    NPC_INSTRUCTOR_GALFORD              = 10811,
+    NPC_THE_UNFORGIVEN                  = 10516,
+
+    NPC_CRYSTAL                         = 10415, // ziggurat crystal
+    NPC_BARON                           = 10440, // ziggurat crystal
+    NPC_YSIDA_TRIGGER                   = 16100, // ziggurat crystal
+
+    NPC_RAMSTEIN                        = 10439,
+    NPC_ABOM_BILE                       = 10416,
+    NPC_ABOM_VENOM                      = 10417,
     NPC_BLACK_GUARD                     = 10394,
     NPC_YSIDA                           = 16031,
-    NPC_PLAGUED_RAT                     = 10441,
-    NPC_PLAGUED_INSECT                  = 10461,
-    NPC_PLAGUED_MAGGOT                  = 10536,
-    NPC_JARIEN                          = 16101,
-    NPC_SOTHOS                          = 16102,
-    NPC_SPIRIT_OF_JARIEN                = 16103,
-    NPC_SPIRIT_OF_SOTHOS                = 16104
+
+    // Scarlet side creatures
+    NPC_CRIMSON_GUARDSMAN               = 10418,
+    NPC_CRIMSON_CONJUROR                = 10419,
+    NPC_CRIMSON_INITATE                 = 10420,
+    NPC_CRIMSON_GALLANT                 = 10424,
+
+    NPC_TIMMY_THE_CRUEL                 = 10808
 };
 
-enum GameobjectIds
+enum STRGameobjectIds
 {
-    GO_CRUSADER_SQUARE_DOOR             = 175967,
-    GO_HOARD_DOOR                       = 175968,
-    GO_HALL_OF_HIGH_COMMAND             = 176194,
-    GO_GAUNTLET_DOOR_1                  = 175357,
-    GO_GAUNTLET_DOOR_2                  = 175356,
-    GO_ZIGGURAT_DOORS1                  = 175380,  // baroness
-    GO_ZIGGURAT_DOORS2                  = 175379,  // nerub'enkan
-    GO_ZIGGURAT_DOORS3                  = 175381,  // maleki
-    GO_ZIGGURAT_DOORS4                  = 175405,  // rammstein
-    GO_ZIGGURAT_DOORS5                  = 175796,  // baron
-    GO_GAUNTLET_GATE                    = 175374,
-    GO_SLAUGTHER_GATE                   = 175373,
-    GO_SLAUGHTER_GATE_SIDE              = 175358,
-    GO_EXIT_GATE                        = 176424,
-    GO_PORT_TRAP_GATE_1                 = 175351,  // Portcullis used in the gate traps (rats trap)
-    GO_PORT_TRAP_GATE_2                 = 175350,  // Gate trap scarlet side
-    GO_PORT_TRAP_GATE_3                 = 175355,  // Gate trap undead side
-    GO_PORT_TRAP_GATE_4                 = 175354,
-    GO_JARIEN_AND_SOTHOS_HEIRLOOMS      = 181083
+    GO_DOOR_HALAZZI                     = 186303,
+    GO_SERVICE_ENTRANCE                 = 175368,
+    GO_GAUNTLET_GATE1                   = 175357,
+    GO_ZIGGURAT1                        = 175380,  // baroness
+    GO_ZIGGURAT2                        = 175379,  // nerub'enkan
+    GO_ZIGGURAT3                        = 175381,  // maleki
+    GO_ZIGGURAT4                        = 175405,  // rammstein
+    GO_ZIGGURAT5                        = 175796,  // baron
+    GO_PORT_GAUNTLET                    = 175374,  // port from gauntlet to slaugther
+    GO_PORT_SLAUGTHER                   = 175373,  // port at slaugther
+    GO_PORT_ELDERS                      = 175377,  // port at elders square
+    GO_YSIDA_CAGE                       = 181071
 };
 
-enum MiscIds
+enum STRQuestIds
 {
-    SAY_BLACK_GUARD_INIT                = 0,
-    SAY_BARON_INIT_YELL                 = 0,
-    SAY_BRAON_ZIGGURAT_FALL_YELL        = 1,
-    SAY_BARON_10M                       = 2,
-    SAY_BARON_5M                        = 3,
-    SAY_BARON_0M                        = 4,
-    SAY_BRAON_SUMMON_RAMSTEIN           = 5,
-    SAY_BARON_GUARD_DEAD                = 6,
+    QUEST_DEAD_MAN_PLEA                 = 8945
+};
 
-    EVENT_BARON_TIME                    = 1,
-    EVENT_SPAWN_MINDLESS                = 2,
-    EVENT_FORCE_SLAUGHTER_EVENT         = 3,
-    EVENT_SPAWN_BLACK_GUARD             = 4,
-    EVENT_EXECUTE_PRISONER              = 5,
-    EVENT_GATE1_TRAP                    = 6,
-    EVENT_GATE1_DELAY                   = 7,
-    EVENT_GATE1_CRITTER_DELAY           = 8,
-    EVENT_GATE2_TRAP                    = 9,
-    EVENT_GATE2_DELAY                   = 10,
-    EVENT_GATE2_CRITTER_DELAY           = 11,
+enum STRSpellIds
+{
+    SPELL_BARON_ULTIMATUM               = 27861,
+    SPELL_PERM_FEIGN_DEATH              = 29266,
+    SPELL_YSIDA_SAVED                   = 31912,
+    SPELL_YSIDA_CREDIT_EFFECT           = 31913
+};
 
-    SPELL_BARON_ULTIMATUM               = 27861
+enum STRMisc
+{
+    //! amount of crusade monsters required to be killed in order for timmy the cruel to spawn
+    TIMMY_THE_CRUEL_CRUSADERS_REQUIRED  = 15,
 };
 
 template <class AI, class T>

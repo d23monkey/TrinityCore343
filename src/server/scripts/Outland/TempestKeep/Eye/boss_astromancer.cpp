@@ -1,262 +1,493 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+/* ScriptData
+SDName: Boss_Astromancer
+SD%Complete: 80
+SDComment:
+SDCategory: Tempest Keep, The Eye
+EndScriptData */
+
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
 #include "ScriptedCreature.h"
 #include "SpellAuras.h"
 #include "SpellScript.h"
-#include "SpellScriptLoader.h"
+#include "TemporarySummon.h"
 #include "the_eye.h"
 
 enum Yells
 {
     SAY_AGGRO                           = 0,
-    SAY_SUMMON                          = 1,
-    SAY_KILL                            = 2,
-    SAY_DEATH                           = 3,
-    SAY_VOID                            = 4
+    SAY_SUMMON1                         = 1,
+    SAY_SUMMON2                         = 2,
+    SAY_KILL                            = 3,
+    SAY_DEATH                           = 4,
+    SAY_VOIDA                           = 5,
+    SAY_VOIDB                           = 6
 };
 
 enum Spells
 {
-    SPELL_SOLARIAN_TRANSFORM            = 39117,
     SPELL_ARCANE_MISSILES               = 33031,
     SPELL_WRATH_OF_THE_ASTROMANCER      = 42783,
+    SPELL_WRATH_OF_THE_ASTROMANCER_DOT  = 42784,
     SPELL_BLINDING_LIGHT                = 33009,
-    SPELL_PSYCHIC_SCREAM                = 34322,
+    SPELL_FEAR                          = 34322,
     SPELL_VOID_BOLT                     = 39329,
-    SPELL_TRUE_BEAM                     = 33365,
-    SPELL_TELEPORT_START_POSITION       = 33244,
+
+    SPELL_SPOTLIGHT                     = 25824,
+
+    SPELL_SOLARIUM_GREAT_HEAL           = 33387,
+    SPELL_SOLARIUM_HOLY_SMITE           = 25054,
+    SPELL_SOLARIUM_ARCANE_TORRENT       = 33390
 };
 
-enum Misc
+enum Creatures
 {
-    DISPLAYID_INVISIBLE                 = 11686,
     NPC_ASTROMANCER_SOLARIAN_SPOTLIGHT  = 18928,
+
     NPC_SOLARIUM_AGENT                  = 18925,
     NPC_SOLARIUM_PRIEST                 = 18806
 };
 
-#define INNER_PORTAL_RADIUS         14.0f
-#define OUTER_PORTAL_RADIUS         28.0f
-#define CENTER_X                    432.909f
-#define CENTER_Y                    -373.424f
-#define CENTER_Z                    17.9608f
-#define CENTER_O                    1.06421f
-#define PORTAL_Z                    17.005f
-#define START_POSITION_X            432.74f
-#define START_POSITION_Y            -373.645f
-#define START_POSITION_Z            18.0138f
+enum Models
+{
+    MODEL_HUMAN                         = 18239,
+    MODEL_VOIDWALKER                    = 18988
+};
+
+enum Misc
+{
+    WV_ARMOR                            = 31000
+};
+
+const float CENTER_X                    = 432.909f;
+const float CENTER_Y                    = -373.424f;
+const float CENTER_Z                    = 17.9608f;
+const float CENTER_O                    = 1.06421f;
+const float SMALL_PORTAL_RADIUS         = 12.6f;
+const float LARGE_PORTAL_RADIUS         = 26.0f;
+const float PORTAL_Z                    = 17.005f;
+
+/* not used                        // x,          y,      z,         o
+static float SolarianPos[4] = {432.909f, -373.424f, 17.9608f, 1.06421f};
+*/
 
 struct boss_high_astromancer_solarian : public BossAI
 {
-    boss_high_astromancer_solarian(Creature* creature) : BossAI(creature, DATA_ASTROMANCER)
+    boss_high_astromancer_solarian(Creature* creature) : BossAI(creature, DATA_SOLARIAN)
     {
-        callForHelpRange = 105.0f;
-        scheduler.SetValidator([this]
-        {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
+        Initialize();
+
+        defaultarmor = creature->GetArmor();
+        memset(Portals, 0, sizeof(Portals));
     }
+
+    void Initialize()
+    {
+        ArcaneMissiles_Timer = 2000;
+        m_uiWrathOfTheAstromancer_Timer = 15000;
+        BlindingLight_Timer = 41000;
+        Fear_Timer = 20000;
+        VoidBolt_Timer = 10000;
+        Phase1_Timer = 50000;
+        Phase2_Timer = 10s;
+        Phase3_Timer = 15s;
+        AppearDelay_Timer = 2s;
+        BlindingLight = false;
+        AppearDelay = false;
+        Wrath_Timer = 20000 + rand32() % 5000;//twice in phase one
+        Phase = 1;
+    }
+
+    uint8 Phase;
+
+    uint32 ArcaneMissiles_Timer;
+    uint32 m_uiWrathOfTheAstromancer_Timer;
+    uint32 BlindingLight_Timer;
+    uint32 Fear_Timer;
+    uint32 VoidBolt_Timer;
+    uint32 Phase1_Timer;
+    Milliseconds Phase2_Timer;
+    Milliseconds Phase3_Timer;
+    Milliseconds AppearDelay_Timer;
+    uint32 defaultarmor;
+    uint32 Wrath_Timer;
+
+    float Portals[3][3];
+
+    bool AppearDelay;
+    bool BlindingLight;
 
     void Reset() override
     {
-        BossAI::Reset();
-        me->SetModelVisible(true);
-        me->SetReactState(REACT_AGGRESSIVE);
+        Initialize();
+        _Reset();
+        me->SetArmor(defaultarmor, 0);
+        me->SetUninteractible(false);
+        me->SetVisible(true);
+        me->SetDisplayId(MODEL_HUMAN);
 
-        ScheduleHealthCheckEvent(20, [&]{
-            Talk(SAY_VOID);
-            me->InterruptNonMeleeSpells(false);
-            scheduler.CancelAll();
-            me->SetModelVisible(true);
-            me->ResumeChasingVictim();
-            scheduler.Schedule(3s, [this](TaskContext context)
-            {
-                DoCastVictim(SPELL_VOID_BOLT);
-                context.Repeat(7s);
-            }).Schedule(7s, [this](TaskContext context)
-            {
-                DoCastSelf(SPELL_PSYCHIC_SCREAM);
-                context.Repeat(12s);
-            });
-            DoCastSelf(SPELL_SOLARIAN_TRANSFORM, true);
-        });
     }
 
-    void AttackStart(Unit* who) override
+    void KilledUnit(Unit* /*victim*/) override
     {
-        if (who && me->Attack(who, true))
-        {
-            me->GetMotionMaster()->MoveChase(who, 0.0f);
-        }
+        Talk(SAY_KILL);
     }
 
-    void KilledUnit(Unit* victim) override
+    void JustDied(Unit* /*killer*/) override
     {
-        if (victim->IsPlayer() && roll_chance_i(50))
-        {
-            Talk(SAY_KILL);
-        }
-    }
-
-    void JustDied(Unit* killer) override
-    {
-        me->SetModelVisible(true);
+        me->SetDisplayId(MODEL_HUMAN);
         Talk(SAY_DEATH);
-        BossAI::JustDied(killer);
+        _JustDied();
     }
 
     void JustEngagedWith(Unit* who) override
     {
         Talk(SAY_AGGRO);
         BossAI::JustEngagedWith(who);
-        me->GetMotionMaster()->Clear();
-
-        scheduler.Schedule(3650ms, [this](TaskContext context)
-        {
-            me->GetMotionMaster()->Clear();
-            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 40.0f, false, true, -SPELL_WRATH_OF_THE_ASTROMANCER))
-            {
-                DoCast(target, SPELL_ARCANE_MISSILES);
-            }
-            else
-            {
-                //no targets in required range
-                me->GetMotionMaster()->MoveChase(me->GetVictim(), 30.0f);
-                me->CastStop();
-            }
-            context.Repeat(800ms, 7300ms);
-        }).Schedule(21800ms, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_WRATH_OF_THE_ASTROMANCER, 0, 100.0f);
-            context.Repeat(21800ms, 23350ms);
-        }).Schedule(33900ms, [this](TaskContext context)
-        {
-            DoCastSelf(SPELL_BLINDING_LIGHT);
-            context.Repeat(33900ms, 48100ms);
-        }).Schedule(52100ms, [this](TaskContext context)
-        {
-            me->SetReactState(REACT_PASSIVE);
-            scheduler.DelayAll(22s);
-            // blink to room center in this line using SPELL_TELEPORT_START_POSITION and START_POSITION_X, START_POSITION_Y, START_POSITION_Z
-            scheduler.Schedule(1s, [this](TaskContext)
-            {
-                for (uint8 i = 0; i < 3; ++i)
-                {
-                    float o = rand_norm() * 2 * M_PI;
-                    if (i == 0)
-                    {
-                        me->SummonCreature(NPC_ASTROMANCER_SOLARIAN_SPOTLIGHT, CENTER_X + cos(o)*INNER_PORTAL_RADIUS, CENTER_Y + std::sin(o)*INNER_PORTAL_RADIUS, CENTER_Z, 0.0f, TEMPSUMMON_TIMED_DESPAWN, 25000);
-                    }
-                    else
-                    {
-                        me->SummonCreature(NPC_ASTROMANCER_SOLARIAN_SPOTLIGHT, CENTER_X + cos(o)*OUTER_PORTAL_RADIUS, CENTER_Y + std::sin(o)*OUTER_PORTAL_RADIUS, PORTAL_Z, 0.0f, TEMPSUMMON_TIMED_DESPAWN, 25000);
-                    }
-                }
-            }).Schedule(2s, [this](TaskContext)
-            {
-                Talk(SAY_SUMMON);
-            }).Schedule(3s, [this](TaskContext)
-            {
-                me->RemoveAllAuras();
-                me->SetModelVisible(false);
-            }).Schedule(7s, [this](TaskContext)
-            {
-                summons.DoForAllSummons([&](WorldObject* summon)
-                {
-                    if (Creature* light = summon->ToCreature())
-                    {
-                        if (light->GetEntry() == NPC_ASTROMANCER_SOLARIAN_SPOTLIGHT)
-                        {
-                            if (light->GetDistance2d(CENTER_X, CENTER_Y) < 20.0f)
-                            {
-                                DoCast(light, SPELL_TRUE_BEAM);
-                                me->SetPosition(*light);
-                                me->StopMovingOnCurrentPos();
-                            }
-                            for (uint8 j = 0; j < 4; ++j)
-                            {
-                                me->SummonCreature(NPC_SOLARIUM_AGENT, light->GetPositionX() + frand(-3.0f, 3.0f), light->GetPositionY() + frand(-3.0f, 3.0f), light->GetPositionZ(), 0.0f, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 10000);
-                            }
-                        }
-                    }
-                });
-            }).Schedule(23s, [this](TaskContext)
-            {
-                me->SetReactState(REACT_AGGRESSIVE);
-                summons.DoForAllSummons([&](WorldObject* summon)
-                {
-                    if (Creature* light = summon->ToCreature())
-                    {
-                        if (light->GetEntry() == NPC_ASTROMANCER_SOLARIAN_SPOTLIGHT)
-                        {
-                            light->RemoveAllAuras();
-                            if (light->GetDistance2d(CENTER_X, CENTER_Y) < 20.0f)
-                            {
-                                me->RemoveAllAuras();
-                                me->SetModelVisible(true);
-                            }
-                            else
-                            {
-                                me->SummonCreature(NPC_SOLARIUM_PRIEST, light->GetPositionX() + frand(-3.0f, 3.0f), light->GetPositionY() + frand(-3.0f, 3.0f), light->GetPositionZ(), 0.0f, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 10000);
-                            }
-                        }
-                    }
-                });
-            });
-            context.Repeat(87500ms, 91200ms);
-        });
+        me->CallForHelp(120.0f);
     }
 
-     void UpdateAI(uint32 diff) override
+    void SummonMinion(uint32 entry, float x, float y, float z)
     {
-        if (!UpdateVictim())
-            return;
-
-        scheduler.Update(diff);
-
-        if (me->GetReactState() == REACT_AGGRESSIVE)
+        Creature* Summoned = me->SummonCreature(entry, x, y, z, 0, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 5s);
+        if (Summoned)
         {
-            DoMeleeAttackIfReady();
+            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
+                Summoned->AI()->AttackStart(target);
+
+            summons.Summon(Summoned);
         }
     }
 
-    void JustSummoned(Creature* summon) override
+    float Portal_X(float radius)
     {
-        summons.Summon(summon);
-        if (!summon->IsTrigger())
+        if (urand(0, 1))
+            radius = -radius;
+
+        return radius * (float)(rand32() % 100) / 100.0f + CENTER_X;
+    }
+
+    float Portal_Y(float x, float radius)
+    {
+        float z = RAND(1.0f, -1.0f);
+
+        return (z*std::sqrt(radius*radius - (x - CENTER_X)*(x - CENTER_X)) + CENTER_Y);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+        if (AppearDelay)
         {
-            summon->SetInCombatWithZone();
+            me->StopMoving();
+            me->AttackStop();
+            if (AppearDelay_Timer <= Milliseconds(diff))
+            {
+                AppearDelay = false;
+                if (Phase == 2)
+                {
+                    me->SetUninteractible(true);
+                    me->SetVisible(false);
+                }
+                AppearDelay_Timer = 2s;
+            }
+            else
+                AppearDelay_Timer -= Milliseconds(diff);
+        }
+        if (Phase == 1)
+        {
+            if (BlindingLight_Timer <= diff)
+            {
+                BlindingLight = true;
+                BlindingLight_Timer = 45000;
+            }
+            else
+                BlindingLight_Timer -= diff;
+
+            if (Wrath_Timer <= diff)
+            {
+                me->InterruptNonMeleeSpells(false);
+                if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1, 100, true))
+                    DoCast(target, SPELL_WRATH_OF_THE_ASTROMANCER, true);
+                Wrath_Timer = 20000 + rand32() % 5000;
+            }
+            else
+                Wrath_Timer -= diff;
+
+            if (ArcaneMissiles_Timer <= diff)
+            {
+                if (BlindingLight)
+                {
+                    DoCastVictim(SPELL_BLINDING_LIGHT);
+                    BlindingLight = false;
+                }
+                else
+                {
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
+                    {
+                        if (!me->HasInArc(2.5f, target))
+                            target = me->GetVictim();
+
+                        DoCast(target, SPELL_ARCANE_MISSILES);
+                    }
+                }
+                ArcaneMissiles_Timer = 3000;
+            }
+            else
+                ArcaneMissiles_Timer -= diff;
+
+            if (m_uiWrathOfTheAstromancer_Timer <= diff)
+            {
+                me->InterruptNonMeleeSpells(false);
+                //Target the tank ?
+                if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1))
+                {
+                    if (target->GetTypeId() == TYPEID_PLAYER)
+                    {
+                        DoCast(target, SPELL_WRATH_OF_THE_ASTROMANCER);
+                        m_uiWrathOfTheAstromancer_Timer = 25000;
+                    }
+                    else
+                        m_uiWrathOfTheAstromancer_Timer = 1000;
+                }
+            }
+            else
+                m_uiWrathOfTheAstromancer_Timer -= diff;
+
+            //Phase1_Timer
+            if (Phase1_Timer <= diff)
+            {
+                Phase = 2;
+                Phase1_Timer = 50000;
+                //After these 50 seconds she portals to the middle of the room and disappears, leaving 3 light portals behind.
+                me->GetMotionMaster()->Clear();
+                me->UpdatePosition(CENTER_X, CENTER_Y, CENTER_Z, CENTER_O);
+                for (uint8 i = 0; i <= 2; ++i)
+                {
+                    if (!i)
+                    {
+                        Portals[i][0] = Portal_X(SMALL_PORTAL_RADIUS);
+                        Portals[i][1] = Portal_Y(Portals[i][0], SMALL_PORTAL_RADIUS);
+                        Portals[i][2] = CENTER_Z;
+                    }
+                    else
+                    {
+                        Portals[i][0] = Portal_X(LARGE_PORTAL_RADIUS);
+                        Portals[i][1] = Portal_Y(Portals[i][0], LARGE_PORTAL_RADIUS);
+                        Portals[i][2] = PORTAL_Z;
+                    }
+                }
+                if ((std::abs(Portals[2][0] - Portals[1][0]) < 7) && (std::abs(Portals[2][1] - Portals[1][1]) < 7))
+                {
+                    int i = 1;
+                    if (std::abs(CENTER_X + 26.0f - Portals[2][0]) < 7)
+                        i = -1;
+                    Portals[2][0] = Portals[2][0] + 7 * i;
+                    Portals[2][1] = Portal_Y(Portals[2][0], LARGE_PORTAL_RADIUS);
+                }
+                for (int i = 0; i <= 2; ++i)
+                {
+                    if (Creature* Summoned = me->SummonCreature(NPC_ASTROMANCER_SOLARIAN_SPOTLIGHT, Portals[i][0], Portals[i][1], Portals[i][2], CENTER_O, TEMPSUMMON_TIMED_DESPAWN, Phase2_Timer + Phase3_Timer + AppearDelay_Timer + 1700ms))
+                    {
+                        Summoned->SetUninteractible(true);
+                        Summoned->CastSpell(Summoned, SPELL_SPOTLIGHT, false);
+                    }
+                }
+                AppearDelay = true;
+            }
+            else
+                Phase1_Timer -= diff;
+        }
+        else if (Phase == 2)
+        {
+            //10 seconds after Solarian disappears, 12 mobs spawn out of the three portals.
+            me->AttackStop();
+            me->StopMoving();
+            if (Phase2_Timer <= Milliseconds(diff))
+            {
+                Phase = 3;
+                for (int i=0; i <= 2; ++i)
+                    for (int j=1; j <= 4; j++)
+                        SummonMinion(NPC_SOLARIUM_AGENT, Portals[i][0], Portals[i][1], Portals[i][2]);
+
+                Talk(SAY_SUMMON1);
+                Phase2_Timer = 10s;
+            }
+            else
+                Phase2_Timer -= Milliseconds(diff);
+        }
+        else if (Phase == 3)
+        {
+            me->AttackStop();
+            me->StopMoving();
+            //Check Phase3_Timer
+            if (Phase3_Timer <= Milliseconds(diff))
+            {
+                Phase = 1;
+                //15 seconds later Solarian reappears out of one of the 3 portals. Simultaneously, 2 healers appear in the two other portals.
+                int i = rand32() % 3;
+                me->GetMotionMaster()->Clear();
+                me->UpdatePosition(Portals[i][0], Portals[i][1], Portals[i][2], CENTER_O);
+
+                for (int j=0; j <= 2; j++)
+                    if (j != i)
+                        SummonMinion(NPC_SOLARIUM_PRIEST, Portals[j][0], Portals[j][1], Portals[j][2]);
+
+                me->SetUninteractible(false);
+                me->SetVisible(true);
+
+                Talk(SAY_SUMMON2);
+                AppearDelay = true;
+                Phase3_Timer = 15s;
+            }
+            else
+                Phase3_Timer -= Milliseconds(diff);
+        }
+        else if (Phase == 4)
+        {
+            //Fear_Timer
+            if (Fear_Timer <= diff)
+            {
+                DoCast(me, SPELL_FEAR);
+                Fear_Timer = 20000;
+            }
+            else
+                Fear_Timer -= diff;
+            //VoidBolt_Timer
+            if (VoidBolt_Timer <= diff)
+            {
+                DoCastVictim(SPELL_VOID_BOLT);
+                VoidBolt_Timer = 10000;
+            }
+            else
+                VoidBolt_Timer -= diff;
+        }
+
+        //When Solarian reaches 20% she will transform into a huge void walker.
+        if (Phase != 4 && me->HealthBelowPct(20))
+        {
+            Phase = 4;
+            //To make sure she wont be invisible or not selecatble
+            me->SetUninteractible(false);
+            me->SetVisible(true);
+            Talk(SAY_VOIDA);
+            Talk(SAY_VOIDB);
+            me->SetArmor(WV_ARMOR, 0);
+            me->SetDisplayId(MODEL_VOIDWALKER);
         }
     }
 };
 
+struct npc_solarium_priest : public ScriptedAI
+{
+    npc_solarium_priest(Creature* creature) : ScriptedAI(creature)
+    {
+        Initialize();
+        instance = creature->GetInstanceScript();
+    }
+
+    void Initialize()
+    {
+        healTimer = 9000;
+        holysmiteTimer = 1;
+        aoesilenceTimer = 15000;
+    }
+
+    InstanceScript* instance;
+
+    uint32 healTimer;
+    uint32 holysmiteTimer;
+    uint32 aoesilenceTimer;
+
+    void Reset() override
+    {
+        Initialize();
+    }
+
+    void JustEngagedWith(Unit* /*who*/) override { }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        if (healTimer <= diff)
+        {
+            Unit* target = nullptr;
+            switch (urand(0, 1))
+            {
+                case 0:
+                    target = ObjectAccessor::GetUnit(*me, instance->GetGuidData(DATA_SOLARIAN));
+                    break;
+                case 1:
+                    target = me;
+                    break;
+            }
+
+            if (target)
+            {
+                DoCast(target, SPELL_SOLARIUM_GREAT_HEAL);
+                healTimer = 9000;
+            }
+        }
+        else
+            healTimer -= diff;
+
+        if (holysmiteTimer <= diff)
+        {
+            DoCastVictim(SPELL_SOLARIUM_HOLY_SMITE);
+            holysmiteTimer = 4000;
+        }
+        else
+            holysmiteTimer -= diff;
+
+        if (aoesilenceTimer <= diff)
+        {
+            DoCastVictim(SPELL_SOLARIUM_ARCANE_TORRENT);
+            aoesilenceTimer = 13000;
+        }
+        else
+            aoesilenceTimer -= diff;
+    }
+};
+
+// 42783 - Wrath of the Astromancer
 class spell_astromancer_wrath_of_the_astromancer : public AuraScript
 {
-    PrepareAuraScript(spell_astromancer_wrath_of_the_astromancer);
+    bool Validate(SpellInfo const* spellInfo) override
+    {
+        return ValidateSpellInfo({ SPELL_WRATH_OF_THE_ASTROMANCER_DOT })
+            && ValidateSpellEffect({ { spellInfo->Id, EFFECT_1 } });
+    }
 
     void AfterRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
     {
+        // Final heal only on duration end
         if (GetTargetApplication()->GetRemoveMode() != AURA_REMOVE_BY_EXPIRE)
             return;
 
         Unit* target = GetUnitOwner();
-        target->CastSpell(target, GetSpellInfo()->Effects[EFFECT_1].CalcValue(), false, nullptr, nullptr, GetCaster () ? GetCaster()->GetGUID() : ObjectGuid::Empty);
+        target->CastSpell(target, GetEffectInfo(EFFECT_1).CalcValue(), false);
     }
 
     void Register() override
@@ -265,30 +496,9 @@ class spell_astromancer_wrath_of_the_astromancer : public AuraScript
     }
 };
 
-class spell_astromancer_solarian_transform : public AuraScript
-{
-    PrepareAuraScript(spell_astromancer_solarian_transform);
-
-    void OnApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        GetUnitOwner()->HandleStatModifier(UnitMods(UNIT_MOD_ARMOR), TOTAL_PCT, 400.0f, true);
-    }
-
-    void OnRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        GetUnitOwner()->HandleStatModifier(UnitMods(UNIT_MOD_ARMOR), TOTAL_PCT, 400.0f, false);
-    }
-
-    void Register() override
-    {
-        OnEffectApply += AuraEffectApplyFn(spell_astromancer_solarian_transform::OnApply, EFFECT_0, SPELL_AURA_TRANSFORM, AURA_EFFECT_HANDLE_REAL);
-        OnEffectRemove += AuraEffectRemoveFn(spell_astromancer_solarian_transform::OnRemove, EFFECT_0, SPELL_AURA_TRANSFORM, AURA_EFFECT_HANDLE_REAL);
-    }
-};
-
 void AddSC_boss_high_astromancer_solarian()
 {
-    RegisterTheEyeAI(boss_high_astromancer_solarian);
+    RegisterTheEyeCreatureAI(boss_high_astromancer_solarian);
+    RegisterTheEyeCreatureAI(npc_solarium_priest);
     RegisterSpellScript(spell_astromancer_wrath_of_the_astromancer);
-    RegisterSpellScript(spell_astromancer_solarian_transform);
 }

@@ -1,109 +1,142 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+/*
+Name: Boss_Temporus
+%Complete: 75
+Comment: More abilities need to be implemented
+Category: Caverns of Time, The Black Morass
+*/
+
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
 #include "ScriptedCreature.h"
 #include "the_black_morass.h"
 
-enum Text
+enum Enums
 {
-    SAY_AGGRO                   = 1,
-    SAY_BANISH                  = 2,
-    SAY_SLAY                    = 3,
-    SAY_DEATH                   = 4
+    SAY_ENTER               = 0,
+    SAY_AGGRO               = 1,
+    SAY_BANISH              = 2,
+    SAY_SLAY                = 3,
+    SAY_DEATH               = 4,
+
+    SPELL_HASTE             = 31458,
+    SPELL_MORTAL_WOUND      = 31464,
+    SPELL_WING_BUFFET       = 31475,
+    H_SPELL_WING_BUFFET     = 38593,
+    SPELL_REFLECT           = 38592                       //Not Implemented (Heroic mod)
 };
 
-enum Spells
+enum Events
 {
-    SPELL_HASTEN                = 31458,
-    SPELL_MORTAL_WOUND          = 31464,
-    SPELL_WING_BUFFET           = 31475,
-    SPELL_REFLECT               = 38592,
-    SPELL_BANISH_DRAGON_HELPER  = 31550
+    EVENT_HASTE             = 1,
+    EVENT_MORTAL_WOUND      = 2,
+    EVENT_WING_BUFFET       = 3,
+    EVENT_SPELL_REFLECTION  = 4
 };
 
 struct boss_temporus : public BossAI
 {
-    boss_temporus(Creature* creature) : BossAI(creature, DATA_TEMPORUS) { }
+    boss_temporus(Creature* creature) : BossAI(creature, TYPE_TEMPORUS) { }
 
-    void OwnTalk(uint32 id)
-    {
-        if (me->GetEntry() == NPC_TEMPORUS)
-            Talk(id);
-    }
+    void Reset() override { }
 
     void JustEngagedWith(Unit* /*who*/) override
     {
-        _JustEngagedWith();
-        scheduler.Schedule(12s, [this](TaskContext context)
-        {
-            DoCastSelf(SPELL_HASTEN);
-            context.Repeat(20s);
-        }).Schedule(5s, [this](TaskContext context)
-        {
-            DoCastVictim(SPELL_MORTAL_WOUND);
-            context.Repeat(10s);
-        }).Schedule(20s, [this](TaskContext context)
-        {
-            DoCastAOE(SPELL_WING_BUFFET);
-            context.Repeat(20s);
-        });
-
+        events.ScheduleEvent(EVENT_HASTE, 15s, 23s);
+        events.ScheduleEvent(EVENT_MORTAL_WOUND, 8s);
+        events.ScheduleEvent(EVENT_WING_BUFFET, 25s, 35s);
         if (IsHeroic())
-        {
-            scheduler.Schedule(28s, [this](TaskContext context)
-            {
-                DoCastSelf(SPELL_REFLECT);
-                context.Repeat(30s);
-            });
-        }
-        OwnTalk(SAY_AGGRO);
+            events.ScheduleEvent(EVENT_SPELL_REFLECTION, 30s);
+
+        Talk(SAY_AGGRO);
     }
 
-    void KilledUnit(Unit* victim) override
+    void KilledUnit(Unit* /*victim*/) override
     {
-        if (victim->IsPlayer())
-        {
-            OwnTalk(SAY_SLAY);
-        }
+        Talk(SAY_SLAY);
     }
 
     void JustDied(Unit* /*killer*/) override
     {
-        OwnTalk(SAY_DEATH);
-        _JustDied();
+        Talk(SAY_DEATH);
+
+        instance->SetData(TYPE_RIFT, SPECIAL);
     }
 
     void MoveInLineOfSight(Unit* who) override
     {
-        if (who->IsCreature() && who->GetEntry() == NPC_TIME_KEEPER)
+        //Despawn Time Keeper
+        if (who->GetTypeId() == TYPEID_UNIT && who->GetEntry() == NPC_TIME_KEEPER)
         {
             if (me->IsWithinDistInMap(who, 20.0f))
             {
-                OwnTalk(SAY_BANISH);
-                me->CastSpell(me, SPELL_BANISH_DRAGON_HELPER, true);
-                return;
+                Talk(SAY_BANISH);
+
+                Unit::DealDamage(me, who, who->GetHealth(), nullptr, DIRECT_DAMAGE, SPELL_SCHOOL_MASK_NORMAL, nullptr, false);
             }
         }
+
         ScriptedAI::MoveInLineOfSight(who);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        //Return since we have no target
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_HASTE:
+                    DoCast(me, SPELL_HASTE);
+                    events.ScheduleEvent(EVENT_HASTE, 20s, 25s);
+                    break;
+                case EVENT_MORTAL_WOUND:
+                    DoCast(me, SPELL_MORTAL_WOUND);
+                    events.ScheduleEvent(EVENT_MORTAL_WOUND, 10s, 20s);
+                    break;
+                case EVENT_WING_BUFFET:
+                     DoCast(me, SPELL_WING_BUFFET);
+                    events.ScheduleEvent(EVENT_WING_BUFFET, 20s, 30s);
+                    break;
+                case EVENT_SPELL_REFLECTION: // Only in Heroic
+                    DoCast(me, SPELL_REFLECT);
+                    events.ScheduleEvent(EVENT_SPELL_REFLECTION, 25s, 35s);
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
     }
 };
 
 void AddSC_boss_temporus()
 {
-    RegisterTheBlackMorassCreatureAI(boss_temporus);
+    RegisterBlackMorassCreatureAI(boss_temporus);
 }

@@ -1,23 +1,27 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "InstanceMapScript.h"
+#include "ScriptMgr.h"
+#include "AreaBoundary.h"
+#include "GameObject.h"
 #include "InstanceScript.h"
 #include "magtheridons_lair.h"
+#include "Map.h"
+#include "ScriptedCreature.h"
 
 BossBoundaryData const boundaries =
 {
@@ -26,171 +30,121 @@ BossBoundaryData const boundaries =
 
 DoorData const doorData[] =
 {
-    { GO_MAGTHERIDON_DOORS,     DATA_MAGTHERIDON,           DOOR_TYPE_ROOM },
-    { 0,                        0,                          DOOR_TYPE_ROOM } // END
+    { GO_MAGTHERIDON_DOOR,      DATA_MAGTHERIDON,           EncounterDoorBehavior::OpenWhenNotInProgress },
+    { 0,                        0,                          EncounterDoorBehavior::OpenWhenNotInProgress } // END
 };
 
-MinionData const minionData[] =
+ObjectData const creatureData[] =
 {
-    { NPC_HELLFIRE_CHANNELER,   DATA_MAGTHERIDON }
+    { NPC_MAGTHERIDON,          DATA_MAGTHERIDON    },
+    { NPC_WORLD_TRIGGER,        DATA_WORLD_TRIGGER  },
+    { 0,                        0                   } // END
+
+};
+
+ObjectData const gameObjectData[] =
+{
+    { GO_MAGTHERIDON_HALL,          DATA_MAGTHERIDON_HALL       },
+    { GO_MAGTHERIDON_COLUMN_0,      DATA_MAGTHERIDON_COLUMN_0   },
+    { GO_MAGTHERIDON_COLUMN_1,      DATA_MAGTHERIDON_COLUMN_1   },
+    { GO_MAGTHERIDON_COLUMN_2,      DATA_MAGTHERIDON_COLUMN_2   },
+    { GO_MAGTHERIDON_COLUMN_3,      DATA_MAGTHERIDON_COLUMN_3   },
+    { GO_MAGTHERIDON_COLUMN_4,      DATA_MAGTHERIDON_COLUMN_4   },
+    { GO_MAGTHERIDON_COLUMN_5,      DATA_MAGTHERIDON_COLUMN_5   },
+    { 0,                            0                           } //END
+};
+
+static MLDataTypes const collapseObjectDatas[] =
+{
+    DATA_MAGTHERIDON_COLUMN_0,
+    DATA_MAGTHERIDON_COLUMN_1,
+    DATA_MAGTHERIDON_COLUMN_2,
+    DATA_MAGTHERIDON_COLUMN_3,
+    DATA_MAGTHERIDON_COLUMN_4,
+    DATA_MAGTHERIDON_COLUMN_5,
+};
+
+DungeonEncounterData const encounters[] =
+{
+    { DATA_MAGTHERIDON, {{ 651 }} }
 };
 
 class instance_magtheridons_lair : public InstanceMapScript
 {
-public:
-    instance_magtheridons_lair() : InstanceMapScript("instance_magtheridons_lair", 544) { }
+    public:
+        instance_magtheridons_lair() : InstanceMapScript(MLScriptName, 544) { }
 
-    struct instance_magtheridons_lair_InstanceMapScript : public InstanceScript
-    {
-        instance_magtheridons_lair_InstanceMapScript(Map* map) : InstanceScript(map)
+        struct instance_magtheridons_lair_InstanceMapScript : public InstanceScript
         {
-            SetHeaders(DataHeader);
-            SetBossNumber(MAX_ENCOUNTER);
-            LoadDoorData(doorData);
-            LoadMinionData(minionData);
-            LoadBossBoundaries(boundaries);
-        }
-
-        void Initialize() override
-        {
-            _wardersSet.clear();
-            _cubesSet.clear();
-            _columnSet.clear();
-        }
-
-        void OnCreatureCreate(Creature* creature) override
-        {
-            switch (creature->GetEntry())
+            instance_magtheridons_lair_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
             {
-                case NPC_MAGTHERIDON:
-                    _magtheridonGUID = creature->GetGUID();
-                    break;
-                case NPC_HELLFIRE_CHANNELER:
-                    AddMinion(creature);
-                    break;
-                case NPC_HELLFIRE_WARDER:
-                    _wardersSet.insert(creature->GetGUID());
-                    break;
+                SetHeaders(DataHeader);
+                SetBossNumber(EncounterCount);
+                LoadDoorData(doorData);
+                LoadBossBoundaries(boundaries);
+                LoadObjectData(creatureData, gameObjectData);
+                LoadDungeonEncounterData(encounters);
             }
-        }
 
-        void OnCreatureRemove(Creature* creature) override
-        {
-            switch (creature->GetEntry())
+            void OnGameObjectCreate(GameObject* go) override
             {
-                case NPC_HELLFIRE_CHANNELER:
-                    RemoveMinion(creature);
-                    break;
+                InstanceScript::OnGameObjectCreate(go);
+
+                if (go->GetEntry() == GO_MANTICRON_CUBE)
+                    cubesGUIDS.push_back(go->GetGUID());
             }
-        }
 
-        void OnGameObjectCreate(GameObject* go) override
-        {
-            switch (go->GetEntry())
+            void OnCreatureCreate(Creature* creature) override
             {
-                case GO_MAGTHERIDON_DOORS:
-                    AddDoor(go);
-                    break;
-                case GO_MANTICRON_CUBE:
-                    _cubesSet.insert(go->GetGUID());
-                    break;
-                case GO_MAGTHERIDON_HALL:
-                case GO_MAGTHERIDON_COLUMN0:
-                case GO_MAGTHERIDON_COLUMN1:
-                case GO_MAGTHERIDON_COLUMN2:
-                case GO_MAGTHERIDON_COLUMN3:
-                case GO_MAGTHERIDON_COLUMN4:
-                case GO_MAGTHERIDON_COLUMN5:
-                    _columnSet.insert(go->GetGUID());
-                    break;
+                InstanceScript::OnCreatureCreate(creature);
+
+                if (creature->GetEntry() == NPC_HELLFIRE_WARDER)
+                    warderGUIDS.push_back(creature->GetGUID());
             }
-        }
 
-        void OnGameObjectRemove(GameObject* go) override
-        {
-            switch (go->GetEntry())
+            void SetData(uint32 data, uint32 value) override
             {
-                case GO_MAGTHERIDON_DOORS:
-                    RemoveDoor(go);
-                    break;
-                case GO_MANTICRON_CUBE:
-                    _cubesSet.erase(go->GetGUID());
-                    break;
-                case GO_MAGTHERIDON_HALL:
-                case GO_MAGTHERIDON_COLUMN0:
-                case GO_MAGTHERIDON_COLUMN1:
-                case GO_MAGTHERIDON_COLUMN2:
-                case GO_MAGTHERIDON_COLUMN3:
-                case GO_MAGTHERIDON_COLUMN4:
-                case GO_MAGTHERIDON_COLUMN5:
-                    _columnSet.erase(go->GetGUID());
-                    break;
-            }
-        }
-
-        bool SetBossState(uint32 id, EncounterState state) override
-        {
-            if (!InstanceScript::SetBossState(id, state))
-                return false;
-
-            if (id == DATA_MAGTHERIDON)
-            {
-                if (state == IN_PROGRESS)
+                switch (data)
                 {
-                    for (ObjectGuid const& guid : _wardersSet)
-                        if (Creature* warder = instance->GetCreature(guid))
-                            if (warder->IsAlive())
+                    case DATA_MANTICRON_CUBE:
+                        for (ObjectGuid gobGUID : cubesGUIDS)
+                            if (GameObject* cube = instance->GetGameObject(gobGUID))
                             {
-                                warder->InterruptNonMeleeSpells(true);
-                                warder->SetInCombatWithZone();
+                                if (value == ACTION_ENABLE)
+                                    cube->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
+                                else
+                                    cube->SetFlag(GO_FLAG_NOT_SELECTABLE);
                             }
-                }
-                else
-                {
-                    for (ObjectGuid const& guid : _cubesSet)
-                        if (GameObject* cube = instance->GetGameObject(guid))
-                            cube->SetGameObjectFlag(GO_FLAG_NOT_SELECTABLE);
-
-                    if (state == NOT_STARTED)
-                        SetData(DATA_COLLAPSE, GO_READY);
+                        break;
+                    case DATA_COLLAPSE:
+                        if (GameObject* hall = GetGameObject(DATA_MAGTHERIDON_HALL))
+                            HandleGameObject(ObjectGuid::Empty, value == ACTION_ENABLE ? true : false, hall);
+                        break;
+                    case DATA_COLLAPSE_2:
+                        for (MLDataTypes type : collapseObjectDatas)
+                            if (GameObject* go = GetGameObject(type))
+                                HandleGameObject(ObjectGuid::Empty, value == ACTION_ENABLE ? true : false, go);
+                        break;
+                    case DATA_CALL_WARDERS:
+                        for (ObjectGuid warderGuid : warderGUIDS)
+                            if (Creature* warder = instance->GetCreature(warderGuid))
+                                if (warder->IsAlive())
+                                    warder->AI()->DoZoneInCombat();
+                        break;
+                    default:
+                        break;
                 }
             }
-            return true;
-        }
 
-        void SetData(uint32 type, uint32 data) override
+        protected:
+            GuidVector cubesGUIDS;
+            GuidVector warderGUIDS;
+        };
+
+        InstanceScript* GetInstanceScript(InstanceMap* map) const override
         {
-            switch (type)
-            {
-                case DATA_CHANNELER_COMBAT:
-                    if (GetBossState(DATA_MAGTHERIDON) != IN_PROGRESS)
-                        if (Creature* magtheridon = instance->GetCreature(_magtheridonGUID))
-                            magtheridon->SetInCombatWithZone();
-                    break;
-                case DATA_ACTIVATE_CUBES:
-                    for (ObjectGuid const& guid : _cubesSet)
-                        if (GameObject* cube = instance->GetGameObject(guid))
-                            cube->RemoveGameObjectFlag(GO_FLAG_NOT_SELECTABLE);
-                    break;
-                case DATA_COLLAPSE:
-                    for (ObjectGuid const& guid : _columnSet)
-                        if (GameObject* column = instance->GetGameObject(guid))
-                            column->SetGoState(GOState(data));
-                    break;
-            }
+            return new instance_magtheridons_lair_InstanceMapScript(map);
         }
-
-    private:
-        ObjectGuid _magtheridonGUID;
-        GuidSet _wardersSet;
-        GuidSet _cubesSet;
-        GuidSet _columnSet;
-    };
-
-    InstanceScript* GetInstanceScript(InstanceMap* map) const override
-    {
-        return new instance_magtheridons_lair_InstanceMapScript(map);
-    }
 };
 
 void AddSC_instance_magtheridons_lair()

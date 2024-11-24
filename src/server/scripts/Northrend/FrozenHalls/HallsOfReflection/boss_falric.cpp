@@ -1,31 +1,32 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
+#include "boss_horAI.h"
 #include "halls_of_reflection.h"
-#include "ScriptedCreature.h"
+#include "InstanceScript.h"
 
-enum Yells
+enum Texts
 {
     SAY_AGGRO                                     = 0,
     SAY_SLAY                                      = 1,
     SAY_DEATH                                     = 2,
     SAY_IMPENDING_DESPAIR                         = 3,
-    SAY_DEFILING_HORROR                           = 4,
+    SAY_DEFILING_HORROR                           = 4
 };
 
 enum Spells
@@ -33,6 +34,9 @@ enum Spells
     SPELL_QUIVERING_STRIKE                        = 72422,
     SPELL_IMPENDING_DESPAIR                       = 72426,
     SPELL_DEFILING_HORROR                         = 72435,
+    SPELL_HOPELESSNESS_1                          = 72395,
+    SPELL_HOPELESSNESS_2                          = 72396,
+    SPELL_HOPELESSNESS_3                          = 72397
 };
 
 enum Events
@@ -40,144 +44,112 @@ enum Events
     EVENT_NONE,
     EVENT_QUIVERING_STRIKE,
     EVENT_IMPENDING_DESPAIR,
-    EVENT_DEFILING_HORROR,
-    EVENT_UNROOT,
+    EVENT_DEFILING_HORROR
 };
 
-const uint32 hopelessnessId[3][2] = { {72395, 72390}, {72396, 72391}, {72397, 72393} };
+uint32 const HopelessnessHelper[3] = { SPELL_HOPELESSNESS_1, SPELL_HOPELESSNESS_2, SPELL_HOPELESSNESS_3 };
 
 class boss_falric : public CreatureScript
 {
-public:
-    boss_falric() : CreatureScript("boss_falric") { }
+    public:
+        boss_falric() : CreatureScript("boss_falric") { }
 
-    struct boss_falricAI : public ScriptedAI
-    {
-        boss_falricAI(Creature* creature) : ScriptedAI(creature)
+        struct boss_falricAI : public boss_horAI
         {
-            pInstance = creature->GetInstanceScript();
-        }
+            boss_falricAI(Creature* creature) : boss_horAI(creature, DATA_FALRIC)
+            {
+                Initialize();
+            }
 
-        InstanceScript* pInstance;
-        EventMap events;
-        uint8 uiHopelessnessCount;
-        uint16 startFightTimer;
+            void Initialize()
+            {
+                _hopelessnessCount = 0;
+            }
 
-        void Reset() override
-        {
-            startFightTimer = 0;
-            uiHopelessnessCount = 0;
-            me->SetImmuneToAll(true);
-            me->SetControlled(false, UNIT_STATE_ROOT);
-            events.Reset();
-            if (pInstance)
-                pInstance->SetData(DATA_FALRIC, NOT_STARTED);
-        }
+            void Reset() override
+            {
+                boss_horAI::Reset();
+                Initialize();
+            }
 
-        void JustEngagedWith(Unit* /*who*/) override
-        {
-            me->SetImmuneToAll(false);
-
-            events.ScheduleEvent(EVENT_QUIVERING_STRIKE, 5s);
-            events.ScheduleEvent(EVENT_IMPENDING_DESPAIR, 11s);
-            events.ScheduleEvent(EVENT_DEFILING_HORROR, 20s);
-        }
-
-        void DoAction(int32 a) override
-        {
-            if (a == 1)
+            void JustEngagedWith(Unit* /*who*/) override
             {
                 Talk(SAY_AGGRO);
-                startFightTimer = 8000;
-            }
-        }
+                DoZoneInCombat();
+                instance->SetBossState(DATA_FALRIC, IN_PROGRESS);
 
-        void UpdateAI(uint32 diff) override
-        {
-            if (startFightTimer)
+                events.ScheduleEvent(EVENT_QUIVERING_STRIKE, 23s);
+                events.ScheduleEvent(EVENT_IMPENDING_DESPAIR, 9s);
+                events.ScheduleEvent(EVENT_DEFILING_HORROR, 21s, 39s);
+            }
+
+            void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
             {
-                if (startFightTimer <= diff)
+                if ((_hopelessnessCount < 1 && me->HealthBelowPctDamaged(66, damage))
+                    || (_hopelessnessCount < 2 && me->HealthBelowPctDamaged(33, damage))
+                    || (_hopelessnessCount < 3 && me->HealthBelowPctDamaged(10, damage)))
                 {
-                    startFightTimer = 0;
-                    me->SetInCombatWithZone();
+                    if (_hopelessnessCount)
+                        me->RemoveOwnedAura(HopelessnessHelper[_hopelessnessCount - 1]);
+                    DoCast(me, HopelessnessHelper[_hopelessnessCount]);
+                    ++_hopelessnessCount;
                 }
-                else
-                    startFightTimer -= diff;
             }
 
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
+            void JustDied(Unit* /*killer*/) override
             {
-                case EVENT_QUIVERING_STRIKE:
-                    me->CastSpell(me->GetVictim(), SPELL_QUIVERING_STRIKE, false);
-                    events.ScheduleEvent(EVENT_QUIVERING_STRIKE, 5s);
-                    break;
-                case EVENT_IMPENDING_DESPAIR:
-                    if (Unit* target = SelectTargetFromPlayerList(45.0f, 0, true))
-                    {
-                        Talk(SAY_IMPENDING_DESPAIR);
-                        me->CastSpell(target, SPELL_IMPENDING_DESPAIR, false);
-                    }
-                    events.ScheduleEvent(EVENT_IMPENDING_DESPAIR, 12s);
-                    break;
-                case EVENT_DEFILING_HORROR:
-                    Talk(SAY_DEFILING_HORROR);
-                    me->CastSpell((Unit*)nullptr, SPELL_DEFILING_HORROR, false);
-                    me->SetControlled(true, UNIT_STATE_ROOT);
-                    events.DelayEventsToMax(5000, 0);
-                    events.ScheduleEvent(EVENT_UNROOT, 4s);
-                    events.ScheduleEvent(EVENT_DEFILING_HORROR, 20s);
-                    break;
-                case EVENT_UNROOT:
-                    me->SetControlled(false, UNIT_STATE_ROOT);
-                    break;
+                Talk(SAY_DEATH);
+                events.Reset();
+                instance->SetBossState(DATA_FALRIC, DONE);
             }
 
-            if ((uiHopelessnessCount == 0 && HealthBelowPct(67)) || (uiHopelessnessCount == 1 && HealthBelowPct(34)) || (uiHopelessnessCount == 2 && HealthBelowPct(11)))
+            void KilledUnit(Unit* who) override
             {
-                if (uiHopelessnessCount)
-                    me->RemoveOwnedAura(hopelessnessId[uiHopelessnessCount - 1][DUNGEON_MODE(0, 1)]);
-                me->CastSpell((Unit*)nullptr, hopelessnessId[uiHopelessnessCount][DUNGEON_MODE(0, 1)], true);
-                ++uiHopelessnessCount;
+                if (who->GetTypeId() == TYPEID_PLAYER)
+                    Talk(SAY_SLAY);
             }
 
-            if (!me->HasUnitState(UNIT_STATE_ROOT))
-                DoMeleeAttackIfReady();
-        }
+            void UpdateAI(uint32 diff) override
+            {
+                if (!UpdateVictim())
+                    return;
 
-        void JustDied(Unit* /*killer*/) override
+                events.Update(diff);
+
+                if (me->HasUnitState(UNIT_STATE_CASTING))
+                    return;
+
+                switch (events.ExecuteEvent())
+                {
+                    case EVENT_QUIVERING_STRIKE:
+                        DoCastVictim(SPELL_QUIVERING_STRIKE);
+                        events.ScheduleEvent(EVENT_QUIVERING_STRIKE, 10s);
+                        break;
+                    case EVENT_IMPENDING_DESPAIR:
+                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 45.0f, true))
+                        {
+                            Talk(SAY_IMPENDING_DESPAIR);
+                            DoCast(target, SPELL_IMPENDING_DESPAIR);
+                        }
+                        events.ScheduleEvent(EVENT_IMPENDING_DESPAIR, 13s);
+                        break;
+                    case EVENT_DEFILING_HORROR:
+                        DoCastAOE(SPELL_DEFILING_HORROR);
+                        events.ScheduleEvent(EVENT_DEFILING_HORROR, 21s, 39s);
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+        private:
+            uint8 _hopelessnessCount;
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
         {
-            Talk(SAY_DEATH);
-            if (pInstance)
-                pInstance->SetData(DATA_FALRIC, DONE);
+            return GetHallsOfReflectionAI<boss_falricAI>(creature);
         }
-
-        void KilledUnit(Unit* who) override
-        {
-            if (who->IsPlayer())
-                Talk(SAY_SLAY);
-        }
-
-        void EnterEvadeMode(EvadeReason why) override
-        {
-            me->SetControlled(false, UNIT_STATE_ROOT);
-            ScriptedAI::EnterEvadeMode(why);
-            if (startFightTimer)
-                Reset();
-        }
-    };
-
-    CreatureAI* GetAI(Creature* creature) const override
-    {
-        return GetHallsOfReflectionAI<boss_falricAI>(creature);
-    }
 };
 
 void AddSC_boss_falric()

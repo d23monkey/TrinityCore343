@@ -1,46 +1,44 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
 #include "Player.h"
-#include "ScriptedCreature.h"
+#include "SpellInfo.h"
 #include "SpellScript.h"
-#include "SpellScriptLoader.h"
 
-enum SpellScripts
+enum OozeZap
 {
     SPELL_OOZE_ZAP              = 42489,
-    SPELL_OOZE_ZAP_CHANNEL_END  = 42485,
     SPELL_OOZE_CHANNEL_CREDIT   = 42486,
     SPELL_ENERGIZED             = 42492,
 };
 
+// 42489 - Cast Ooze Zap When Energized
 class spell_ooze_zap : public SpellScript
 {
-    PrepareSpellScript(spell_ooze_zap);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
+    bool Validate(SpellInfo const* spellInfo) override
     {
-        return ValidateSpellInfo({ SPELL_OOZE_ZAP });
+        return ValidateSpellEffect({ { spellInfo->Id, EFFECT_1 } })
+            && ValidateSpellInfo({ SPELL_OOZE_ZAP });
     }
 
     SpellCastResult CheckRequirement()
     {
-        if (!GetCaster()->HasAura(GetSpellInfo()->Effects[EFFECT_1].CalcValue()))
+        if (!GetCaster()->HasAura(GetEffectInfo(EFFECT_1).CalcValue()))
             return SPELL_FAILED_CANT_DO_THAT_RIGHT_NOW; // This is actually correct
 
         if (!GetExplTargetUnit())
@@ -63,13 +61,12 @@ class spell_ooze_zap : public SpellScript
     }
 };
 
+// 42485 - End of Ooze Channel
 class spell_ooze_zap_channel_end : public SpellScript
 {
-    PrepareSpellScript(spell_ooze_zap_channel_end);
-
     bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        return ValidateSpellInfo({ SPELL_OOZE_ZAP_CHANNEL_END });
+        return ValidateSpellInfo({ SPELL_OOZE_CHANNEL_CREDIT });
     }
 
     void HandleDummy(SpellEffIndex effIndex)
@@ -77,7 +74,7 @@ class spell_ooze_zap_channel_end : public SpellScript
         PreventHitDefaultEffect(effIndex);
         if (Player* player = GetCaster()->ToPlayer())
             player->CastSpell(player, SPELL_OOZE_CHANNEL_CREDIT, true);
-        Unit::Kill(GetHitUnit(), GetHitUnit());
+        GetHitUnit()->KillSelf();
     }
 
     void Register() override
@@ -86,10 +83,9 @@ class spell_ooze_zap_channel_end : public SpellScript
     }
 };
 
+// 42492 - Cast Energized
 class spell_energize_aoe : public SpellScript
 {
-    PrepareSpellScript(spell_energize_aoe);
-
     bool Validate(SpellInfo const* /*spellInfo*/) override
     {
         return ValidateSpellInfo({ SPELL_ENERGIZED });
@@ -99,7 +95,7 @@ class spell_energize_aoe : public SpellScript
     {
         for (std::list<WorldObject*>::iterator itr = targets.begin(); itr != targets.end();)
         {
-            if ((*itr)->IsPlayer() && (*itr)->ToPlayer()->GetQuestStatus(GetSpellInfo()->Effects[EFFECT_1].CalcValue()) == QUEST_STATUS_INCOMPLETE)
+            if ((*itr)->GetTypeId() == TYPEID_PLAYER && (*itr)->ToPlayer()->GetQuestStatus(GetEffectInfo(EFFECT_1).CalcValue()) == QUEST_STATUS_INCOMPLETE)
                 ++itr;
             else
                 targets.erase(itr++);
@@ -121,9 +117,39 @@ class spell_energize_aoe : public SpellScript
     }
 };
 
+/*######
+## Quest 11140: Recover the Cargo!
+######*/
+
+enum RecoverTheCargo
+{
+    SPELL_SUMMON_LOCKBOX        = 42288,
+    SPELL_SUMMON_BURROWER       = 42289
+};
+
+// 42287 - Salvage Wreckage
+class spell_dustwallow_marsh_salvage_wreckage : public SpellScript
+{
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo({ SPELL_SUMMON_LOCKBOX, SPELL_SUMMON_BURROWER });
+    }
+
+    void HandleDummy(SpellEffIndex /*effIndex*/)
+    {
+        GetCaster()->CastSpell(GetCaster(), roll_chance_i(50) ? SPELL_SUMMON_LOCKBOX : SPELL_SUMMON_BURROWER);
+    }
+
+    void Register() override
+    {
+        OnEffectHit += SpellEffectFn(spell_dustwallow_marsh_salvage_wreckage::HandleDummy, EFFECT_0, SPELL_EFFECT_DUMMY);
+    }
+};
+
 void AddSC_dustwallow_marsh()
 {
     RegisterSpellScript(spell_ooze_zap);
     RegisterSpellScript(spell_ooze_zap_channel_end);
     RegisterSpellScript(spell_energize_aoe);
+    RegisterSpellScript(spell_dustwallow_marsh_salvage_wreckage);
 }

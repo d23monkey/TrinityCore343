@@ -1,24 +1,23 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
-#include "SpellScriptLoader.h"
+#include "ScriptMgr.h"
 #include "arcatraz.h"
+#include "ScriptedCreature.h"
 
 enum Say
 {
@@ -32,13 +31,24 @@ enum Spells
 {
     SPELL_VOID_ZONE                 = 36119,
     SPELL_SHADOW_NOVA               = 36127,
-    SPELL_SEED_OF_CORRUPTION        = 36123,
-    SPELL_CORRUPTION_PROC           = 32865
+    SPELL_SEED_OF_CORRUPTION        = 36123
+};
+
+enum Events
+{
+    EVENT_VOID_ZONE                 = 1,
+    EVENT_SHADOW_NOVA               = 2,
+    EVENT_SEED_OF_CORRUPTION        = 3
 };
 
 struct boss_zereketh_the_unbound : public BossAI
 {
     boss_zereketh_the_unbound(Creature* creature) : BossAI(creature, DATA_ZEREKETH) { }
+
+    void Reset() override
+    {
+        _Reset();
+    }
 
     void JustDied(Unit* /*killer*/) override
     {
@@ -46,35 +56,55 @@ struct boss_zereketh_the_unbound : public BossAI
         Talk(SAY_DEATH);
     }
 
-    void JustEngagedWith(Unit* /*who*/) override
+    void JustEngagedWith(Unit* who) override
     {
-        _JustEngagedWith();
+        BossAI::JustEngagedWith(who);
+        events.ScheduleEvent(EVENT_VOID_ZONE, 6s, 10s);
+        events.ScheduleEvent(EVENT_SHADOW_NOVA, 6s, 10s);
+        events.ScheduleEvent(EVENT_SEED_OF_CORRUPTION, 12s, 20s);
         Talk(SAY_AGGRO);
-
-        scheduler.Schedule(11s, 29s, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_VOID_ZONE, 0, 60.0f);
-            context.Repeat();
-        }).Schedule(12s, 22s, [this](TaskContext context)
-        {
-            DoCastAOE(SPELL_SHADOW_NOVA);
-            if (roll_chance_i(50))
-            {
-                Talk(SAY_SHADOW_NOVA);
-            }
-            context.Repeat();
-        }).Schedule(6s, 12s, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_SEED_OF_CORRUPTION, 0, 30.0f);
-            context.Repeat(13s, 27s);
-        });
     }
 
-    void KilledUnit(Unit* victim) override
+    void KilledUnit(Unit* /*victim*/) override
     {
-        if (victim->IsPlayer())
+        Talk(SAY_SLAY);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
         {
-            Talk(SAY_SLAY);
+            switch (eventId)
+            {
+                case EVENT_VOID_ZONE:
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1, 100, true))
+                        DoCast(target, SPELL_VOID_ZONE);
+                    events.ScheduleEvent(EVENT_VOID_ZONE, 6s, 10s);
+                    break;
+                case EVENT_SHADOW_NOVA:
+                    DoCastVictim(SPELL_SHADOW_NOVA, true);
+                    Talk(SAY_SHADOW_NOVA);
+                    events.ScheduleEvent(EVENT_SHADOW_NOVA, 6s, 10s);
+                    break;
+                case EVENT_SEED_OF_CORRUPTION:
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1, 100, true))
+                        DoCast(target, SPELL_SEED_OF_CORRUPTION);
+                    events.ScheduleEvent(EVENT_SEED_OF_CORRUPTION, 12s, 20s);
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
         }
     }
 };

@@ -1,91 +1,84 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
 #include "ScriptedCreature.h"
+#include "SpellInfo.h"
 #include "SpellScript.h"
-#include "SpellScriptLoader.h"
 #include "the_botanica.h"
 
-enum Says
+enum Texts
 {
-    SAY_AGGRO                   = 0,
-    SAY_KILL                    = 1,
-    SAY_ARCANE_RESONANCE        = 2,
-    SAY_ARCANE_DEVASTATION      = 3,
-    EMOTE_SUMMON                = 4,
-    SAY_SUMMON                  = 5,
-    SAY_DEATH                   = 6
+    SAY_AGGRO                      = 0,
+    SAY_SLAY                       = 1,
+    SAY_ARCANE_DEVASTATION         = 2,
+    EMOTE_SUMMON                   = 3,
+    SAY_SUMMON                     = 4,
+    SAY_DEATH                      = 5
 };
 
 enum Spells
 {
-    SPELL_ARCANE_RESONANCE      = 34794,
-    SPELL_ARCANE_DEVASTATION    = 34799,
-    SPELL_SUMMON_REINFORCEMENTS = 34803,
-    SPELL_SUMMON_MENDER_1       = 34810,
-    SPELL_SUMMON_RESERVIST_1    = 34817,
-    SPELL_SUMMON_RESERVIST_2    = 34818,
-    SPELL_SUMMON_RESERVIST_3    = 34819
+    SPELL_ARCANE_RESONANCE         = 34794,
+    SPELL_ARCANE_DEVASTATION       = 34799,
+
+    SPELL_SUMMON_REINFORCEMENTS    = 34803,
+    SPELL_SUMMON_MENDER_1          = 34810,
+    SPELL_SUMMON_RESERVIST_1       = 34817,
+    SPELL_SUMMON_RESERVIST_2       = 34818,
+    SPELL_SUMMON_RESERVIST_3       = 34819
+};
+
+enum Events
+{
+    EVENT_ARCANE_DEVASTATION       = 1,
+    EVENT_SUMMON_REINFORCEMENTS
+};
+
+uint32 const SummonReinforcementsSpells[] =
+{
+    SPELL_SUMMON_MENDER_1, SPELL_SUMMON_RESERVIST_1, SPELL_SUMMON_RESERVIST_2, SPELL_SUMMON_RESERVIST_3
 };
 
 struct boss_commander_sarannis : public BossAI
 {
-    boss_commander_sarannis(Creature* creature) : BossAI(creature, DATA_COMMANDER_SARANNIS) { }
+    boss_commander_sarannis(Creature* creature) : BossAI(creature, DATA_COMMANDER_SARANNIS), _summoned(false) { }
 
-    void JustEngagedWith(Unit* /*who*/) override
+    void Reset() override
     {
-        _JustEngagedWith();
-        Talk(SAY_AGGRO);
-
-        if (!IsHeroic())
-        {
-            ScheduleHealthCheckEvent(55, [&] {
-                ScheduleReinforcements();
-            });
-        }
-        else
-        {
-            ScheduleReinforcements();
-        }
-
-        ScheduleTimedEvent(20s, [&] {
-            if (roll_chance_i(50))
-            {
-                Talk(SAY_ARCANE_RESONANCE);
-            }
-            DoCastVictim(SPELL_ARCANE_RESONANCE);
-        }, 27s);
-
-        ScheduleTimedEvent(10s, [&] {
-            if (roll_chance_i(50))
-            {
-                Talk(SAY_ARCANE_DEVASTATION);
-            }
-            DoCastVictim(SPELL_ARCANE_DEVASTATION);
-        }, 17s);
+        _Reset();
+        _summoned = false;
     }
 
-    void KilledUnit(Unit* victim) override
+    void JustEngagedWith(Unit* who) override
     {
-        if (victim->IsPlayer())
-        {
-            Talk(SAY_KILL);
-        }
+        BossAI::JustEngagedWith(who);
+        Talk(SAY_AGGRO);
+
+        // This is definitely just timed, not scheduled instantly when victim has specific amount of stacks of Arcane Resonance
+        events.ScheduleEvent(EVENT_ARCANE_DEVASTATION, RAND(10s, 15s, 20s, 25s, 30s, 35s));
+        // Timed in heroic (repeatable), on HP PTC in normal (not repeatable)
+        if (IsHeroic())
+            events.ScheduleEvent(EVENT_SUMMON_REINFORCEMENTS, 1min);
+    }
+
+    void KilledUnit(Unit* /*victim*/) override
+    {
+        Talk(SAY_SLAY);
     }
 
     void JustDied(Unit* /*killer*/) override
@@ -94,27 +87,71 @@ struct boss_commander_sarannis : public BossAI
         Talk(SAY_DEATH);
     }
 
-    void ScheduleReinforcements()
+    void DamageTaken(Unit* /*killer*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
     {
-        scheduler.Schedule(IsHeroic() ? 1min : 1s, [this](TaskContext context)
+        if (!_summoned && me->HealthBelowPctDamaged(55, damage) && !IsHeroic())
         {
-            Talk(EMOTE_SUMMON);
-            Talk(SAY_SUMMON);
-            DoCast(SPELL_SUMMON_REINFORCEMENTS);
-
-            if (IsHeroic())
-            {
-                context.Repeat();
-            }
-        });
+            _summoned = true;
+            events.ScheduleEvent(EVENT_SUMMON_REINFORCEMENTS, 0s);
+        }
     }
+
+    void OnSpellCast(SpellInfo const* spell) override
+    {
+        if (spell->Id == SPELL_SUMMON_REINFORCEMENTS)
+            Talk(SAY_SUMMON);
+    }
+
+    // Do not despawn them
+    void JustSummoned(Creature* summon) override
+    {
+        if (me->IsEngaged())
+            DoZoneInCombat(summon);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_ARCANE_DEVASTATION:
+                    // Not always?
+                    Talk(SAY_ARCANE_DEVASTATION);
+                    // She can cast it if victim has only one stack of Arcane Resonance but can she cast it if victim has no stacks?
+                    DoCastVictim(SPELL_ARCANE_DEVASTATION);
+                    events.Repeat(RAND(10s, 15s, 20s, 25s, 30s, 35s));
+                    break;
+                case EVENT_SUMMON_REINFORCEMENTS:
+                    Talk(EMOTE_SUMMON);
+                    DoCastSelf(SPELL_SUMMON_REINFORCEMENTS);
+                    if (IsHeroic())
+                        events.Repeat(1min);
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+    }
+
+private:
+    bool _summoned;
 };
 
 // 34799 - Arcane Devastation
 class spell_commander_sarannis_arcane_devastation : public AuraScript
 {
-    PrepareAuraScript(spell_commander_sarannis_arcane_devastation);
-
     bool Validate(SpellInfo const* /*spell*/) override
     {
         return ValidateSpellInfo({ SPELL_ARCANE_RESONANCE });
@@ -132,33 +169,29 @@ class spell_commander_sarannis_arcane_devastation : public AuraScript
 };
 
 // 34803 - Summon Reinforcements
- class spell_commander_sarannis_summon_reinforcements : public SpellScript
- {
-     PrepareSpellScript(spell_commander_sarannis_summon_reinforcements);
+class spell_commander_sarannis_summon_reinforcements : public SpellScript
+{
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo(SummonReinforcementsSpells);
+    }
 
-     bool Validate(SpellInfo const* /*spellInfo*/) override
-     {
-         return ValidateSpellInfo({ SPELL_SUMMON_MENDER_1, SPELL_SUMMON_RESERVIST_1, SPELL_SUMMON_RESERVIST_2, SPELL_SUMMON_RESERVIST_3 });
-     }
+    void HandleDummy(SpellEffIndex /*effIndex*/)
+    {
+        Unit* caster = GetCaster();
+        for (uint32 spells : SummonReinforcementsSpells)
+            caster->CastSpell(caster, spells, true);
+    }
 
-     void HandleCast(SpellEffIndex /*effIndex*/)
-     {
-         std::vector<uint32> reinforcementSpells = { SPELL_SUMMON_MENDER_1, SPELL_SUMMON_RESERVIST_1, SPELL_SUMMON_RESERVIST_2, SPELL_SUMMON_RESERVIST_3 };
-         for (uint32 spellId : reinforcementSpells)
-         {
-             GetCaster()->CastSpell((Unit*)nullptr, spellId, true);
-         }
-     }
-
-     void Register() override
-     {
-         OnEffectHitTarget += SpellEffectFn(spell_commander_sarannis_summon_reinforcements::HandleCast, EFFECT_0, SPELL_EFFECT_DUMMY);
-     }
- };
+    void Register() override
+    {
+        OnEffectHit += SpellEffectFn(spell_commander_sarannis_summon_reinforcements::HandleDummy, EFFECT_0, SPELL_EFFECT_DUMMY);
+    }
+};
 
 void AddSC_boss_commander_sarannis()
 {
-    RegisterTheBotanicaCreatureAI(boss_commander_sarannis);
+    RegisterBotanicaCreatureAI(boss_commander_sarannis);
     RegisterSpellScript(spell_commander_sarannis_arcane_devastation);
     RegisterSpellScript(spell_commander_sarannis_summon_reinforcements);
 }

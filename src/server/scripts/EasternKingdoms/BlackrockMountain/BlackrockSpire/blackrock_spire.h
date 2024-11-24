@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -22,11 +22,10 @@
 
 uint32 const EncounterCount         = 23;
 
-#define DataHeader "BRS"
-
 #define BRSScriptName "instance_blackrock_spire"
+#define DataHeader    "BRSv1"
 
-enum DataTypes
+enum BRSDataTypes
 {
     DATA_HIGHLORD_OMOKK             = 0,
     DATA_SHADOW_HUNTER_VOSHGAJIN    = 1,
@@ -52,12 +51,11 @@ enum DataTypes
     DATA_HALL_RUNE_5                = 20,
     DATA_HALL_RUNE_6                = 21,
     DATA_HALL_RUNE_7                = 22,
-    DATA_SOLAKAR_FLAMEWREATH        = 23,
-    DATA_MOR_GRAYHOOF               = 24,
-    DATA_VAELASTRASZ                = 25
+    DATA_SCARSHIELD_INFILTRATOR     = 23,
+    DATA_BLACKHAND_INCARCERATOR     = 24
 };
 
-enum CreaturesIds
+enum BRSCreaturesIds
 {
     NPC_HIGHLORD_OMOKK              = 9196,
     NPC_SHADOW_HUNTER_VOSHGAJIN     = 9236,
@@ -78,37 +76,22 @@ enum CreaturesIds
     NPC_BLACKHAND_VETERAN           = 9819,
     NPC_BLACKHAND_INCARCERATOR      = 10316,
     NPC_LORD_VICTOR_NEFARIUS        = 10162,
-    NPC_VAELASTRASZ_THE_RED         = 10340,
-    NPC_VAELASTRASZ_UBRS            = 10538,
-
-    NPC_SCARSHIELD_INFILTRATOR      = 10299,
-
-    NPC_SOLAKAR                     = 10264,
-    NPC_ROOKERY_GUARDIAN            = 10258,
-    NPC_ROOKERY_HATCHER             = 10683,
-    NPC_ROOKERY_WHELP               = 10161,
-
-    NPC_UROK_MAGUS                  = 10602,
-    NPC_UROK_ENFORCER               = 10601,
-    NPC_FINKLE_EINHORN              = 10776,
-    NPC_CHROMATIC_ELITE_GUARD       = 10814
+    NPC_SCARSHIELD_INFILTRATOR      = 10299
 };
 
-enum AdditionalData
+enum BRSAdditionalData
 {
     SPELL_SUMMON_ROOKERY_WHELP      = 15745,
     EVENT_UROK_DOOMHOWL             = 4845,
     EVENT_PYROGUARD_EMBERSEER       = 4884,
     AREATRIGGER                     = 1,
     AREATRIGGER_DRAGONSPIRE_HALL    = 2046,
-    AREATRIGGER_BLACKROCK_STADIUM   = 2026,
-    SAY_FINKLE_GANG                 = 0,
-    ITEM_UNADORNED_SEAL             = 12219
+    AREATRIGGER_BLACKROCK_STADIUM   = 2026
 };
 
-enum GameObjectsIds
+enum BRSGameObjectsIds
 {
-    GO_ROOKERY_EGG                  = 175124,
+    GO_WHELP_SPAWNER                = 175622, // trap spawned by go id 175124
     // Doors
     GO_EMBERSEER_IN                 = 175244, // First door to Pyroguard Emberseer
     GO_DOORS                        = 175705, // Second door to Pyroguard Emberseer
@@ -137,15 +120,7 @@ enum GameObjectsIds
     // For Gyth event
     GO_DR_PORTCULLIS                = 175185,
     GO_PORTCULLIS_ACTIVE            = 164726,
-    // Urok Doomhowl
-    GO_UROK_PILE                    = 175621,
-    GO_UROK_CHALLENGE               = 175584,
-    GO_UROK_CIRCLE                  = 175571
-};
-
-enum npcspells
-{
-    SPELL_FINKLE_IS_EINHORN         = 16710
+    GO_PORTCULLIS_TOBOSSROOMS       = 175186
 };
 
 template <class AI, class T>

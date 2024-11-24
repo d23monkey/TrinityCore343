@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,8 +18,9 @@
 #ifndef BankPackets_h__
 #define BankPackets_h__
 
-#include "ObjectGuid.h"
 #include "Packet.h"
+#include "ItemPacketsCommon.h"
+#include "ObjectGuid.h"
 
 namespace WorldPackets
 {
@@ -32,6 +33,7 @@ namespace WorldPackets
 
             void Read() override;
 
+            WorldPackets::Item::InvUpdate Inv;
             uint8 Bag = 0;
             uint8 Slot = 0;
         };
@@ -43,6 +45,7 @@ namespace WorldPackets
 
             void Read() override;
 
+            WorldPackets::Item::InvUpdate Inv;
             uint8 Bag = 0;
             uint8 Slot = 0;
         };
@@ -54,25 +57,41 @@ namespace WorldPackets
 
             void Read() override;
 
-            ObjectGuid Banker;
+            ObjectGuid Guid;
         };
 
-        class BuyBankSlotResult final : public ServerPacket
+        class AutoBankReagent final : public ClientPacket
         {
         public:
-            BuyBankSlotResult() : ServerPacket(SMSG_BUY_BANK_SLOT_RESULT, 4) { }
+            AutoBankReagent(WorldPacket&& packet) : ClientPacket(CMSG_AUTOBANK_REAGENT, std::move(packet)) { }
 
-            WorldPacket const* Write() override;
+            void Read() override;
 
-            uint32 Result = 0;
+            WorldPackets::Item::InvUpdate Inv;
+            uint8 Slot = 0;
+            uint8 PackSlot = 0;
         };
 
-        class ShowBank final : public ServerPacket
+        class AutoStoreBankReagent final : public ClientPacket
         {
         public:
-            ShowBank() : ServerPacket(SMSG_SHOW_BANK, 8) { }
+            AutoStoreBankReagent(WorldPacket&& packet) : ClientPacket(CMSG_AUTOSTORE_BANK_REAGENT, std::move(packet)) { }
 
-            WorldPacket const* Write() override;
+            void Read() override;
+
+            WorldPackets::Item::InvUpdate Inv;
+            uint8 Slot = 0;
+            uint8 PackSlot = 0;
+        };
+
+        // CMSG_BUY_REAGENT_BANK
+        // CMSG_REAGENT_BANK_DEPOSIT
+        class ReagentBank final : public ClientPacket
+        {
+        public:
+            ReagentBank(WorldPacket&& packet) : ClientPacket(std::move(packet)) { }
+
+            void Read() override;
 
             ObjectGuid Banker;
         };

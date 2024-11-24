@@ -1,433 +1,210 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "InstanceMapScript.h"
-#include "InstanceScript.h"
-#include "ObjectMgr.h"
-#include "TemporarySummon.h"
+#include "ScriptMgr.h"
 #include "molten_core.h"
+#include "GameObject.h"
+#include "InstanceScript.h"
+#include "Map.h"
+#include "ScriptedCreature.h"
+#include "TemporarySummon.h"
 
-MinionData const minionData[] =
+Position const SummonPositions[10] =
 {
-    { NPC_FIRESWORN,                DATA_GARR },
-    { NPC_FLAMEWALKER,              DATA_GEHENNAS },
-    { NPC_FLAMEWALKER_PROTECTOR,    DATA_LUCIFRON },
-    { NPC_FLAMEWALKER_PRIEST,       DATA_SULFURON },
-    { NPC_FLAMEWALKER_HEALER,       DATA_MAJORDOMO_EXECUTUS },
-    { NPC_FLAMEWALKER_ELITE,        DATA_MAJORDOMO_EXECUTUS },
-    { 0, 0 } // END
+    {737.850f, -1145.35f, -120.288f, 4.71368f},
+    {744.162f, -1151.63f, -119.726f, 4.58204f},
+    {751.247f, -1152.82f, -119.744f, 4.49673f},
+    {759.206f, -1155.09f, -120.051f, 4.30104f},
+    {755.973f, -1152.33f, -120.029f, 4.25588f},
+    {731.712f, -1147.56f, -120.195f, 4.95955f},
+    {726.499f, -1149.80f, -120.156f, 5.24055f},
+    {722.408f, -1152.41f, -120.029f, 5.33087f},
+    {718.994f, -1156.36f, -119.805f, 5.75738f},
+    {838.510f, -829.840f, -232.000f, 2.00000f},
 };
 
-struct MCBossObject
-{
-    uint32 bossId;
-    uint32 runeId;
-    uint32 circleId;
-};
+Position const RagnarosTelePos   = {829.159f, -815.773f, -228.972f, 5.30500f};
+Position const RagnarosSummonPos = {838.510f, -829.840f, -232.000f, 2.00000f};
 
-constexpr uint8 MAX_MC_LINKED_BOSS_OBJ = 7;
-MCBossObject const linkedBossObjData[MAX_MC_LINKED_BOSS_OBJ]=
+DungeonEncounterData const encounters[] =
 {
-    { DATA_MAGMADAR,    GO_RUNE_KRESS,      GO_CIRCLE_MAGMADAR  },
-    { DATA_GEHENNAS,    GO_RUNE_MOHN,       GO_CIRCLE_GEHENNAS  },
-    { DATA_GARR,        GO_RUNE_BLAZ,       GO_CIRCLE_GARR      },
-    { DATA_SHAZZRAH,    GO_RUNE_MAZJ,       GO_CIRCLE_SHAZZRAH  },
-    { DATA_GEDDON,      GO_RUNE_ZETH,       GO_CIRCLE_GEDDON    },
-    { DATA_GOLEMAGG,    GO_RUNE_THERI,      GO_CIRCLE_GOLEMAGG  },
-    { DATA_SULFURON,    GO_RUNE_KORO,       GO_CIRCLE_SULFURON  },
+    { BOSS_LUCIFRON, {{ 663 }} },
+    { BOSS_MAGMADAR, {{ 664 }} },
+    { BOSS_GEHENNAS, {{ 665 }} },
+    { BOSS_GARR, {{ 666 }} },
+    { BOSS_SHAZZRAH, {{ 667 }} },
+    { BOSS_BARON_GEDDON, {{ 668 }} },
+    { BOSS_SULFURON_HARBINGER, {{ 669 }} },
+    { BOSS_GOLEMAGG_THE_INCINERATOR, {{ 670 }} },
+    { BOSS_MAJORDOMO_EXECUTUS, {{ 671 }} },
+    { BOSS_RAGNAROS, {{ 672 }} }
 };
-
-constexpr uint8 SAY_SPAWN = 1;
 
 class instance_molten_core : public InstanceMapScript
 {
-public:
-    instance_molten_core() : InstanceMapScript(MCScriptName, 409) {}
+    public:
+        instance_molten_core() : InstanceMapScript(MCScriptName, 409) { }
 
-    struct instance_molten_core_InstanceMapScript : public InstanceScript
-    {
-        instance_molten_core_InstanceMapScript(Map* map) : InstanceScript(map)
+        struct instance_molten_core_InstanceMapScript : public InstanceScript
         {
-            SetHeaders(DataHeader);
-            SetBossNumber(MAX_ENCOUNTER);
-            LoadMinionData(minionData);
-        }
-
-        void OnPlayerEnter(Player* /*player*/) override
-        {
-            if (CheckMajordomoExecutus())
+            instance_molten_core_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
             {
-                SummonMajordomoExecutus();
-            }
-        }
-
-        void OnCreatureCreate(Creature* creature) override
-        {
-            switch (creature->GetEntry())
-            {
-                case NPC_GOLEMAGG_THE_INCINERATOR:
-                {
-                    _golemaggGUID = creature->GetGUID();
-                    break;
-                }
-                case NPC_CORE_RAGER:
-                {
-                    _golemaggMinionsGUIDS.insert(creature->GetGUID());
-                    break;
-                }
-                case NPC_MAJORDOMO_EXECUTUS:
-                {
-                    _majordomoExecutusGUID = creature->GetGUID();
-                    break;
-                }
-                case NPC_GARR:
-                {
-                    _garrGUID = creature->GetGUID();
-                    break;
-                }
-                case NPC_RAGNAROS:
-                {
-                    _ragnarosGUID = creature->GetGUID();
-                    break;
-                }
-                case NPC_FIRESWORN:
-                case NPC_FLAMEWALKER:
-                case NPC_FLAMEWALKER_PROTECTOR:
-                case NPC_FLAMEWALKER_PRIEST:
-                case NPC_FLAMEWALKER_HEALER:
-                case NPC_FLAMEWALKER_ELITE:
-                {
-                    AddMinion(creature);
-                    break;
-                }
-            }
-        }
-
-        void OnCreatureRemove(Creature* creature) override
-        {
-            switch (creature->GetEntry())
-            {
-                case NPC_FIRESWORN:
-                {
-                    RemoveMinion(creature);
-                    break;
-                }
-                case NPC_FLAMEWALKER:
-                case NPC_FLAMEWALKER_PROTECTOR:
-                case NPC_FLAMEWALKER_PRIEST:
-                case NPC_FLAMEWALKER_HEALER:
-                case NPC_FLAMEWALKER_ELITE:
-                {
-                    RemoveMinion(creature);
-                    break;
-                }
-            }
-        }
-
-        void OnGameObjectCreate(GameObject* go) override
-        {
-            switch (go->GetEntry())
-            {
-                case GO_CACHE_OF_THE_FIRELORD:
-                {
-                    _cacheOfTheFirelordGUID = go->GetGUID();
-                    break;
-                }
-                case GO_CIRCLE_GEDDON:
-                case GO_CIRCLE_GARR:
-                case GO_CIRCLE_GEHENNAS:
-                case GO_CIRCLE_GOLEMAGG:
-                case GO_CIRCLE_MAGMADAR:
-                case GO_CIRCLE_SHAZZRAH:
-                case GO_CIRCLE_SULFURON:
-                {
-                    for (uint8 i = 0; i < MAX_MC_LINKED_BOSS_OBJ; ++i)
-                    {
-                        if (linkedBossObjData[i].circleId != go->GetEntry())
-                        {
-                            continue;
-                        }
-
-                        if (GetBossState(linkedBossObjData[i].bossId) == DONE)
-                        {
-                            go->DespawnOrUnsummon(0ms, Seconds(WEEK));
-                        }
-                        else
-                        {
-                            _circlesGUIDs[linkedBossObjData[i].bossId] = go->GetGUID();
-                        }
-                    }
-
-                    break;
-                }
-                case GO_RUNE_KRESS:
-                case GO_RUNE_MOHN:
-                case GO_RUNE_BLAZ:
-                case GO_RUNE_MAZJ:
-                case GO_RUNE_ZETH:
-                case GO_RUNE_THERI:
-                case GO_RUNE_KORO:
-                {
-                    for (uint8 i = 0; i < MAX_MC_LINKED_BOSS_OBJ; ++i)
-                    {
-                        if (linkedBossObjData[i].runeId != go->GetEntry())
-                        {
-                            continue;
-                        }
-
-                        if (GetBossState(linkedBossObjData[i].bossId) == DONE)
-                        {
-                            go->UseDoorOrButton(WEEK * IN_MILLISECONDS);
-                        }
-                        else
-                        {
-                            _runesGUIDs[linkedBossObjData[i].bossId] = go->GetGUID();
-                        }
-                    }
-                    break;
-                }
-                case GO_LAVA_STEAM:
-                {
-                    _lavaSteamGUID = go->GetGUID();
-                    break;
-                }
-                case GO_LAVA_SPLASH:
-                {
-                    _lavaSplashGUID = go->GetGUID();
-                    break;
-                }
-                case GO_LAVA_BURST:
-                {
-                    if (Creature* ragnaros = instance->GetCreature(_ragnarosGUID))
-                    {
-                        ragnaros->AI()->SetGUID(go->GetGUID(), GO_LAVA_BURST);
-                    }
-                    break;
-                }
-            }
-        }
-
-        ObjectGuid GetGuidData(uint32 type) const override
-        {
-            switch (type)
-            {
-                case DATA_GOLEMAGG:
-                    return _golemaggGUID;
-                case DATA_MAJORDOMO_EXECUTUS:
-                    return _majordomoExecutusGUID;
-                case DATA_GARR:
-                    return _garrGUID;
-                case DATA_LAVA_STEAM:
-                    return _lavaSteamGUID;
-                case DATA_LAVA_SPLASH:
-                    return _lavaSplashGUID;
-                case DATA_RAGNAROS:
-                    return _ragnarosGUID;
+                SetHeaders(DataHeader);
+                SetBossNumber(MAX_ENCOUNTER);
+                LoadDungeonEncounterData(encounters);
+                _executusSchedule = false;
+                _ragnarosAddDeaths = 0;
             }
 
-            return ObjectGuid::Empty;
-        }
-
-        bool SetBossState(uint32 bossId, EncounterState state) override
-        {
-            if (!InstanceScript::SetBossState(bossId, state))
+            void OnPlayerEnter(Player* /*player*/) override
             {
-                return false;
+                if (_executusSchedule)
+                    SummonMajordomoExecutus();
             }
 
-            if (bossId == DATA_MAJORDOMO_EXECUTUS && state == DONE)
+            void OnCreatureCreate(Creature* creature) override
             {
-                if (GameObject* cache = instance->GetGameObject(_cacheOfTheFirelordGUID))
+                switch (creature->GetEntry())
                 {
-                    cache->SetRespawnTime(7 * DAY);
-                    cache->SetLootRecipient(instance);
-                }
-            }
-            else if (bossId == DATA_GOLEMAGG)
-            {
-                switch (state)
-                {
-                    case NOT_STARTED:
-                    case FAIL:
-                    {
-                        if (!_golemaggMinionsGUIDS.empty())
-                        {
-                            for (ObjectGuid const& minionGuid : _golemaggMinionsGUIDS)
-                            {
-                                Creature* minion = instance->GetCreature(minionGuid);
-                                if (minion && minion->isDead())
-                                {
-                                    minion->Respawn();
-                                }
-                            }
-                        }
+                    case NPC_GOLEMAGG_THE_INCINERATOR:
+                        _golemaggTheIncineratorGUID = creature->GetGUID();
                         break;
-                    }
-                    case IN_PROGRESS:
-                    {
-                        if (!_golemaggMinionsGUIDS.empty())
-                        {
-                            for (ObjectGuid const& minionGuid : _golemaggMinionsGUIDS)
-                            {
-                                if (Creature* minion = instance->GetCreature(minionGuid))
-                                {
-                                    minion->AI()->DoZoneInCombat(nullptr, 150.0f);
-                                }
-                            }
-                        }
+                    case NPC_MAJORDOMO_EXECUTUS:
+                        _majordomoExecutusGUID = creature->GetGUID();
                         break;
-                    }
-                    case DONE:
-                    {
-                        if (!_golemaggMinionsGUIDS.empty())
-                        {
-                            for (ObjectGuid const& minionGuid : _golemaggMinionsGUIDS)
-                            {
-                                if (Creature* minion = instance->GetCreature(minionGuid))
-                                {
-                                    minion->CastSpell(minion, SPELL_CORE_RAGER_QUIET_SUICIDE, true);
-                                }
-                            }
-                            _golemaggMinionsGUIDS.clear();
-                        }
-                        break;
-                    }
                     default:
                         break;
                 }
             }
-            // Perform needed checks for Majordomu
-            if (bossId < DATA_MAJORDOMO_EXECUTUS && state == DONE)
+
+            void OnGameObjectCreate(GameObject* go) override
             {
-                if (GameObject* circle = instance->GetGameObject(_circlesGUIDs[bossId]))
+                switch (go->GetEntry())
                 {
-                    circle->DespawnOrUnsummon(0ms, Seconds(WEEK));
-                    _circlesGUIDs[bossId].Clear();
-                }
-
-                if (GameObject* rune = instance->GetGameObject(_runesGUIDs[bossId]))
-                {
-                    rune->UseDoorOrButton(WEEK * IN_MILLISECONDS);
-                    _runesGUIDs[bossId].Clear();
-                }
-
-                if (CheckMajordomoExecutus())
-                {
-                    SummonMajordomoExecutus();
+                    case GO_CACHE_OF_THE_FIRELORD:
+                        _cacheOfTheFirelordGUID = go->GetGUID();
+                        break;
+                    default:
+                        break;
                 }
             }
 
-            return true;
-        }
-
-        void DoAction(int32 action) override
-        {
-            if (action == ACTION_RESET_GOLEMAGG_ENCOUNTER)
+            void SetData(uint32 type, uint32 data) override
             {
-                if (Creature* golemagg = instance->GetCreature(_golemaggGUID))
+                if (type == DATA_RAGNAROS_ADDS)
                 {
-                    golemagg->AI()->EnterEvadeMode();
-                }
-
-                if (!_golemaggMinionsGUIDS.empty())
-                {
-                    for (ObjectGuid const& minionGuid : _golemaggMinionsGUIDS)
-                    {
-                        if (Creature* minion = instance->GetCreature(minionGuid))
-                        {
-                            minion->AI()->EnterEvadeMode();
-                        }
-                    }
+                    if (data == 1)
+                        ++_ragnarosAddDeaths;
+                    else if (data == 0)
+                        _ragnarosAddDeaths = 0;
                 }
             }
-        }
 
-        void SummonMajordomoExecutus()
-        {
-            if (instance->GetCreature(_majordomoExecutusGUID))
+            uint32 GetData(uint32 type) const override
             {
-                return;
-            }
-
-            if (GetBossState(DATA_MAJORDOMO_EXECUTUS) != DONE)
-            {
-                if (Creature* creature = instance->SummonCreature(NPC_MAJORDOMO_EXECUTUS, MajordomoSummonPos))
+                switch (type)
                 {
-                    creature->AI()->Talk(SAY_SPAWN);
-                }
-            }
-            else
-            {
-                instance->SummonCreature(NPC_MAJORDOMO_EXECUTUS, MajordomoRagnaros);
-            }
-        }
-
-        bool CheckMajordomoExecutus() const
-        {
-            if (GetBossState(DATA_RAGNAROS) == DONE)
-            {
-                return false;
-            }
-
-            for (uint8 i = 0; i < DATA_MAJORDOMO_EXECUTUS; ++i)
-            {
-                if (i == DATA_LUCIFRON)
-                {
-                    continue;
+                    case DATA_RAGNAROS_ADDS:
+                        return _ragnarosAddDeaths;
                 }
 
-                if (GetBossState(i) != DONE)
+                return 0;
+            }
+
+            ObjectGuid GetGuidData(uint32 type) const override
+            {
+                switch (type)
                 {
+                    case BOSS_GOLEMAGG_THE_INCINERATOR:
+                        return _golemaggTheIncineratorGUID;
+                    case BOSS_MAJORDOMO_EXECUTUS:
+                        return _majordomoExecutusGUID;
+                }
+
+                return ObjectGuid::Empty;
+            }
+
+            bool SetBossState(uint32 bossId, EncounterState state) override
+            {
+                if (!InstanceScript::SetBossState(bossId, state))
                     return false;
-                }
+
+                if (state == DONE && bossId < BOSS_MAJORDOMO_EXECUTUS)
+                    if (CheckMajordomoExecutus())
+                        SummonMajordomoExecutus();
+
+                if (bossId == BOSS_MAJORDOMO_EXECUTUS && state == DONE)
+                    DoRespawnGameObject(_cacheOfTheFirelordGUID, 7_days);
+
+                return true;
             }
 
-            // Prevent spawning if Ragnaros is present
-            if (instance->GetCreature(_ragnarosGUID))
+            void SummonMajordomoExecutus()
             {
-                return false;
+                _executusSchedule = false;
+                if (!_majordomoExecutusGUID.IsEmpty())
+                    return;
+
+                if (GetBossState(BOSS_MAJORDOMO_EXECUTUS) != DONE)
+                {
+                    instance->SummonCreature(NPC_MAJORDOMO_EXECUTUS, SummonPositions[0]);
+                    instance->SummonCreature(NPC_FLAMEWAKER_HEALER, SummonPositions[1]);
+                    instance->SummonCreature(NPC_FLAMEWAKER_HEALER, SummonPositions[2]);
+                    instance->SummonCreature(NPC_FLAMEWAKER_HEALER, SummonPositions[3]);
+                    instance->SummonCreature(NPC_FLAMEWAKER_HEALER, SummonPositions[4]);
+                    instance->SummonCreature(NPC_FLAMEWAKER_ELITE, SummonPositions[5]);
+                    instance->SummonCreature(NPC_FLAMEWAKER_ELITE, SummonPositions[6]);
+                    instance->SummonCreature(NPC_FLAMEWAKER_ELITE, SummonPositions[7]);
+                    instance->SummonCreature(NPC_FLAMEWAKER_ELITE, SummonPositions[8]);
+                }
+                else if (TempSummon* summon = instance->SummonCreature(NPC_MAJORDOMO_EXECUTUS, RagnarosTelePos))
+                    summon->AI()->DoAction(ACTION_START_RAGNAROS_ALT);
             }
 
-            return true;
+            bool CheckMajordomoExecutus() const
+            {
+                if (GetBossState(BOSS_RAGNAROS) == DONE)
+                    return false;
+
+                for (uint8 i = 0; i < BOSS_MAJORDOMO_EXECUTUS; ++i)
+                    if (GetBossState(i) != DONE)
+                        return false;
+
+                return true;
+            }
+
+            void AfterDataLoad() override
+            {
+                if (CheckMajordomoExecutus())
+                    _executusSchedule = true;
+            }
+
+        private:
+            ObjectGuid _golemaggTheIncineratorGUID;
+            ObjectGuid _majordomoExecutusGUID;
+            ObjectGuid _cacheOfTheFirelordGUID;
+            bool  _executusSchedule;
+            uint8 _ragnarosAddDeaths;
+        };
+
+        InstanceScript* GetInstanceScript(InstanceMap* map) const override
+        {
+            return new instance_molten_core_InstanceMapScript(map);
         }
-
-    private:
-        std::unordered_map<uint32/*bossid*/, ObjectGuid/*circleGUID*/> _circlesGUIDs;
-        std::unordered_map<uint32/*bossid*/, ObjectGuid/*runeGUID*/> _runesGUIDs;
-
-        // Golemagg encounter related
-        ObjectGuid _golemaggGUID;
-        GuidSet _golemaggMinionsGUIDS;
-
-        // Ragnaros encounter related
-        ObjectGuid _ragnarosGUID;
-        ObjectGuid _lavaSteamGUID;
-        ObjectGuid _lavaSplashGUID;
-
-        ObjectGuid _majordomoExecutusGUID;
-        ObjectGuid _cacheOfTheFirelordGUID;
-        ObjectGuid _garrGUID;
-        ObjectGuid _magmadarGUID;
-    };
-
-    InstanceScript* GetInstanceScript(InstanceMap* map) const override
-    {
-        return new instance_molten_core_InstanceMapScript(map);
-    }
 };
 
 void AddSC_instance_molten_core()

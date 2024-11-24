@@ -1,62 +1,68 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
+#ifndef __TRINITY_CHANNELMGR_H
+#define __TRINITY_CHANNELMGR_H
 
-#ifndef __ACORE_CHANNELMGR_H
-#define __ACORE_CHANNELMGR_H
-
-#include "Channel.h"
-#include "World.h"
-#include <map>
+#include "Define.h"
+#include "ObjectGuid.h"
 #include <string>
+#include <unordered_map>
 
-#define MAX_CHANNEL_PASS_STR 31
+class Channel;
+class Player;
+struct AreaTableEntry;
 
-class ChannelMgr
+class TC_GAME_API ChannelMgr
 {
-    typedef std::unordered_map<std::wstring, Channel*> ChannelMap;
-    typedef std::map<std::string, ChannelRights> ChannelRightsMap;
+    typedef std::unordered_map<std::wstring, Channel*> CustomChannelContainer; // custom channels only differ in name
+    typedef std::unordered_map<ObjectGuid, Channel*> BuiltinChannelContainer;
 
-public:
-    ChannelMgr(TeamId teamId) : _teamId(teamId)
-    { }
+    protected:
+        explicit ChannelMgr(uint32 team) : _team(team), _guidGenerator(HighGuid::ChatChannel) { }
+        ~ChannelMgr();
 
-    ~ChannelMgr();
+    public:
+        ChannelMgr(ChannelMgr const& right) = delete;
+        ChannelMgr(ChannelMgr&& right) = delete;
+        ChannelMgr& operator=(ChannelMgr const& right) = delete;
+        ChannelMgr& operator=(ChannelMgr&& right) = delete;
 
-    static ChannelMgr* forTeam(TeamId teamId);
+        static void LoadFromDB();
+        static ChannelMgr* ForTeam(uint32 team);
+        static Channel* GetChannelForPlayerByNamePart(std::string const& namePart, Player* playerSearcher);
+        static Channel* GetChannelForPlayerByGuid(ObjectGuid channelGuid, Player* playerSearcher);
+        static AreaTableEntry const* SpecialLinkedArea;
 
-    Channel* GetJoinChannel(std::string const& name, uint32 channel_id);
-    Channel* GetChannel(std::string const& name, Player* p, bool pkt = true);
-    static void LoadChannels();
+        void SaveToDB();
+        Channel* GetSystemChannel(uint32 channelId, AreaTableEntry const* zoneEntry = nullptr);
+        Channel* CreateCustomChannel(std::string const& name);
+        Channel* GetCustomChannel(std::string const& name) const;
+        Channel* GetChannel(uint32 channelId, std::string const& name, Player* player, bool notify = true, AreaTableEntry const* zoneEntry = nullptr) const;
+        void LeftChannel(uint32 channelId, AreaTableEntry const* zoneEntry);
 
-    static void LoadChannelRights();
-    static const ChannelRights& GetChannelRightsFor(const std::string& name);
-    static void SetChannelRightsFor(const std::string& name, const uint32& flags, const uint32& speakDelay, const std::string& joinmessage, const std::string& speakmessage, const std::set<uint32>& moderators);
-    static uint32 _channelIdMax;
+    private:
+        CustomChannelContainer _customChannels;
+        BuiltinChannelContainer _channels;
+        uint32 const _team;
+        ObjectGuidGenerator _guidGenerator;
 
-private:
-    ChannelMap channels;
-    TeamId _teamId;
-    static ChannelRightsMap channels_rights;
-    static ChannelRights channelRightsEmpty; // when not found in the map, reference to this is returned
-
-    void MakeNotOnPacket(WorldPacket* data, std::string const& name);
+        static void SendNotOnChannelNotify(Player const* player, std::string const& name);
+        ObjectGuid CreateCustomChannelGuid();
+        ObjectGuid CreateBuiltinChannelGuid(uint32 channelId, AreaTableEntry const* zoneEntry = nullptr) const;
 };
-
-class AllianceChannelMgr : public ChannelMgr { public: AllianceChannelMgr() : ChannelMgr(TEAM_ALLIANCE) {} };
-class HordeChannelMgr    : public ChannelMgr { public: HordeChannelMgr() : ChannelMgr(TEAM_HORDE) {} };
 
 #endif

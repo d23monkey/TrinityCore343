@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,7 +20,17 @@
 
 #include "OutdoorPvP.h"
 
-/// @todo: "sometimes" set to neutral
+enum DefenseMessages
+{
+    TEXT_ALL_GUARDS_DEFEATED                = 15017, // (NYI) '|cffffff00All the guards have been defeated!|r'
+    TEXT_HALAA_TAKEN_ALLIANCE               = 15018, // '|cffffff00The Alliance has taken control of Halaa!|r'
+    TEXT_HALAA_TAKEN_HORDE                  = 15019, // '|cffffff00The Horde has taken control of Halaa!|r'
+    TEXT_HALAA_DEFENSELESS                  = 15020, // (NYI) '|cffffff00Halaa is defenseless!|r'
+    TEXT_HALAA_GAINING_CONTROL_HORDE        = 15493, // (NYI) '|cffffff00The Horde is gaining control of Halaa!|r'
+    TEXT_HALAA_GAINING_CONTROL_ALLIANCE     = 15494  // (NYI) '|cffffff00The Alliance is gaining control of Halaa!|r'
+};
+
+/// @todo "sometimes" set to neutral
 
 enum OutdoorPvPNASpells
 {
@@ -29,35 +39,12 @@ enum OutdoorPvPNASpells
     NA_CAPTURE_BUFF = 33795  // strength of the halaani
 };
 
-// kill credit for pks
-const uint32 NA_CREDIT_MARKER = 24867;
-
-const uint32 NA_GUARDS_MAX = 15;
-
-const uint32 NA_BUFF_ZONE = 3518;
-
-const uint32 NA_HALAA_GRAVEYARD = 993;
-
-const uint32 NA_HALAA_GRAVEYARD_ZONE = 3518; // need to add zone id, not area id
-
-uint32 const NA_HALAA_ZONE_ID = 3628; // halaa zone id
-
-const uint32 NA_RESPAWN_TIME = 3600000; // one hour to capture after defeating all guards
-
-const uint32 NA_GUARD_CHECK_TIME = 500; // every half second
-
-const uint32 NA_HALAA_BOMB = 24538; // Item id Bomb throwed in Halaa
-
 enum OutdoorPvPNAWorldStates
 {
     NA_UI_HORDE_GUARDS_SHOW = 2503,
     NA_UI_ALLIANCE_GUARDS_SHOW = 2502,
     NA_UI_GUARDS_MAX = 2493,
     NA_UI_GUARDS_LEFT = 2491,
-
-    NA_UI_TOWER_SLIDER_DISPLAY = 2495,
-    NA_UI_TOWER_SLIDER_POS = 2494,
-    NA_UI_TOWER_SLIDER_N = 2497,
 
     NA_MAP_WYVERN_NORTH_NEU_H = 2762,
     NA_MAP_WYVERN_NORTH_NEU_A = 2662,
@@ -86,8 +73,6 @@ enum OutdoorPvPNAWorldStates
     NA_MAP_HALAA_ALLIANCE = 2673
 };
 
-const uint32 FLIGHT_NODES_NUM = 4;
-
 // used to access the elements of Horde/AllyControlGOs
 enum ControlGOTypes
 {
@@ -95,22 +80,7 @@ enum ControlGOTypes
     NA_ROOST_W = 1,
     NA_ROOST_N = 2,
     NA_ROOST_E = 3,
-
-    NA_BOMB_WAGON_S = 4,
-    NA_BOMB_WAGON_W = 5,
-    NA_BOMB_WAGON_N = 6,
-    NA_BOMB_WAGON_E = 7,
-
-    NA_DESTROYED_ROOST_S = 8,
-    NA_DESTROYED_ROOST_W = 9,
-    NA_DESTROYED_ROOST_N = 10,
-    NA_DESTROYED_ROOST_E = 11,
-
-    NA_CONTROL_GO_NUM = 12
 };
-
-const uint32 FlightPathStartNodes[FLIGHT_NODES_NUM] = {103, 105, 107, 109};
-const uint32 FlightPathEndNodes[FLIGHT_NODES_NUM] = {104, 106, 108, 110};
 
 enum FlightSpellsNA
 {
@@ -120,79 +90,10 @@ enum FlightSpellsNA
     NA_SPELL_FLY_EAST = 32081
 };
 
-//Npc ids from Halaa guards, Ally and Horde
-enum HalaaGuardsNA
+enum HalaaSpawnGroupIds
 {
-    NA_HALAANI_GUARD_A = 18256,
-    NA_HALAANI_GUARD_H = 18192
-};
-
-enum HalaaCreaturesSpawn
-{
-    NA_HALAA_CREATURES = 12, //Quantity of creatures_templates contains HALAA
-    NA_HALAA_CREATURE_TEAM_SPAWN = 20, //Number of creatures by team
-    NA_HALAA_MAX_CREATURE_SPAWN = 40 //Number of creatures by both teams
-};
-
-// spawned when the alliance is attacking, horde is in control
-const go_type HordeControlGOs[NA_CONTROL_GO_NUM] =
-{
-    {182267, 530, -1815.8f, 8036.51f, -26.2354f, -2.89725f, 0.0f, 0.0f, 0.992546f, -0.121869f}, //ALLY_ROOST_SOUTH
-    {182280, 530, -1507.95f, 8132.1f, -19.5585f, -1.3439f, 0.0f, 0.0f, 0.622515f, -0.782608f}, //ALLY_ROOST_WEST
-    {182281, 530, -1384.52f, 7779.33f, -11.1663f, -0.575959f, 0.0f, 0.0f, 0.284015f, -0.95882f}, //ALLY_ROOST_NORTH
-    {182282, 530, -1650.11f, 7732.56f, -15.4505f, -2.80998f, 0.0f, 0.0f, 0.986286f, -0.165048f}, //ALLY_ROOST_EAST
-
-    {182222, 530, -1825.4022f, 8039.2602f, -26.08f, -2.89725f, 0.0f, 0.0f, 0.992546f, -0.121869f}, //HORDE_BOMB_WAGON_SOUTH
-    {182272, 530, -1517.44f, 8140.24f, -20.17f, -2.8099f, 0.0f, 0.0f, 0.622515f, -0.782608f}, //HORDE_BOMB_WAGON_WEST
-    {182273, 530, -1389.53f, 7782.50f, -11.62f, -1.5184f, 0.0f, 0.0f, 0.284015f, -0.95882f}, //HORDE_BOMB_WAGON_NORTH
-    {182274, 530, -1662.28f, 7735.00f, -15.96f, 1.8845f, 0.0f, 0.0f, 0.986286f, -0.165048f}, //HORDE_BOMB_WAGON_EAST
-
-    {182266, 530, -1815.8f, 8036.51f, -26.2354f, -2.89725f, 0.0f, 0.0f, 0.992546f, -0.121869f}, //DESTROYED_ALLY_ROOST_SOUTH
-    {182275, 530, -1507.95f, 8132.1f, -19.5585f, -1.3439f, 0.0f, 0.0f, 0.622515f, -0.782608f}, //DESTROYED_ALLY_ROOST_WEST
-    {182276, 530, -1384.52f, 7779.33f, -11.1663f, -0.575959f, 0.0f, 0.0f, 0.284015f, -0.95882f}, //DESTROYED_ALLY_ROOST_NORTH
-    {182277, 530, -1650.11f, 7732.56f, -15.4505f, -2.80998f, 0.0f, 0.0f, 0.986286f, -0.165048f}  //DESTROYED_ALLY_ROOST_EAST
-};
-
-// spawned when the horde is attacking, alliance is in control
-const go_type AllianceControlGOs[NA_CONTROL_GO_NUM] =
-{
-    {182301, 530, -1815.8f, 8036.51f, -26.2354f, -2.89725f, 0.0f, 0.0f, 0.992546f, -0.121869f}, //HORDE_ROOST_SOUTH
-    {182302, 530, -1507.95f, 8132.1f, -19.5585f, -1.3439f, 0.0f, 0.0f, 0.622515f, -0.782608f}, //HORDE_ROOST_WEST
-    {182303, 530, -1384.52f, 7779.33f, -11.1663f, -0.575959f, 0.0f, 0.0f, 0.284015f, -0.95882f}, //HORDE_ROOST_NORTH
-    {182304, 530, -1650.11f, 7732.56f, -15.4505f, -2.80998f, 0.0f, 0.0f, 0.986286f, -0.165048f}, //HORDE_ROOST_EAST
-
-    {182305, 530, -1825.4022f, 8039.2602f, -26.08f, -2.89725f, 0.0f, 0.0f, 0.992546f, -0.121869f}, //ALLY_BOMB_WAGON_SOUTH
-    {182306, 530, -1517.44f, 8140.24f, -20.17f, -2.8099f, 0.0f, 0.0f, 0.622515f, -0.782608f}, //ALLY_BOMB_WAGON_WEST
-    {182307, 530, -1389.53f, 7782.50f, -11.62f, -1.5184f, 0.0f, 0.0f, 0.284015f, -0.95882f}, //ALLY_BOMB_WAGON_NORTH
-    {182308, 530, -1662.28f, 7735.00f, -15.96f, 1.8845f, 0.0f, 0.0f, 0.986286f, -0.165048f}, //ALLY_BOMB_WAGON_EAST
-
-    {182297, 530, -1815.8f, 8036.51f, -26.2354f, -2.89725f, 0.0f, 0.0f, 0.992546f, -0.121869f}, //DESTROYED_HORDE_ROOST_SOUTH
-    {182298, 530, -1507.95f, 8132.1f, -19.5585f, -1.3439f, 0.0f, 0.0f, 0.622515f, -0.782608f}, //DESTROYED_HORDE_ROOST_WEST
-    {182299, 530, -1384.52f, 7779.33f, -11.1663f, -0.575959f, 0.0f, 0.0f, 0.284015f, -0.95882f}, //DESTROYED_HORDE_ROOST_NORTH
-    {182300, 530, -1650.11f, 7732.56f, -15.4505f, -2.80998f, 0.0f, 0.0f, 0.986286f, -0.165048f}  //DESTROYED_HORDE_ROOST_EAST
-};
-
-struct HalaaIds
-{
-    uint32 idPatrol;
-};
-
-const HalaaIds PatrolCreatureEntry[NA_HALAA_CREATURES] =
-{
-    // Horde
-    {18192},
-    {18816},
-    {18821},
-    {21474},
-    {21484},
-    {21483},
-    // Ally
-    {18256},
-    {18817},
-    {18822},
-    {21485},
-    {21487},
-    {21488}
+    SPAWN_GROUP_HORDE_GUARDS = 123,
+    SPAWN_GROUP_ALLIANCE_GUARDS = 124,
 };
 
 enum WyvernStates
@@ -212,93 +113,86 @@ enum HalaaStates
     HALAA_H = 16
 };
 
-typedef std::map<uint32, ObjectGuid::LowType> HalaaNPCS;
+enum HalaaEvents
+{
+    HALAA_EVENT_CAPTURE_HORDE       = 11504,
+    HALAA_EVENT_CAPTURE_ALLIANCE    = 11503,
+    HALAA_EVENT_CONTESTED_HORDE     = 11559,
+    HALAA_EVENT_CONTESTED_ALLIANCE  = 11558,
+    HALAA_EVENT_PROGRESS_HORDE      = 11821,
+    HALAA_EVENT_PROGRESS_ALLIANCE   = 11822
+};
 
 class Unit;
 class Creature;
+class WorldObject;
+
 class OutdoorPvPNA;
+
+class NAControlZoneHandler : public OutdoorPvPControlZoneHandler
+{
+public:
+    explicit NAControlZoneHandler(OutdoorPvPNA* pvp);
+
+    void HandleCaptureEventHorde([[maybe_unused]] GameObject* controlZone) override;
+    void HandleCaptureEventAlliance([[maybe_unused]] GameObject* controlZone) override;
+    void HandleContestedEventHorde([[maybe_unused]] GameObject* controlZone) override;
+    void HandleContestedEventAlliance([[maybe_unused]] GameObject* controlZone) override;
+    void HandleProgressEventHorde([[maybe_unused]] GameObject* controlZone) override;
+    void HandleProgressEventAlliance([[maybe_unused]] GameObject* controlZone) override;
+    void HandleNeutralEventHorde([[maybe_unused]] GameObject* controlZone) override;
+    void HandleNeutralEventAlliance([[maybe_unused]] GameObject* controlZone) override;
+    void HandleNeutralEvent([[maybe_unused]] GameObject* controlZone) override;
+
+    OutdoorPvPNA* GetOutdoorPvPNA() const;
+};
 
 class OPvPCapturePointNA : public OPvPCapturePoint
 {
-public:
-    OPvPCapturePointNA(OutdoorPvP* pvp);
+    public:
+        OPvPCapturePointNA(OutdoorPvP* pvp);
 
-    bool Update(uint32 diff) override;
+        void Update(uint32 diff) override;
+        void ChangeState() override { } // todo remove?
+        bool HandleCustomSpell(Player* player, uint32 spellId, GameObject* go) override;
+        int32 HandleOpenGo(Player* player, GameObject* go) override;
 
-    void ChangeState() override;
+        uint32 GetAliveGuardsCount() const;
+        Team GetControllingFaction() const;
+        void FactionTakeOver(Team team); // called when a faction takes control
+        void UpdateWyvernRoostWorldState(uint32 roost);
 
-    void SendChangePhase() override;
-
-    void FillInitialWorldStates(WorldPacket& data) override;
-
-    // used when player is activated/inactivated in the area
-    bool HandlePlayerEnter(Player* player) override;
-    void HandlePlayerLeave(Player* player) override;
-
-    bool HandleCustomSpell(Player* player, uint32 spellId, GameObject* go) override;
-
-    int32 HandleOpenGo(Player* player, GameObject* go) override;
-
-    uint32 GetAliveGuardsCount();
-    TeamId GetControllingFaction() const;
-
-protected:
-    // called when a faction takes control
-    void FactionTakeOver(TeamId teamId);
-
-    void DespawnGOs();
-    void DespawnCreatures(HalaaNPCS teamNPC);
-
-    void SpawnNPCsForTeam(HalaaNPCS teamNPC);
-    void SpawnGOsForTeam(TeamId teamId);
-
-    void UpdateWyvernRoostWorldState(uint32 roost);
-    void UpdateHalaaWorldState();
-private:
-    bool m_capturable;
-
-    uint32 m_GuardsAlive;
-
-    TeamId m_ControllingFaction;
-
-    uint32 m_WyvernStateNorth;
-    uint32 m_WyvernStateSouth;
-    uint32 m_WyvernStateEast;
-    uint32 m_WyvernStateWest;
-
-    uint32 m_HalaaState;
-
-    uint32 m_RespawnTimer;
-
-    uint32 m_GuardCheckTimer;
-
-    bool m_canRecap;
+        void SetControlZoneGUID(ObjectGuid guid) { _controlZoneGUID = guid; }
+    private:
+        bool m_capturable;
+        uint32 m_GuardsAlive;
+        Team m_ControllingFaction;
+        uint32 m_WyvernStateNorth;
+        uint32 m_WyvernStateSouth;
+        uint32 m_WyvernStateEast;
+        uint32 m_WyvernStateWest;
+        uint32 m_RespawnTimer;
+        uint32 m_GuardCheckTimer;
+        ObjectGuid _controlZoneGUID;
 };
 
 class OutdoorPvPNA : public OutdoorPvP
 {
-public:
-    OutdoorPvPNA();
+    public:
+        OutdoorPvPNA(Map* map);
 
-    bool SetupOutdoorPvP() override;
+        void OnGameObjectCreate(GameObject* go) override;
 
-    void HandlePlayerEnterZone(Player* player, uint32 zone) override;
-    void HandlePlayerLeaveZone(Player* player, uint32 zone) override;
-
-    bool Update(uint32 diff) override;
-
-    void FillInitialWorldStates(WorldPacket& data) override;
-
-    void SendRemoveWorldStates(Player* player) override;
-
-    void HandleKill(Player* killer, Unit* killed) override;
-
-    void HandleKillImpl(Player* player, Unit* killed) override;
-
-    OPvPCapturePointNA* GetCapturePoint() { return m_obj; }
-
-private:
-    OPvPCapturePointNA* m_obj;
+        bool SetupOutdoorPvP() override;
+        void HandlePlayerEnterZone(Player* player, uint32 zone) override;
+        void HandlePlayerLeaveZone(Player* player, uint32 zone) override;
+        void Update(uint32 diff) override;
+        void SendRemoveWorldStates(Player* player) override;
+        void HandleKillImpl(Player* player, Unit* killed) override;
+        void SendMapWorldStates(int32 neutral, int32 progressHorde, int32 progressAlliance, int32 capturedHorde, int32 captureAlliance);
+        OPvPCapturePointNA* GetCapturePoint() const { return m_obj; }
+    private:
+        OPvPCapturePointNA* m_obj;
 };
 
 #endif

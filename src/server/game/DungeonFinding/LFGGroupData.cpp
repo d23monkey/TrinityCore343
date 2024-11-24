@@ -1,142 +1,140 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "LFGGroupData.h"
 #include "LFG.h"
-#include "World.h"
+#include "LFGGroupData.h"
 
 namespace lfg
 {
-    LfgGroupData::LfgGroupData(): m_State(LFG_STATE_NONE), m_OldState(LFG_STATE_NONE),
-        m_Dungeon(0), _isLFGGroup(false), m_KicksLeft(sWorld->getIntConfig(CONFIG_LFG_MAX_KICK_COUNT))
-    { }
 
-    LfgGroupData::~LfgGroupData()
-    { }
+LfgGroupData::LfgGroupData(): m_State(LFG_STATE_NONE), m_OldState(LFG_STATE_NONE),
+    m_Leader(), m_Dungeon(0), m_KicksLeft(LFG_GROUP_MAX_KICKS), m_VoteKickActive(false)
+{ }
 
-    bool LfgGroupData::IsLfgGroup()
+LfgGroupData::~LfgGroupData()
+{ }
+
+bool LfgGroupData::IsLfgGroup()
+{
+    return m_OldState != LFG_STATE_NONE;
+}
+
+void LfgGroupData::SetState(LfgState state)
+{
+    switch (state)
     {
-        return _isLFGGroup;
+        case LFG_STATE_NONE:
+            m_Dungeon = 0;
+            m_KicksLeft = LFG_GROUP_MAX_KICKS;
+            [[fallthrough]];
+        case LFG_STATE_FINISHED_DUNGEON:
+        case LFG_STATE_DUNGEON:
+            m_OldState = state;
+            [[fallthrough]];
+        default:
+            m_State = state;
     }
+}
 
-    void LfgGroupData::SetState(LfgState state)
-    {
-        switch (state)
-        {
-            case LFG_STATE_DUNGEON:
-                _isLFGGroup = true;
-                break;
-            case LFG_STATE_FINISHED_DUNGEON:
-                _isLFGGroup = false;
-                break;
-            default:
-                break;
-        }
+void LfgGroupData::RestoreState()
+{
+    m_State = m_OldState;
+}
 
-        switch (state)
-        {
-            case LFG_STATE_NONE:
-                m_Dungeon = 0;
-                m_KicksLeft = sWorld->getIntConfig(CONFIG_LFG_MAX_KICK_COUNT);
-                [[fallthrough]];
-            case LFG_STATE_FINISHED_DUNGEON:
-            case LFG_STATE_DUNGEON:
-                m_OldState = state;
-                [[fallthrough]];
-            default:
-                m_State = state;
-        }
-    }
+void LfgGroupData::AddPlayer(ObjectGuid guid)
+{
+    m_Players.insert(guid);
+}
 
-    void LfgGroupData::RestoreState()
-    {
-        m_State = m_OldState;
-    }
+uint8 LfgGroupData::RemovePlayer(ObjectGuid guid)
+{
+    GuidSet::iterator it = m_Players.find(guid);
+    if (it != m_Players.end())
+        m_Players.erase(it);
+    return uint8(m_Players.size());
+}
 
-    void LfgGroupData::AddPlayer(ObjectGuid guid)
-    {
-        m_Players.insert(guid);
-    }
+void LfgGroupData::RemoveAllPlayers()
+{
+    m_Players.clear();
+}
 
-    uint8 LfgGroupData::RemovePlayer(ObjectGuid guid)
-    {
-        LfgGuidSet::iterator it = m_Players.find(guid);
-        if (it != m_Players.end())
-            m_Players.erase(it);
-        return uint8(m_Players.size());
-    }
+void LfgGroupData::SetLeader(ObjectGuid guid)
+{
+    m_Leader = guid;
+}
 
-    void LfgGroupData::RemoveAllPlayers()
-    {
-        m_Players.clear();
-    }
+void LfgGroupData::SetDungeon(uint32 dungeon)
+{
+    m_Dungeon = dungeon;
+}
 
-    void LfgGroupData::SetLeader(ObjectGuid guid)
-    {
-        m_Leader = guid;
-    }
+void LfgGroupData::DecreaseKicksLeft()
+{
+    if (m_KicksLeft)
+      --m_KicksLeft;
+}
 
-    void LfgGroupData::SetDungeon(uint32 dungeon)
-    {
-        m_Dungeon = dungeon;
-    }
+LfgState LfgGroupData::GetState() const
+{
+    return m_State;
+}
 
-    void LfgGroupData::DecreaseKicksLeft()
-    {
-        if (m_KicksLeft)
-            --m_KicksLeft;
-    }
+LfgState LfgGroupData::GetOldState() const
+{
+    return m_OldState;
+}
 
-    LfgState LfgGroupData::GetState() const
-    {
-        return m_State;
-    }
+GuidSet const& LfgGroupData::GetPlayers() const
+{
+    return m_Players;
+}
 
-    LfgState LfgGroupData::GetOldState() const
-    {
-        return m_OldState;
-    }
+uint8 LfgGroupData::GetPlayerCount() const
+{
+    return m_Players.size();
+}
 
-    LfgGuidSet const& LfgGroupData::GetPlayers() const
-    {
-        return m_Players;
-    }
+ObjectGuid LfgGroupData::GetLeader() const
+{
+    return m_Leader;
+}
 
-    uint8 LfgGroupData::GetPlayerCount() const
-    {
-        return m_Players.size();
-    }
+uint32 LfgGroupData::GetDungeon(bool asId /* = true */) const
+{
+    if (asId)
+        return (m_Dungeon & 0x00FFFFFF);
+    else
+        return m_Dungeon;
+}
 
-    ObjectGuid LfgGroupData::GetLeader() const
-    {
-        return m_Leader;
-    }
+uint8 LfgGroupData::GetKicksLeft() const
+{
+    return m_KicksLeft;
+}
 
-    uint32 LfgGroupData::GetDungeon(bool asId /* = true */) const
-    {
-        if (asId)
-            return (m_Dungeon & 0x00FFFFFF);
-        else
-            return m_Dungeon;
-    }
+void LfgGroupData::SetVoteKick(bool active)
+{
+    m_VoteKickActive = active;
+}
 
-    uint8 LfgGroupData::GetKicksLeft() const
-    {
-        return m_KicksLeft;
-    }
+bool LfgGroupData::IsVoteKickActive() const
+{
+    return m_VoteKickActive;
+}
 
 } // namespace lfg

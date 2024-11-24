@@ -1,28 +1,31 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef ACORE_M2STRUCTURE_H
-#define ACORE_M2STRUCTURE_H
+#ifndef TRINITY_M2STRUCTURE_H
+#define TRINITY_M2STRUCTURE_H
 
-#include <G3D/AABox.h>
+#include "Common.h"
+
 #include <G3D/Vector3.h>
+#include <G3D/AABox.h>
 
-// Structures for M2 file. Source: https://wowdev.wiki
+// Structures using to access raw DBC data and required packing to portability
 #pragma pack(push, 1)
+// Structures for M2 file. Source: https://wowdev.wiki
 template<typename T>
 struct M2SplineKey
 {
@@ -73,7 +76,7 @@ struct M2Header
     uint32 ofsTransLookup;         // Everything needs its lookup. Here are the transparencies.
     uint32 nUVAnimLookup;
     uint32 ofsUVAnimLookup;
-    G3D::AABox BoundingBox;        // min/max( [1].z, 2.0277779f ) - 0.16f seems to be the maximum camera height
+    G3D::AABox BoundingBox;            // min/max( [1].z, 2.0277779f ) - 0.16f seems to be the maximum camera height
     float  BoundingSphereRadius;
     G3D::AABox CollisionBox;
     float  CollisionSphereRadius;
@@ -118,15 +121,15 @@ struct M2Track
 
 struct M2Camera
 {
-    uint32_t type;                  // 0: portrait, 1: characterinfo; -1: else (flyby etc.); referenced backwards in the lookup table.
-    float fov;                      // No radians, no degrees. Multiply by 35 to get degrees.
+    uint32_t type; // 0: portrait, 1: characterinfo; -1: else (flyby etc.); referenced backwards in the lookup table.
     float far_clip;
     float near_clip;
-    M2Track positions;              // How the camera's position moves. Should be 3*3 floats.
+    M2Track positions; // How the camera's position moves. Should be 3*3 floats.
     G3D::Vector3 position_base;
-    M2Track target_positions;       // How the target moves. Should be 3*3 floats.
+    M2Track target_positions; // How the target moves. Should be 3*3 floats.
     G3D::Vector3 target_position_base;
-    M2Track rolldata;               // The camera can have some roll-effect. Its 0 to 2*Pi.
+    M2Track rolldata; // The camera can have some roll-effect. Its 0 to 2*Pi.
+    M2Track fovdata;  // FoV for this segment
 };
 #pragma pack(pop)
 

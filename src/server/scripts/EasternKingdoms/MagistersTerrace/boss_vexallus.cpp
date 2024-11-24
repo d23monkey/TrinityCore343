@@ -1,23 +1,24 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
+#include "ScriptMgr.h"
 #include "magisters_terrace.h"
+#include "MotionMaster.h"
+#include "ScriptedCreature.h"
 
 enum Yells
 {
@@ -26,100 +27,194 @@ enum Yells
     SAY_OVERLOAD                    = 2,
     SAY_KILL                        = 3,
     EMOTE_DISCHARGE_ENERGY          = 4
+
+    //is this text for real?
+    //#define SAY_DEATH             "What...happen...ed."
 };
 
 enum Spells
 {
-    // Pure energy spell info
-    SPELL_ENERGY_FEEDBACK_CHANNEL   = 44328,
-    SPELL_ENERGY_FEEDBACK           = 44335,
-
-    // Vexallus spell info
     SPELL_CHAIN_LIGHTNING           = 44318,
-    SPELL_OVERLOAD                  = 44352,
+    SPELL_OVERLOAD                  = 44353,
     SPELL_ARCANE_SHOCK              = 44319,
 
-    SPELL_SUMMON_PURE_ENERGY_N      = 44322,
-    SPELL_SUMMON_PURE_ENERGY_H1     = 46154,
-    SPELL_SUMMON_PURE_ENERGY_H2     = 46159
+    SPELL_SUMMON_PURE_ENERGY        = 44322, // mod scale -10
+    H_SPELL_SUMMON_PURE_ENERGY1     = 46154, // mod scale -5
+    H_SPELL_SUMMON_PURE_ENERGY2     = 46159  // mod scale -5
+};
+
+enum Events
+{
+    EVENT_ENERGY_BOLT               = 1,
+    EVENT_ENERGY_FEEDBACK,
+    EVENT_CHAIN_LIGHTNING,
+    EVENT_OVERLOAD,
+    EVENT_ARCANE_SHOCK
 };
 
 enum Misc
 {
-    NPC_PURE_ENERGY                 = 24745
+    INTERVAL_MODIFIER               = 15,
+    INTERVAL_SWITCH                 = 6
 };
 
-struct boss_vexallus : public BossAI
+class boss_vexallus : public CreatureScript
 {
-    boss_vexallus(Creature* creature) : BossAI(creature, DATA_VEXALLUS) { }
+    public:
+        boss_vexallus() : CreatureScript("boss_vexallus") { }
 
-    void Reset() override
-    {
-        _Reset();
-
-        ScheduleHealthCheckEvent({ 85, 70, 55, 40 }, [&]
+        struct boss_vexallusAI : public BossAI
         {
-            Talk(SAY_ENERGY);
-            Talk(EMOTE_DISCHARGE_ENERGY);
-
-            if (IsHeroic())
+            boss_vexallusAI(Creature* creature) : BossAI(creature, DATA_VEXALLUS)
             {
-                DoCastSelf(SPELL_SUMMON_PURE_ENERGY_H1);
-                DoCastSelf(SPELL_SUMMON_PURE_ENERGY_H2);
+                _intervalHealthAmount = 1;
+                _enraged = false;
             }
-            else
-                DoCastSelf(SPELL_SUMMON_PURE_ENERGY_N);
-        });
 
-        ScheduleHealthCheckEvent(20, [&]
+            void Reset() override
+            {
+                _Reset();
+                _intervalHealthAmount = 1;
+                _enraged = false;
+            }
+
+            void KilledUnit(Unit* /*victim*/) override
+            {
+                Talk(SAY_KILL);
+            }
+
+            void JustEngagedWith(Unit* who) override
+            {
+                Talk(SAY_AGGRO);
+                BossAI::JustEngagedWith(who);
+
+                events.ScheduleEvent(EVENT_CHAIN_LIGHTNING, 8s);
+                events.ScheduleEvent(EVENT_ARCANE_SHOCK, 5s);
+            }
+
+            void JustSummoned(Creature* summoned) override
+            {
+                if (Unit* temp = SelectTarget(SelectTargetMethod::Random, 0))
+                    summoned->GetMotionMaster()->MoveFollow(temp, 0, 0);
+
+                summons.Summon(summoned);
+            }
+
+            void DamageTaken(Unit* /*who*/, uint32& /*damage*/, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
+            {
+                if (_enraged)
+                    return;
+
+                // 85%, 70%, 55%, 40%, 25%
+                if (!HealthAbovePct(100 - INTERVAL_MODIFIER * _intervalHealthAmount))
+                {
+                    // increase amount, unless we're at 10%, then we switch and return
+                    if (_intervalHealthAmount == INTERVAL_SWITCH)
+                    {
+                        _enraged = true;
+                        events.Reset();
+                        events.ScheduleEvent(EVENT_OVERLOAD, 1200ms);
+                        return;
+                    }
+                    else
+                        ++_intervalHealthAmount;
+
+                    Talk(SAY_ENERGY);
+                    Talk(EMOTE_DISCHARGE_ENERGY);
+
+                    if (IsHeroic())
+                    {
+                        DoCast(me, H_SPELL_SUMMON_PURE_ENERGY1);
+                        DoCast(me, H_SPELL_SUMMON_PURE_ENERGY2);
+                    }
+                    else
+                        DoCast(me, SPELL_SUMMON_PURE_ENERGY);
+                }
+            }
+
+            void UpdateAI(uint32 diff) override
+            {
+                if (!UpdateVictim())
+                    return;
+
+                events.Update(diff);
+
+                if (me->HasUnitState(UNIT_STATE_CASTING))
+                    return;
+
+                while (uint32 eventId = events.ExecuteEvent())
+                {
+                    switch (eventId)
+                    {
+                        case EVENT_CHAIN_LIGHTNING:
+                            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 0.0f, true))
+                                DoCast(target, SPELL_CHAIN_LIGHTNING);
+                            events.ScheduleEvent(EVENT_CHAIN_LIGHTNING, 8s);
+                            break;
+                        case EVENT_ARCANE_SHOCK:
+                            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 20.0f, true))
+                                DoCast(target, SPELL_ARCANE_SHOCK);
+                            events.ScheduleEvent(EVENT_ARCANE_SHOCK, 8s);
+                            break;
+                        case EVENT_OVERLOAD:
+                            DoCastVictim(SPELL_OVERLOAD);
+                            events.ScheduleEvent(EVENT_OVERLOAD, 2s);
+                            break;
+                        default:
+                            break;
+                    }
+
+                    if (me->HasUnitState(UNIT_STATE_CASTING))
+                        return;
+                }
+            }
+
+        private:
+            uint32 _intervalHealthAmount;
+            bool _enraged;
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
         {
-            scheduler.CancelAll();
-            DoCastSelf(SPELL_OVERLOAD, true);
-        });
-    }
+            return GetMagistersTerraceAI<boss_vexallusAI>(creature);
+        };
+};
 
-    void KilledUnit(Unit* victim) override
-    {
-        if (victim->IsPlayer())
-            Talk(SAY_KILL);
-    }
+enum NpcPureEnergy
+{
+    SPELL_ENERGY_BOLT               = 46156,
+    SPELL_ENERGY_FEEDBACK           = 44335,
+    SPELL_PURE_ENERGY_PASSIVE       = 44326
+};
 
-    void JustEngagedWith(Unit* /*who*/) override
-    {
-        _JustEngagedWith();
-        Talk(SAY_AGGRO);
+class npc_pure_energy : public CreatureScript
+{
+    public:
+        npc_pure_energy() : CreatureScript("npc_pure_energy") { }
 
-        ScheduleTimedEvent(8s, [&]
+        struct npc_pure_energyAI : public ScriptedAI
         {
-            DoCastRandomTarget(SPELL_CHAIN_LIGHTNING);
-        }, 8s, 8s);
+            npc_pure_energyAI(Creature* creature) : ScriptedAI(creature)
+            {
+                me->SetDisplayFromModel(1);
+            }
 
-        ScheduleTimedEvent(5s, [&]
+            void JustDied(Unit* killer) override
+            {
+                if (killer)
+                    killer->CastSpell(killer, SPELL_ENERGY_FEEDBACK, true);
+                me->RemoveAurasDueToSpell(SPELL_PURE_ENERGY_PASSIVE);
+            }
+        };
+
+        CreatureAI* GetAI(Creature* creature) const override
         {
-            DoCastRandomTarget(SPELL_ARCANE_SHOCK);
-        }, 8s, 8s);
-    }
-
-    void JustSummoned(Creature* summon) override
-    {
-        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
-        {
-            summon->GetMotionMaster()->MoveFollow(target, 0.0f, 0.0f);
-            summon->CastSpell(target, SPELL_ENERGY_FEEDBACK_CHANNEL, false);
-        }
-        summons.Summon(summon);
-    }
-
-    void SummonedCreatureDies(Creature* summon, Unit* killer) override
-    {
-        summons.Despawn(summon);
-        summon->DespawnOrUnsummon(1);
-        if (killer)
-            killer->CastSpell(killer, SPELL_ENERGY_FEEDBACK, true, 0, 0, summon->GetGUID());
-    }
+            return GetMagistersTerraceAI<npc_pure_energyAI>(creature);
+        };
 };
 
 void AddSC_boss_vexallus()
 {
-    RegisterMagistersTerraceCreatureAI(boss_vexallus);
+    new boss_vexallus();
+    new npc_pure_energy();
 }

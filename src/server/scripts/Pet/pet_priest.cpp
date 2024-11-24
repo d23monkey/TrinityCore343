@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,66 +20,80 @@
  * Scriptnames of files in this file should be prefixed with "npc_pet_pri_".
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
+#include "Creature.h"
+#include "PassiveAI.h"
 #include "PetAI.h"
-#include "ScriptedCreature.h"
-#include "TotemAI.h"
+#include "TemporarySummon.h"
 
 enum PriestSpells
 {
-    SPELL_PRIEST_GLYPH_OF_SHADOWFIEND       = 58228,
-    SPELL_PRIEST_GLYPH_OF_SHADOWFIEND_MANA  = 58227,
-    SPELL_PRIEST_SHADOWFIEND_DODGE          = 8273,
+    SPELL_PRIEST_ATONEMENT                  = 81749,
+    SPELL_PRIEST_ATONEMENT_PASSIVE          = 195178,
+    SPELL_PRIEST_DIVINE_IMAGE_SPELL_CHECK   = 405216,
+    SPELL_PRIEST_INVOKE_THE_NAARU           = 196687,
     SPELL_PRIEST_LIGHTWELL_CHARGES          = 59907
 };
 
-struct npc_pet_pri_lightwell : public TotemAI
+// 198236 - Divine Image
+struct npc_pet_pri_divine_image : public PassiveAI
 {
-    npc_pet_pri_lightwell(Creature* creature) : TotemAI(creature) { }
+    npc_pet_pri_divine_image(Creature* creature) : PassiveAI(creature) { }
 
-    void InitializeAI() override
+    void IsSummonedBy(WorldObject* summoner) override
     {
-        if (TempSummon* tempSummon = me->ToTempSummon())
-        {
-            if (Unit* owner = tempSummon->GetSummonerUnit())
-            {
-                uint32 hp = uint32(owner->GetMaxHealth() * 0.3f);
-                me->SetMaxHealth(hp);
-                me->SetHealth(hp);
-                me->SetLevel(owner->GetLevel());
-            }
-        }
+        me->CastSpell(me, SPELL_PRIEST_INVOKE_THE_NAARU);
 
-        me->CastSpell(me, SPELL_PRIEST_LIGHTWELL_CHARGES, false); // Spell for Lightwell Charges
-        TotemAI::InitializeAI();
+        if (me->ToTempSummon()->IsGuardian() && summoner->IsUnit())
+            static_cast<Guardian*>(me)->SetBonusDamage(summoner->ToUnit()->SpellBaseHealingBonusDone(SPELL_SCHOOL_MASK_HOLY));
+    }
+
+    void OnDespawn() override
+    {
+        if (Unit* owner = me->GetOwner())
+            owner->RemoveAura(SPELL_PRIEST_DIVINE_IMAGE_SPELL_CHECK);
     }
 };
 
-struct npc_pet_pri_shadowfiend : public PetAI
+// 189820 - Lightwell
+struct npc_pet_pri_lightwell : public PassiveAI
 {
-    npc_pet_pri_shadowfiend(Creature* creature) : PetAI(creature) { }
-
-    void Reset() override
+    npc_pet_pri_lightwell(Creature* creature) : PassiveAI(creature)
     {
-        PetAI::Reset();
-        if (!me->HasAura(SPELL_PRIEST_SHADOWFIEND_DODGE))
-            me->AddAura(SPELL_PRIEST_SHADOWFIEND_DODGE, me);
-
-        if (Unit* target = me->SelectNearestTarget(15.0f))
-            AttackStart(target);
+        DoCast(me, SPELL_PRIEST_LIGHTWELL_CHARGES, false);
     }
 
-    void JustDied(Unit* /*killer*/) override
+    void EnterEvadeMode(EvadeReason /*why*/) override
     {
-        if (me->IsSummon())
-            if (Unit* owner = me->ToTempSummon()->GetSummonerUnit())
-                if (owner->HasAura(SPELL_PRIEST_GLYPH_OF_SHADOWFIEND))
-                    owner->CastSpell(owner, SPELL_PRIEST_GLYPH_OF_SHADOWFIEND_MANA, true);
+        if (!me->IsAlive())
+            return;
+
+        me->CombatStop(true);
+        EngagementOver();
+        me->ResetPlayerDamageReq();
+    }
+};
+
+// 19668 - Shadowfiend
+// 62982 - Mindbender
+struct npc_pet_pri_shadowfiend_mindbender : public PetAI
+{
+    npc_pet_pri_shadowfiend_mindbender(Creature* creature) : PetAI(creature) { }
+
+    void IsSummonedBy(WorldObject* summonerWO) override
+    {
+        Unit* summoner = summonerWO->ToUnit();
+        if (!summoner)
+            return;
+
+        if (summoner->HasAura(SPELL_PRIEST_ATONEMENT))
+            DoCastSelf(SPELL_PRIEST_ATONEMENT_PASSIVE, TRIGGERED_FULL_MASK);
     }
 };
 
 void AddSC_priest_pet_scripts()
 {
+    RegisterCreatureAI(npc_pet_pri_divine_image);
     RegisterCreatureAI(npc_pet_pri_lightwell);
-    RegisterCreatureAI(npc_pet_pri_shadowfiend);
+    RegisterCreatureAI(npc_pet_pri_shadowfiend_mindbender);
 }

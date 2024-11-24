@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -23,15 +23,15 @@
 // EnumUtils: DESCRIBE THIS
 enum LogLevel : uint8
 {
-    LOG_LEVEL_DISABLED = 0,
-    LOG_LEVEL_FATAL = 1,
-    LOG_LEVEL_ERROR = 2,
-    LOG_LEVEL_WARN = 3,
-    LOG_LEVEL_INFO = 4,
-    LOG_LEVEL_DEBUG = 5,
-    LOG_LEVEL_TRACE = 6,
+    LOG_LEVEL_DISABLED                           = 0,
+    LOG_LEVEL_TRACE                              = 1,
+    LOG_LEVEL_DEBUG                              = 2,
+    LOG_LEVEL_INFO                               = 3,
+    LOG_LEVEL_WARN                               = 4,
+    LOG_LEVEL_ERROR                              = 5,
+    LOG_LEVEL_FATAL                              = 6,
 
-    NUM_ENABLED_LOG_LEVELS = LOG_LEVEL_TRACE, // SKIP
+    NUM_ENABLED_LOG_LEVELS = LOG_LEVEL_FATAL, // SKIP
     LOG_LEVEL_INVALID = 0xFF // SKIP
 };
 
@@ -46,15 +46,14 @@ enum AppenderType : uint8
     APPENDER_INVALID = 0xFF // SKIP
 };
 
-// EnumUtils: DESCRIBE THIS
 enum AppenderFlags : uint8
 {
     APPENDER_FLAGS_NONE                          = 0x00,
     APPENDER_FLAGS_PREFIX_TIMESTAMP              = 0x01,
     APPENDER_FLAGS_PREFIX_LOGLEVEL               = 0x02,
     APPENDER_FLAGS_PREFIX_LOGFILTERTYPE          = 0x04,
-    APPENDER_FLAGS_USE_TIMESTAMP                 = 0x08,
-    APPENDER_FLAGS_MAKE_FILE_BACKUP              = 0x10
+    APPENDER_FLAGS_USE_TIMESTAMP                 = 0x08, // only used by FileAppender
+    APPENDER_FLAGS_MAKE_FILE_BACKUP              = 0x10  // only used by FileAppender
 };
 
 #endif // LogCommon_h__

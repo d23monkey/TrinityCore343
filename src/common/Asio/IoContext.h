@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,43 +18,57 @@
 #ifndef IoContext_h__
 #define IoContext_h__
 
-#include <boost/version.hpp>
-
+#include <boost/asio/bind_executor.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
-#define IoContextBaseNamespace boost::asio
-#define IoContextBase io_context
 
-namespace Acore::Asio
+namespace Trinity
 {
-    class IoContext
+    namespace Asio
     {
-    public:
-        IoContext() : _impl() { }
-        explicit IoContext(int concurrency_hint) : _impl(concurrency_hint) { }
+        class IoContext
+        {
+        public:
+            using Executor = boost::asio::io_context::executor_type;
 
-        operator IoContextBaseNamespace::IoContextBase&() { return _impl; }
-        operator IoContextBaseNamespace::IoContextBase const&() const { return _impl; }
+            IoContext() : _impl() { }
+            explicit IoContext(int concurrency_hint) : _impl(concurrency_hint) { }
 
-        std::size_t run() { return _impl.run(); }
-        void stop() { _impl.stop(); }
+            operator boost::asio::io_context&() { return _impl; }
+            operator boost::asio::io_context const&() const { return _impl; }
 
-        boost::asio::io_context::executor_type get_executor() noexcept { return _impl.get_executor(); }
+            std::size_t run() { return _impl.run(); }
+            std::size_t poll() { return _impl.poll(); }
+            void stop() { _impl.stop(); }
 
-    private:
-        IoContextBaseNamespace::IoContextBase _impl;
-    };
+            bool stopped() const { return _impl.stopped(); }
+            void restart() { return _impl.restart(); }
 
-    template<typename T>
-    inline decltype(auto) post(IoContextBaseNamespace::IoContextBase& ioContext, T&& t)
-    {
-        return boost::asio::post(ioContext, std::forward<T>(t));
-    }
+            Executor get_executor() noexcept { return _impl.get_executor(); }
 
-    template<typename T>
-    inline decltype(auto) get_io_context(T&& ioObject)
-    {
-        return ioObject.get_executor().context();
+        private:
+            boost::asio::io_context _impl;
+        };
+
+        template<typename T>
+        inline decltype(auto) post(boost::asio::io_context& ioContext, T&& t)
+        {
+            return boost::asio::post(ioContext, std::forward<T>(t));
+        }
+
+        template<typename T>
+        inline decltype(auto) post(boost::asio::io_context::executor_type& executor, T&& t)
+        {
+            return boost::asio::post(executor, std::forward<T>(t));
+        }
+
+        using boost::asio::bind_executor;
+
+        template<typename T>
+        inline decltype(auto) get_io_context(T&& ioObject)
+        {
+            return ioObject.get_executor().context();
+        }
     }
 }
 

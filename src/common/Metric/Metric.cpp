@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,32 +18,18 @@
 #include "Metric.h"
 #include "Config.h"
 #include "DeadlineTimer.h"
+#include "IoContext.h"
 #include "Log.h"
-#include "Strand.h"
-#include "Tokenize.h"
+#include "Util.h"
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
-Metric::Metric()
-{
-}
-
-Metric::~Metric()
-{
-}
-
-Metric* Metric::instance()
-{
-    static Metric instance;
-    return &instance;
-}
-
-void Metric::Initialize(std::string const& realmName, Acore::Asio::IoContext& ioContext, std::function<void()> overallStatusLogger)
+void Metric::Initialize(std::string const& realmName, Trinity::Asio::IoContext& ioContext, std::function<void()> overallStatusLogger)
 {
     _dataStream = std::make_unique<boost::asio::ip::tcp::iostream>();
     _realmName = FormatInfluxDBTagValue(realmName);
-    _batchTimer = std::make_unique<Acore::Asio::DeadlineTimer>(ioContext);
-    _overallStatusTimer = std::make_unique<Acore::Asio::DeadlineTimer>(ioContext);
+    _batchTimer = std::make_unique<Trinity::Asio::DeadlineTimer>(ioContext);
+    _overallStatusTimer = std::make_unique<Trinity::Asio::DeadlineTimer>(ioContext);
     _overallStatusLogger = overallStatusLogger;
     LoadFromConfigs();
 }
@@ -52,17 +38,14 @@ bool Metric::Connect()
 {
     auto& stream = static_cast<boost::asio::ip::tcp::iostream&>(GetDataStream());
     stream.connect(_hostname, _port);
-
     auto error = stream.error();
     if (error)
     {
-        LOG_ERROR("metric", "Error connecting to '{}:{}', disabling Metric. Error message: {}",
+        TC_LOG_ERROR("metric", "Error connecting to '{}:{}', disabling Metric. Error message : {}",
             _hostname, _port, error.message());
-
         _enabled = false;
         return false;
     }
-
     stream.clear();
     return true;
 }
@@ -70,19 +53,18 @@ bool Metric::Connect()
 void Metric::LoadFromConfigs()
 {
     bool previousValue = _enabled;
-    _enabled = sConfigMgr->GetOption<bool>("Metric.Enable", false);
-    _updateInterval = sConfigMgr->GetOption<int32>("Metric.Interval", 1);
-
+    _enabled = sConfigMgr->GetBoolDefault("Metric.Enable", false);
+    _updateInterval = sConfigMgr->GetIntDefault("Metric.Interval", 1);
     if (_updateInterval < 1)
     {
-        LOG_ERROR("metric", "'Metric.Interval' config set to {}, overriding to 1.", _updateInterval);
+        TC_LOG_ERROR("metric", "'Metric.Interval' config set to {}, overriding to 1.", _updateInterval);
         _updateInterval = 1;
     }
 
-    _overallStatusTimerInterval = sConfigMgr->GetOption<int32>("Metric.OverallStatusInterval", 1);
+    _overallStatusTimerInterval = sConfigMgr->GetIntDefault("Metric.OverallStatusInterval", 1);
     if (_overallStatusTimerInterval < 1)
     {
-        LOG_ERROR("metric", "'Metric.OverallStatusInterval' config set to {}, overriding to 1.", _overallStatusTimerInterval);
+        TC_LOG_ERROR("metric", "'Metric.OverallStatusInterval' config set to {}, overriding to 1.", _overallStatusTimerInterval);
         _overallStatusTimerInterval = 1;
     }
 
@@ -90,7 +72,7 @@ void Metric::LoadFromConfigs()
     std::vector<std::string> thresholdSettings = sConfigMgr->GetKeysByString("Metric.Threshold.");
     for (std::string const& thresholdSetting : thresholdSettings)
     {
-        int64 thresholdValue = sConfigMgr->GetOption<int64>(thresholdSetting, 0);
+        int thresholdValue = sConfigMgr->GetIntDefault(thresholdSetting, 0);
         std::string thresholdName = thresholdSetting.substr(strlen("Metric.Threshold."));
         _thresholds[thresholdName] = thresholdValue;
     }
@@ -99,17 +81,17 @@ void Metric::LoadFromConfigs()
     // Cancel any scheduled operation if the config changed from Enabled to Disabled.
     if (_enabled && !previousValue)
     {
-        std::string connectionInfo = sConfigMgr->GetOption<std::string>("Metric.ConnectionInfo", "");
+        std::string connectionInfo = sConfigMgr->GetStringDefault("Metric.ConnectionInfo", "");
         if (connectionInfo.empty())
         {
-            LOG_ERROR("metric", "'Metric.ConnectionInfo' not specified in configuration file.");
+            TC_LOG_ERROR("metric", "'Metric.ConnectionInfo' not specified in configuration file.");
             return;
         }
 
-        std::vector<std::string_view> tokens = Acore::Tokenize(connectionInfo, ';', true);
+        std::vector<std::string_view> tokens = Trinity::Tokenize(connectionInfo, ';', true);
         if (tokens.size() != 3)
         {
-            LOG_ERROR("metric", "'Metric.ConnectionInfo' specified with wrong format in configuration file.");
+            TC_LOG_ERROR("metric", "'Metric.ConnectionInfo' specified with wrong format in configuration file.");
             return;
         }
 
@@ -135,25 +117,21 @@ void Metric::Update()
 bool Metric::ShouldLog(std::string const& category, int64 value) const
 {
     auto threshold = _thresholds.find(category);
-
     if (threshold == _thresholds.end())
-    {
         return false;
-    }
-
     return value >= threshold->second;
 }
 
-void Metric::LogEvent(std::string const& category, std::string const& title, std::string const& description)
+void Metric::LogEvent(std::string category, std::string title, std::string description)
 {
     using namespace std::chrono;
 
     MetricData* data = new MetricData;
-    data->Category = category;
+    data->Category = std::move(category);
     data->Timestamp = system_clock::now();
     data->Type = METRIC_DATA_EVENT;
-    data->Title = title;
-    data->Text = description;
+    data->Title = std::move(title);
+    data->ValueOrEventText = std::move(description);
 
     _queuedData.Enqueue(data);
 }
@@ -165,7 +143,6 @@ void Metric::SendBatch()
     std::stringstream batchedData;
     MetricData* data;
     bool firstLoop = true;
-
     while (_queuedData.Dequeue(data))
     {
         if (!firstLoop)
@@ -175,22 +152,30 @@ void Metric::SendBatch()
         if (!_realmName.empty())
             batchedData << ",realm=" << _realmName;
 
-        for (MetricTag const& tag : data->Tags)
-            batchedData << "," << tag.first << "=" << FormatInfluxDBTagValue(tag.second);
+        if (data->Tags)
+        {
+            auto begin = std::visit([](auto&& value) { return value.data(); }, *data->Tags);
+            auto end = std::visit([](auto&& value) { return value.data() + value.size(); }, *data->Tags);
+            for (auto itr = begin; itr != end; ++itr)
+                if (!itr->first.empty())
+                    batchedData << "," << itr->first << "=" << FormatInfluxDBTagValue(itr->second);
+        }
 
         batchedData << " ";
 
         switch (data->Type)
         {
             case METRIC_DATA_VALUE:
-                batchedData << "value=" << data->Value;
+                batchedData << "value=" << data->ValueOrEventText;
                 break;
             case METRIC_DATA_EVENT:
-                batchedData << "title=\"" << data->Title << "\",text=\"" << data->Text << "\"";
+                batchedData << "title=\"" << data->Title << "\",text=\"" << data->ValueOrEventText << "\"";
                 break;
         }
 
-        batchedData << " " << std::to_string(duration_cast<nanoseconds>(data->Timestamp.time_since_epoch()).count());
+        batchedData << " ";
+
+        batchedData << std::to_string(duration_cast<nanoseconds>(data->Timestamp.time_since_epoch()).count());
 
         firstLoop = false;
         delete data;
@@ -219,26 +204,19 @@ void Metric::SendBatch()
     GetDataStream() >> http_version;
     unsigned int status_code = 0;
     GetDataStream() >> status_code;
-
     if (status_code != 204)
     {
-        LOG_ERROR("metric", "Error sending data, returned HTTP code: {}", status_code);
+        TC_LOG_ERROR("metric", "Error sending data, returned HTTP code: {}", status_code);
     }
 
     // Read and ignore the status description
     std::string status_description;
     std::getline(GetDataStream(), status_description);
-
     // Read headers
     std::string header;
-
     while (std::getline(GetDataStream(), header) && header != "\r")
-    {
         if (header == "Connection: close\r")
-        {
             static_cast<boost::asio::ip::tcp::iostream&>(GetDataStream()).close();
-        }
-    }
 
     ScheduleSend();
 }
@@ -248,25 +226,22 @@ void Metric::ScheduleSend()
     if (_enabled)
     {
         _batchTimer->expires_from_now(boost::posix_time::seconds(_updateInterval));
-        _batchTimer->async_wait(std::bind(&Metric::SendBatch, this));
+        _batchTimer->async_wait([this](boost::system::error_code const&){ SendBatch(); });
     }
     else
     {
         static_cast<boost::asio::ip::tcp::iostream&>(GetDataStream()).close();
         MetricData* data;
-
         // Clear the queue
         while (_queuedData.Dequeue(data))
-        {
             delete data;
-        }
     }
 }
 
 void Metric::Unload()
 {
     // Send what's queued only if IoContext is stopped (so only on shutdown)
-    if (_enabled && Acore::Asio::get_io_context(*_batchTimer).stopped())
+    if (_enabled && Trinity::Asio::get_io_context(*_batchTimer).stopped())
     {
         _enabled = false;
         SendBatch();
@@ -322,7 +297,7 @@ std::string Metric::FormatInfluxDBValue(float value)
 
 std::string Metric::FormatInfluxDBTagValue(std::string const& value)
 {
-    /// @todo: should handle '=' and ',' characters too
+    // ToDo: should handle '=' and ',' characters too
     return boost::replace_all_copy(value, " ", "\\ ");
 }
 
@@ -331,11 +306,25 @@ std::string Metric::FormatInfluxDBValue(std::chrono::nanoseconds value)
     return FormatInfluxDBValue(std::chrono::duration_cast<Milliseconds>(value).count());
 }
 
-template AC_COMMON_API std::string Metric::FormatInfluxDBValue(int8);
-template AC_COMMON_API std::string Metric::FormatInfluxDBValue(uint8);
-template AC_COMMON_API std::string Metric::FormatInfluxDBValue(int16);
-template AC_COMMON_API std::string Metric::FormatInfluxDBValue(uint16);
-template AC_COMMON_API std::string Metric::FormatInfluxDBValue(int32);
-template AC_COMMON_API std::string Metric::FormatInfluxDBValue(uint32);
-template AC_COMMON_API std::string Metric::FormatInfluxDBValue(int64);
-template AC_COMMON_API std::string Metric::FormatInfluxDBValue(uint64);
+Metric::Metric()
+{
+}
+
+Metric::~Metric()
+{
+}
+
+Metric* Metric::instance()
+{
+    static Metric instance;
+    return &instance;
+}
+
+template TC_COMMON_API std::string Metric::FormatInfluxDBValue(int8);
+template TC_COMMON_API std::string Metric::FormatInfluxDBValue(uint8);
+template TC_COMMON_API std::string Metric::FormatInfluxDBValue(int16);
+template TC_COMMON_API std::string Metric::FormatInfluxDBValue(uint16);
+template TC_COMMON_API std::string Metric::FormatInfluxDBValue(int32);
+template TC_COMMON_API std::string Metric::FormatInfluxDBValue(uint32);
+template TC_COMMON_API std::string Metric::FormatInfluxDBValue(int64);
+template TC_COMMON_API std::string Metric::FormatInfluxDBValue(uint64);

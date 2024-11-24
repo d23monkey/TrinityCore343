@@ -1,111 +1,144 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __ACORE_VEHICLE_H
-#define __ACORE_VEHICLE_H
+#ifndef __TRINITY_VEHICLE_H
+#define __TRINITY_VEHICLE_H
 
-#include "Unit.h"
+#include "Object.h"
 #include "VehicleDefines.h"
+#include "Unit.h"
+#include <list>
 
 struct VehicleEntry;
 class Unit;
+class VehicleJoinEvent;
 
-class Vehicle : public TransportBase
+class TC_GAME_API Vehicle final : public TransportBase
 {
-public:
-    void Install();
-    void Uninstall();
-    void Reset(bool evading = false);
-    void InstallAllAccessories(bool evading);
-    void ApplyAllImmunities();
-    void InstallAccessory(uint32 entry, int8 seatId, bool minion, uint8 type, uint32 summonTime);   //! May be called from scripts
+    public:
+        Vehicle(Unit* unit, VehicleEntry const* vehInfo, uint32 creatureEntry);
+        ~Vehicle();
 
-    Unit* GetBase() const { return _me; }
-    VehicleEntry const* GetVehicleInfo() const { return _vehicleInfo; }
-    uint32 GetCreatureEntry() const { return _creatureEntry; }
+        Vehicle(Vehicle const& right) = delete;
+        Vehicle(Vehicle&& right) = delete;
+        Vehicle& operator=(Vehicle const& right) = delete;
+        Vehicle& operator=(Vehicle&& right) = delete;
 
-    bool HasEmptySeat(int8 seatId) const;
-    Unit* GetPassenger(int8 seatId) const;
-    int8 GetNextEmptySeat(int8 seatId, bool next) const;
-    VehicleSeatAddon const* GetSeatAddonForSeatOfPassenger(Unit const* passenger) const;
-    uint8 GetAvailableSeatCount() const;
+        void Install();
+        void Uninstall();
+        void Reset(bool evading = false);
+        void InstallAllAccessories(bool evading);
+        void ApplyAllImmunities();
+        void InstallAccessory(uint32 entry, int8 seatId, bool minion, uint8 type, uint32 summonTime);   // May be called from scripts
 
-    bool AddPassenger(Unit* passenger, int8 seatId = -1);
-    void EjectPassenger(Unit* passenger, Unit* controller);
-    void RemovePassenger(Unit* passenger);
-    void RelocatePassengers();
-    void RemoveAllPassengers();
-    void Dismiss();
-    bool IsVehicleInUse();
-    void TeleportVehicle(float x, float y, float z, float ang);
+        Unit* GetBase() const { return _me; }
+        VehicleEntry const* GetVehicleInfo() const { return _vehicleInfo; }
+        uint32 GetCreatureEntry() const { return _creatureEntry; }
 
-    SeatMap Seats;
+        bool HasEmptySeat(int8 seatId) const;
+        Unit* GetPassenger(int8 seatId) const;
+        SeatMap::const_iterator GetNextEmptySeat(int8 seatId, bool next) const;
+        VehicleSeatAddon const* GetSeatAddonForSeatOfPassenger(Unit const* passenger) const;
+        uint8 GetAvailableSeatCount() const;
 
-    VehicleSeatEntry const* GetSeatForPassenger(Unit const* passenger);
-    SeatMap::iterator GetSeatIteratorForPassenger(Unit* passenger);
+        bool AddVehiclePassenger(Unit* unit, int8 seatId = -1);
+        Vehicle* RemovePassenger(WorldObject* passenger) override;
+        void RelocatePassengers();
+        void RemoveAllPassengers();
+        bool IsVehicleInUse() const;
+        bool IsControllableVehicle() const;
 
-protected:
-    friend bool Unit::CreateVehicleKit(uint32 id, uint32 creatureEntry);
-    Vehicle(Unit* unit, VehicleEntry const* vehInfo, uint32 creatureEntry);
-    friend void Unit::RemoveVehicleKit();
-    ~Vehicle() override;
+        SeatMap::iterator GetSeatIteratorForPassenger(Unit* passenger);
+        SeatMap Seats;                                      ///< The collection of all seats on the vehicle. Including vacant ones.
 
-private:
-    enum Status
-    {
-        STATUS_NONE,
-        STATUS_INSTALLED,
-        STATUS_UNINSTALLING,
-    };
+        VehicleSeatEntry const* GetSeatForPassenger(Unit const* passenger) const;
 
-    void InitMovementInfoForBase();
+        void RemovePendingEventsForPassenger(Unit* passenger);
 
-    /// This method transforms supplied transport offsets into global coordinates
-    void CalculatePassengerPosition(float& x, float& y, float& z, float* o /*= nullptr*/) const override
-    {
-        TransportBase::CalculatePassengerPosition(x, y, z, o,
+        Milliseconds GetDespawnDelay();
+
+        std::string GetDebugInfo() const;
+
+    protected:
+        friend class VehicleJoinEvent;
+        uint32 UsableSeatNum;                               ///< Number of seats that match VehicleSeatEntry::UsableByPlayer, used for proper display flags
+
+    private:
+        enum Status
+        {
+            STATUS_NONE,
+            STATUS_INSTALLED,
+            STATUS_UNINSTALLING,
+        };
+
+        void InitMovementInfoForBase();
+
+        ObjectGuid GetTransportGUID() const override { return GetBase()->GetGUID(); }
+
+        float GetTransportOrientation() const override { return GetBase()->GetOrientation(); }
+
+        void AddPassenger(WorldObject* /*passenger*/) override { ABORT_MSG("Vehicle cannot directly gain passengers without auras"); }
+
+        /// This method transforms supplied transport offsets into global coordinates
+        void CalculatePassengerPosition(float& x, float& y, float& z, float* o /*= nullptr*/) const override
+        {
+            TransportBase::CalculatePassengerPosition(x, y, z, o,
                 GetBase()->GetPositionX(), GetBase()->GetPositionY(),
                 GetBase()->GetPositionZ(), GetBase()->GetOrientation());
-    }
+        }
 
-    /// This method transforms supplied global coordinates into local offsets
-    void CalculatePassengerOffset(float& x, float& y, float& z, float* o /*= nullptr*/) const override
-    {
-        TransportBase::CalculatePassengerOffset(x, y, z, o,
-                                                GetBase()->GetPositionX(), GetBase()->GetPositionY(),
-                                                GetBase()->GetPositionZ(), GetBase()->GetOrientation());
-    }
+        /// This method transforms supplied global coordinates into local offsets
+        void CalculatePassengerOffset(float& x, float& y, float& z, float* o /*= nullptr*/) const override
+        {
+            TransportBase::CalculatePassengerOffset(x, y, z, o,
+                GetBase()->GetPositionX(), GetBase()->GetPositionY(),
+                GetBase()->GetPositionZ(), GetBase()->GetOrientation());
+        }
 
-    Unit* _me;
-    VehicleEntry const* _vehicleInfo;
-    uint32 _usableSeatNum;         // Number of seats that match VehicleSeatEntry::UsableByPlayer, used for proper display flags
-    uint32 _creatureEntry;         // Can be different than me->GetBase()->GetEntry() in case of players
-    Status _status;
+        int32 GetMapIdForSpawning() const override { return GetBase()->GetMapId(); }
+
+        void RemovePendingEvent(VehicleJoinEvent* e);
+        void RemovePendingEventsForSeat(int8 seatId);
+
+        bool HasPendingEventForSeat(int8 seatId) const;
+
+    private:
+        Unit* _me;                                          ///< The underlying unit with the vehicle kit. Can be player or creature.
+        VehicleEntry const* _vehicleInfo;                   ///< DBC data for vehicle
+        GuidSet vehiclePlayers;
+
+        uint32 _creatureEntry;                              ///< Can be different than the entry of _me in case of players
+        Status _status;                                     ///< Internal variable for sanity checks
+
+        typedef std::list<VehicleJoinEvent*> PendingJoinEventContainer;
+        PendingJoinEventContainer _pendingJoinEvents;       ///< Collection of delayed join events for prospective passengers
 };
 
-class VehicleDespawnEvent : public BasicEvent
+class TC_GAME_API VehicleJoinEvent : public BasicEvent
 {
-public:
-    VehicleDespawnEvent(Unit& self, uint32 duration) : _self(self), _duration(duration) { }
-    bool Execute(uint64 e_time, uint32 p_time) override;
+    friend class Vehicle;
+    protected:
+        VehicleJoinEvent(Vehicle* v, Unit* u) : Target(v), Passenger(u), Seat(Target->Seats.end()) { }
+        bool Execute(uint64, uint32) override;
+        void Abort(uint64) override;
 
-protected:
-    Unit& _self;
-    uint32 _duration;
+        Vehicle* Target;
+        Unit* Passenger;
+        SeatMap::iterator Seat;
 };
 
 #endif

@@ -1,583 +1,496 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
-#include "SpellInfo.h"
 #include "halls_of_lightning.h"
+#include "ScriptMgr.h"
+#include "GameObject.h"
+#include "InstanceScript.h"
+#include "Map.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
+#include "ScriptedCreature.h"
+#include "SpellAuraEffects.h"
+#include "SpellInfo.h"
+#include "SpellScript.h"
 
-enum VolkahnSpells
+enum Texts
 {
     // Volkhan
-    SPELL_HEAT_N                        = 52387,
-    SPELL_HEAT_H                        = 59528,
-    SPELL_SHATTERING_STOMP_N            = 52237,
-    SPELL_SHATTERING_STOMP_H            = 59529,
-    SPELL_TEMPER                        = 52238,
-    SPELL_SUMMON_MOLTEN_GOLEM           = 52405,
-
-    //Molten Golem
-    SPELL_BLAST_WAVE                    = 23113,
-    SPELL_IMMOLATION_STRIKE_N           = 52433,
-    SPELL_IMMOLATION_STRIKE_H           = 59530,
-    SPELL_SHATTER_N                     = 52429,
-    SPELL_SHATTER_H                     = 59527,
+    SAY_AGGRO                       = 0,
+    SAY_ANNOUNCE_RUN_TO_ANVIL       = 1,
+    SAY_RUN_TO_ANVIL                = 2,
+    SAY_SHATTERING_STOMP            = 3,
+    SAY_ANNOUNCE_SHATTERING_STOMP   = 4,
+    SAY_DEATH                       = 5,
+    SAY_SLAY                        = 6
 };
 
-enum VolkhanOther
-{
-    // NPCs
-    NPC_VOLKHAN_ANVIL                   = 28823,
-    NPC_MOLTEN_GOLEM                    = 28695,
-    NPC_BRITTLE_GOLEM                   = 28681,
-
-    // Misc
-    ACTION_SHATTER                      = 1,
-    ACTION_DESTROYED                    = 2,
-
-    // Point
-    POINT_ANVIL                         = 1,
-};
-
-enum VolkhanEvents
+enum Spells
 {
     // Volkhan
-    EVENT_HEAT                          = 1,
-    EVENT_CHECK_HEALTH                  = 2,
-    EVENT_SHATTER                       = 3,
-    EVENT_POSITION                      = 4,
-    EVENT_MOVE_TO_ANVIL                 = 5,
+    SPELL_TEMPER_SUMMON_OBJECT              = 52661,
+    SPELL_TEMPER_DUMMY_INTRO                = 52654,
+    SPELL_TEMPER_DUMMY_COMBAT               = 52238,
+    SPELL_SHATTERING_STOMP                  = 52237,
+    SPELL_HEAT                              = 52387,
+    SPELL_DAZE_IMMUNITY_CANCEL              = 59556,
+
+    // Volkhan's Anvil
+    SPELL_SUMMON_MOLTEN_GOLEM               = 52405,
 
     // Molten Golem
-    EVENT_BLAST                         = 11,
-    EVENT_IMMOLATION                    = 12,
+    SPELL_COOL_DOWN                         = 52441,
+    SPELL_COOL_DOWN_SLOW                    = 52443,
+    SPELL_STUN_SELF                         = 47067, // Serverside spell @todo
+    SPELL_COSMETIC_STUN_IMMUNE_FREEZE_AMNIM = 59123,
+    SPELL_INSTAKILL_SELF                    = 29878, // Serverside spell
+    SPELL_IMMOLATION_STRIKE                 = 52433
 };
 
-enum Yells
+#define SPELL_SHATTER DUNGEON_MODE<uint32>(52429,59527)
+
+enum Events
 {
-    SAY_AGGRO                               = 0,
-    SAY_FORGE                               = 1,
-    SAY_STOMP                               = 2,
-    SAY_SLAY                                = 3,
-    SAY_DEATH                               = 4,
-    EMOTE_TO_ANVIL                          = 5,
-    EMOTE_SHATTER                           = 6,
+    // Volkhan
+    EVENT_TEMPER_INTRO = 1,
+    EVENT_RUN_TO_ANVIL,
+    EVENT_TEMPER,
+    EVENT_HEAT,
+    EVENT_SHATTERING_STOMP,
+
+    // Molten Golem
+    EVENT_IMMOLATION_STRIKE
 };
 
-class boss_volkhan : public CreatureScript
+enum Actions
 {
-public:
-    boss_volkhan() : CreatureScript("boss_volkhan") { }
+    // Volkhan
+    ACTION_SHATTER_GOLEMS   = 0,
+    ACTION_GOLEMS_TEMPERED  = 1,
 
-    CreatureAI* GetAI(Creature* creature) const override
+    // Molten Golem
+    ACTION_SHATTER          = 0
+};
+
+enum Phases
+{
+    // Volkhan
+    PHASE_INTRO = 1,
+    PHASE_COMBAT
+};
+
+enum MovePoints
+{
+    // Volkhan
+    POINT_ID_ANVIL = 0
+};
+
+enum Misc
+{
+    ENTRY_BRITTLE_GOLEM = 28681
+};
+
+enum Data
+{
+    DATA_SHATTER_RESISTANT = 0
+};
+
+static Position const AnvilPosition = { 1333.5901f, -103.67797f, 56.7177f };
+
+struct boss_volkhan : public BossAI
+{
+    boss_volkhan(Creature* creature) : BossAI(creature, DATA_VOLKHAN),
+        _shatteredGolems(false), _temperingGolems(false), _temperCycles(0), _shatteredGolemsCount(0) { }
+
+    void JustAppeared() override
     {
-        return GetHallsOfLightningAI<boss_volkhanAI>(creature);
+        events.SetPhase(PHASE_INTRO);
+        events.ScheduleEvent(EVENT_TEMPER_INTRO, 13s, 0, PHASE_INTRO);
     }
 
-    struct boss_volkhanAI : public ScriptedAI
+    void JustEngagedWith(Unit* who) override
     {
-        boss_volkhanAI(Creature* creature) : ScriptedAI(creature), summons(creature)
-        {
-            m_pInstance = creature->GetInstanceScript();
-        }
-
-        InstanceScript* m_pInstance;
-        EventMap events;
-        SummonList summons;
-        uint8 HealthCheck;
-        float x, y, z;
-        uint8 PointID;
-        uint8 ShatteredCount;
-
-        void Reset() override
-        {
-            x = y = z = PointID = ShatteredCount = 0;
-            HealthCheck = 100;
-            events.Reset();
-            summons.DespawnAll();
-            me->SetSpeed(MOVE_RUN, 1.2f, true);
-            me->SetReactState(REACT_AGGRESSIVE);
-
-            if (m_pInstance)
-            {
-                m_pInstance->SetData(TYPE_VOLKHAN, NOT_STARTED);
-                m_pInstance->SetData(DATA_VOLKHAN_ACHIEVEMENT, true);
-            }
-        }
-
-        void JustEngagedWith(Unit*) override
-        {
-            me->SetInCombatWithZone();
-            Talk(SAY_AGGRO);
-
-            if (m_pInstance)
-                m_pInstance->SetData(TYPE_VOLKHAN, IN_PROGRESS);
-
-            ScheduleEvents(false);
-        }
-
-        void JustDied(Unit*) override
-        {
-            Talk(SAY_DEATH);
-
-            summons.DespawnAll();
-
-            if (m_pInstance)
-                m_pInstance->SetData(TYPE_VOLKHAN, DONE);
-        }
-
-        void GetNextPos()
-        {
-            if (me->GetPositionY() < -180)
-            {
-                if (me->GetPositionX() > 1330)
-                    x = 1355;
-                else
-                    x = 1308;
-
-                y = -178;
-                z = 52.5f;
-            }
-            else if (me->GetPositionY() < -145)
-            {
-                if (me->GetPositionX() > 1330)
-                    x = 1355;
-                else
-                    x = 1308;
-
-                y = -137;
-                z = 52.5f;
-            }
-            else if (me->GetPositionY() < -130)
-            {
-                if (me->GetPositionX() > 1330)
-                    x = 1343;
-                else
-                    x = 1320;
-
-                y = -123;
-                z = 56.7f;
-            }
-            else
-            {
-                PointID = POINT_ANVIL;
-                x = 1327;
-                y = -96;
-                z = 56.7f;
-            }
-        }
-
-        void KilledUnit(Unit* victim) override
-        {
-            if (!victim->IsPlayer())
-                return;
-
-            Talk(SAY_SLAY);
-        }
-
-        void ScheduleEvents(bool anvil)
-        {
-            events.SetPhase(1);
-            events.RescheduleEvent(EVENT_HEAT, 8s, 0, 1);
-            events.RescheduleEvent(EVENT_SHATTER, 10s, 0, 1);
-            events.RescheduleEvent(EVENT_CHECK_HEALTH, anvil ? 1s : 6s, 0, 1);
-            events.RescheduleEvent(EVENT_POSITION, 4s, 0, 1);
-        }
-
-        void JustSummoned(Creature* summon) override
-        {
-            summons.Summon(summon);
-            if (summon->GetEntry() == NPC_MOLTEN_GOLEM)
-            {
-                summon->SetFaction(me->GetFaction());
-
-                if (Unit* target = SelectTarget(SelectTargetMethod::Random))
-                    summon->AI()->AttackStart(target);
-            }
-        }
-
-        void DoAction(int32 param) override
-        {
-            if (param == ACTION_DESTROYED)
-            {
-                ShatteredCount++;
-                if (ShatteredCount > 4)
-                    m_pInstance->SetData(DATA_VOLKHAN_ACHIEVEMENT, false);
-            }
-        }
-
-        void MovementInform(uint32 type, uint32 id) override
-        {
-            if (type != POINT_MOTION_TYPE)
-                return;
-
-            if (id == POINT_ANVIL)
-            {
-                me->SetSpeed(MOVE_RUN, 1.2f, true);
-                me->SetReactState(REACT_AGGRESSIVE);
-                me->CastSpell(me, SPELL_TEMPER, false);
-                PointID = 0;
-                ScheduleEvents(true);
-
-                // update orientation at server
-                me->SetOrientation(2.19f);
-
-                // and client
-                WorldPacket data;
-                me->BuildHeartBeatMsg(&data);
-                me->SendMessageToSet(&data, false);
-                me->SetControlled(true, UNIT_STATE_ROOT);
-            }
-            else
-                events.ScheduleEvent(EVENT_MOVE_TO_ANVIL, 0ms, 0, 2);
-        }
-
-        void SpellHitTarget(Unit* /*who*/, SpellInfo const* spellInfo) override
-        {
-            if (spellInfo->Id == SPELL_TEMPER)
-            {
-                me->CastSpell(me, SPELL_SUMMON_MOLTEN_GOLEM, true);
-                me->CastSpell(me, SPELL_SUMMON_MOLTEN_GOLEM, true);
-                me->GetMotionMaster()->MoveChase(me->GetVictim());
-                me->SetControlled(false, UNIT_STATE_ROOT);
-            }
-        }
-
-        void GoToAnvil()
-        {
-            events.SetPhase(2);
-            HealthCheck -= 20;
-            me->SetSpeed(MOVE_RUN, 4.0f, true);
-            me->SetReactState(REACT_PASSIVE);
-
-            Talk(SAY_FORGE);
-
-            if (me->GetMotionMaster()->GetCurrentMovementGeneratorType() == CHASE_MOTION_TYPE)
-                me->GetMotionMaster()->MovementExpired();
-
-            events.ScheduleEvent(EVENT_MOVE_TO_ANVIL, 0ms, 0, 2);
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            //Return since we have no target
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
-            {
-                case EVENT_HEAT:
-                    me->CastSpell(me, me->GetMap()->IsHeroic() ? SPELL_HEAT_H : SPELL_HEAT_N, true);
-                    events.Repeat(8s);
-                    break;
-                case EVENT_CHECK_HEALTH:
-                    if (HealthBelowPct(HealthCheck))
-                        GoToAnvil();
-
-                    events.Repeat(1s);
-                    return;
-                case EVENT_SHATTER:
-                    {
-                        events.Repeat(10s);
-                        summons.DoAction(ACTION_SHATTER);
-                        break;
-                    }
-                case EVENT_MOVE_TO_ANVIL:
-                    GetNextPos();
-                    me->GetMotionMaster()->MovePoint(PointID, x, y, z);
-                    return;
-                case EVENT_POSITION:
-                    if (me->GetDistance(1331.9f, -106, 56) > 95)
-                        EnterEvadeMode();
-                    else
-                        events.Repeat(4s);
-
-                    return;
-            }
-
-            DoMeleeAttackIfReady();
-        }
-    };
-};
-
-class npc_molten_golem : public CreatureScript
-{
-public:
-    npc_molten_golem() : CreatureScript("npc_molten_golem") { }
-
-    CreatureAI* GetAI(Creature* creature) const override
-    {
-        return GetHallsOfLightningAI<npc_molten_golemAI>(creature);
+        BossAI::JustEngagedWith(who);
+        Talk(SAY_AGGRO, who);
+        events.SetPhase(PHASE_COMBAT);
     }
 
-    struct npc_molten_golemAI : public ScriptedAI
+    void EnterEvadeMode(EvadeReason /*why*/) override
     {
-        npc_molten_golemAI(Creature* creature) : ScriptedAI(creature)
-        {
-            m_pInstance = creature->GetInstanceScript();
-        }
-
-        EventMap events;
-        InstanceScript* m_pInstance;
-
-        void Reset() override
-        {
-            events.Reset();
-            events.ScheduleEvent(EVENT_BLAST, 7s);
-            events.ScheduleEvent(EVENT_IMMOLATION, 3s);
-        }
-
-        void DamageTaken(Unit*, uint32& uiDamage, DamageEffectType, SpellSchoolMask) override
-        {
-            if (me->GetEntry() == NPC_BRITTLE_GOLEM)
-            {
-                uiDamage = 0;
-                return;
-            }
-
-            if (uiDamage >= me->GetHealth())
-            {
-                me->UpdateEntry(NPC_BRITTLE_GOLEM, 0, false);
-                me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_DISABLE_MOVE);
-                me->SetHealth(me->GetMaxHealth());
-                me->RemoveAllAuras();
-                me->AttackStop();
-                uiDamage = 0;
-
-                if (me->IsNonMeleeSpellCast(false))
-                    me->InterruptNonMeleeSpells(false);
-
-                me->SetControlled(true, UNIT_STATE_STUNNED);
-            }
-        }
-
-        void DoAction(int32 param) override
-        {
-            if (me->GetEntry() == NPC_BRITTLE_GOLEM && param == ACTION_SHATTER)
-            {
-                if (Creature* volkhan = ObjectAccessor::GetCreature(*me, m_pInstance->GetGuidData(TYPE_VOLKHAN)))
-                    volkhan->AI()->DoAction(ACTION_DESTROYED);
-
-                me->CastSpell(me, me->GetMap()->IsHeroic() ? SPELL_SHATTER_H : SPELL_SHATTER_N, true);
-                me->DespawnOrUnsummon(500);
-            }
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            //Return since we have no target or if we are frozen
-            if (!UpdateVictim() || me->GetEntry() == NPC_BRITTLE_GOLEM)
-                return;
-
-            events.Update(diff);
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
-            {
-                case EVENT_BLAST:
-                    me->CastSpell(me, SPELL_BLAST_WAVE, false);
-                    events.Repeat(14s);
-                    break;
-                case EVENT_IMMOLATION:
-                    me->CastSpell(me->GetVictim(), me->GetMap()->IsHeroic() ? SPELL_IMMOLATION_STRIKE_H : SPELL_IMMOLATION_STRIKE_N, false);
-                    events.Repeat(5s);
-                    break;
-            }
-
-            DoMeleeAttackIfReady();
-        }
-    };
-};
-
-enum monumentSpells
-{
-    SPELL_FREEZE_ANIM           = 16245,
-    SPELL_AWAKEN                = 52875,
-
-    SPELL_PIERCING_HOWL         = 23600,
-    SPELL_PENETRATING_STRIKE    = 52890,
-    SPELL_FRIGHTENING_SHOUT     = 19134,
-    SPELL_BLADE_TURNING_N       = 52891,
-    SPELL_BLADE_TURNING_H       = 59173,
-
-    SPELL_DEADLY_THROW_N        = 52885,
-    SPELL_DEADLY_THROW_H        = 59180,
-    SPELL_DEFLECTION_N          = 52879,
-    SPELL_DEFLECTION_H          = 59181,
-    SPELL_THROW_N               = 52904,
-    SPELL_THROW_H               = 59179,
-};
-
-enum monumentEvents
-{
-    EVENT_PIERCING_HOWL         = 1,
-    EVENT_PENETRATING_STRIKE    = 2,
-    EVENT_FRIGHTENING_SHOUT     = 3,
-    EVENT_BLADE_TURNING         = 4,
-
-    EVENT_DEADLY_THROW          = 11,
-    EVENT_DEFLECTION            = 12,
-    EVENT_THROW                 = 13,
-
-    EVENT_UNFREEZE              = 20,
-};
-
-class npc_hol_monument : public CreatureScript
-{
-public:
-    npc_hol_monument() : CreatureScript("npc_hol_monument") {}
-
-    CreatureAI* GetAI(Creature* creature) const override
-    {
-        return GetHallsOfLightningAI<npc_hol_monumentAI>(creature);
+        summons.DespawnAll();
+        _DespawnAtEvade();
     }
 
-    struct npc_hol_monumentAI : public ScriptedAI
+    void JustDied(Unit* killer) override
     {
-        npc_hol_monumentAI(Creature* creature) : ScriptedAI(creature)
+        BossAI::JustDied(killer);
+        Talk(SAY_DEATH, killer);
+    }
+
+    void KilledUnit(Unit* who) override
+    {
+        if (who->IsPlayer())
+            Talk(SAY_SLAY, who);
+    }
+
+    void MovementInform(uint32 motionType, uint32 id) override
+    {
+        if (motionType != POINT_MOTION_TYPE)
+            return;
+
+        switch (id)
         {
-            _attackGUID.Clear();
-            _isActive = urand(0, 1);
-            me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-            me->CastSpell(me, SPELL_FREEZE_ANIM, true);
+            case POINT_ID_ANVIL:
+                events.ScheduleEvent(EVENT_TEMPER, 1s, 0, PHASE_COMBAT);
+                break;
+            default:
+                break;
+        }
+    }
+
+    void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo*/) override
+    {
+        if (damage >= me->GetHealth() || _shatteredGolems)
+            return;
+
+        if (_temperCycles >= 3 && !_temperingGolems && !_shatteredGolems && me->HealthBelowPctDamaged(25, damage))
+        {
+            events.CancelEvent(EVENT_RUN_TO_ANVIL);
+            events.ScheduleEvent(EVENT_SHATTERING_STOMP, 1ms, 0, PHASE_COMBAT);
+            _shatteredGolems = true;
+            return;
         }
 
-        EventMap events;
-        bool _isActive;
-        ObjectGuid _attackGUID;
-
-        void Reset() override
+        if (_temperCycles < 3 && me->HealthBelowPctDamaged(100.f - (20.f + 20.f * _temperCycles), damage))
         {
-        }
-
-        void MoveInLineOfSight(Unit* who) override
-        {
-            if (_attackGUID)
-                ScriptedAI::MoveInLineOfSight(who);
-            else if (_isActive && who->IsPlayer())
+            if (!_temperingGolems)
             {
-                if ((who->GetPositionX() < me->GetPositionX() || who->GetPositionY() < -220.0f) && me->GetDistance2d(who) < 40)
+                events.ScheduleEvent(EVENT_RUN_TO_ANVIL, 1ms, 0, PHASE_COMBAT);
+                _temperingGolems = true;
+            }
+            ++_temperCycles;
+        }
+
+    }
+
+    void DoAction(int32 action) override
+    {
+        switch (action)
+        {
+            case ACTION_SHATTER_GOLEMS:
+                summons.RemoveNotExisting();
+                for (ObjectGuid const& guid : summons)
                 {
-                    _isActive = false;
-                    _attackGUID = who->GetGUID();
-                    events.Reset();
-                    events.RescheduleEvent(EVENT_UNFREEZE, 5s);
+                    if (Creature* golem = ObjectAccessor::GetCreature(*me, guid))
+                    {
+                        if (golem->HasAura(SPELL_COSMETIC_STUN_IMMUNE_FREEZE_AMNIM))
+                        {
+                            if (CreatureAI* ai = golem->AI())
+                            {
+                                ai->DoAction(ACTION_SHATTER);
+                                ++_shatteredGolemsCount;
+                            }
+                        }
+                    }
                 }
-            }
+                break;
+            case ACTION_GOLEMS_TEMPERED:
+                _temperingGolems = false;
+                break;
+            default:
+                break;
+        }
+    }
+
+    uint32 GetData(uint32 type) const override
+    {
+        switch (type)
+        {
+            case DATA_SHATTER_RESISTANT:
+                return _shatteredGolemsCount;
+            default:
+                return 0;
         }
 
-        void JustEngagedWith(Unit*) override
+        return 0;
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim() && !events.IsInPhase(PHASE_INTRO))
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
         {
-            events.Reset();
-            if (me->GetEntry() == 28961) // NPC_TITANIUM_SIEGEBREAKER
-            {
-                events.ScheduleEvent(EVENT_PIERCING_HOWL, 10s, 25s);
-                events.ScheduleEvent(EVENT_PENETRATING_STRIKE, 5s, 10s);
-                events.ScheduleEvent(EVENT_FRIGHTENING_SHOUT, 20s, 28s);
-                events.ScheduleEvent(EVENT_BLADE_TURNING, 12s);
-            }
-            else
-            {
-                events.ScheduleEvent(EVENT_THROW, 10s, 25s);
-                events.ScheduleEvent(EVENT_DEADLY_THROW, 15s, 30s);
-                events.ScheduleEvent(EVENT_DEFLECTION, 15s);
-            }
-        }
-
-        void AttackStart(Unit* who) override
-        {
-            if (!_attackGUID || !_isActive)
-                return;
-            ScriptedAI::AttackStart(who);
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (!_isActive && !_attackGUID)
-                return;
-
-            events.Update(diff);
-            uint32 eventId = events.ExecuteEvent();
-
-            if (eventId == EVENT_UNFREEZE)
-            {
-                me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                me->CastSpell(me, SPELL_AWAKEN, true);
-                me->RemoveAllAuras();
-                _isActive = true;
-                if (Unit* target = ObjectAccessor::GetUnit(*me, _attackGUID))
-                    AttackStart(target);
-                return;
-            }
-
-            //Return since we have no target or if we are disabled from fight
-            if (!UpdateVictim())
-                return;
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
             switch (eventId)
             {
-                case EVENT_PIERCING_HOWL:
-                    me->CastSpell(me->GetVictim(), SPELL_PIERCING_HOWL, false);
-                    events.Repeat(10s, 25s);
+                case EVENT_TEMPER_INTRO:
+                    DoCastAOE(SPELL_TEMPER_SUMMON_OBJECT);
+                    DoCastAOE(SPELL_TEMPER_DUMMY_INTRO);
+                    events.Repeat(13s);
                     break;
-                case EVENT_PENETRATING_STRIKE:
-                    me->CastSpell(me->GetVictim(), SPELL_PENETRATING_STRIKE, false);
-                    events.Repeat(5s, 10s);
+                case EVENT_RUN_TO_ANVIL:
+                    me->AttackStop();
+                    me->SetReactState(REACT_PASSIVE);
+                    me->GetMotionMaster()->MovePoint(POINT_ID_ANVIL, AnvilPosition);
+                    events.CancelEvent(EVENT_HEAT);
+                    Talk(SAY_ANNOUNCE_RUN_TO_ANVIL);
+                    Talk(SAY_RUN_TO_ANVIL);
                     break;
-                case EVENT_FRIGHTENING_SHOUT:
-                    me->CastSpell(me->GetVictim(), SPELL_FRIGHTENING_SHOUT, false);
-                    events.Repeat(20s, 28s);
+                case EVENT_TEMPER:
+                    if (Creature const* anvil = instance->GetCreature(DATA_VOLKHANS_ANVIL))
+                    {
+                        me->SetFacingToObject(anvil);
+                        DoCastAOE(SPELL_TEMPER_SUMMON_OBJECT);
+                        DoCastAOE(SPELL_TEMPER_DUMMY_COMBAT);
+                        me->SetReactState(REACT_AGGRESSIVE);
+                        events.ScheduleEvent(EVENT_HEAT, 8s + 500ms, 0, PHASE_COMBAT);
+                    }
                     break;
-                case EVENT_BLADE_TURNING:
-                    me->CastSpell(me->GetVictim(), me->GetMap()->IsHeroic() ? SPELL_BLADE_TURNING_H : SPELL_BLADE_TURNING_N, false);
-                    events.Repeat(12s);
+                case EVENT_HEAT:
+                    DoCastAOE(SPELL_HEAT);
+                    events.Repeat(10s);
                     break;
-                case EVENT_THROW:
-                    me->CastSpell(SelectTarget(SelectTargetMethod::Random, 0, 50.0f, true, 0), me->GetMap()->IsHeroic() ? SPELL_THROW_H : SPELL_THROW_N, true);
-                    events.Repeat(10s, 25s);
+                case EVENT_SHATTERING_STOMP:
+                    events.CancelEvent(EVENT_HEAT);
+                    Talk(SAY_SHATTERING_STOMP);
+                    Talk(SAY_ANNOUNCE_SHATTERING_STOMP);
+                    DoCastAOE(SPELL_SHATTERING_STOMP);
                     break;
-                case EVENT_DEADLY_THROW:
-                    me->CastSpell(SelectTarget(SelectTargetMethod::Random, 0, 50.0f, true, 0), me->GetMap()->IsHeroic() ? SPELL_DEADLY_THROW_H : SPELL_DEADLY_THROW_N, true);
-                    events.Repeat(15s, 30s);
-                    break;
-                case EVENT_DEFLECTION:
-                    me->CastSpell(me, me->GetMap()->IsHeroic() ? SPELL_DEFLECTION_H : SPELL_DEFLECTION_N, false);
-                    events.Repeat(15s);
+                default:
                     break;
             }
 
-            DoMeleeAttackIfReady();
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
         }
-    };
+    }
+
+private:
+    bool _shatteredGolems;
+    bool _temperingGolems;
+    uint8 _temperCycles;
+    uint8 _shatteredGolemsCount;
+};
+
+struct npc_volkhan_molten_golem : public ScriptedAI
+{
+    npc_volkhan_molten_golem(Creature* creature) : ScriptedAI(creature) { }
+
+    void JustAppeared() override
+    {
+        DoCastSelf(SPELL_COOL_DOWN);
+        //DoCastSelf(SPELL_STUN_SELF);
+    }
+
+    void JustEngagedWith(Unit* /*who*/) override
+    {
+        _events.ScheduleEvent(EVENT_IMMOLATION_STRIKE, 7s, 12s);
+    }
+
+    void EnterEvadeMode(EvadeReason why) override
+    {
+        ScriptedAI::EnterEvadeMode(why);
+        _events.Reset();
+    }
+
+    void JustDied(Unit* /*killer*/) override
+    {
+        me->DespawnOrUnsummon(5s);
+    }
+
+    void DoAction(int32 action) override
+    {
+        switch (action)
+        {
+            case ACTION_SHATTER:
+                me->RemoveAurasDueToSpell(SPELL_COSMETIC_STUN_IMMUNE_FREEZE_AMNIM);
+                DoCastAOE(SPELL_SHATTER);
+                DoCastSelf(SPELL_INSTAKILL_SELF);
+                break;
+            default:
+                break;
+        }
+    }
+
+    void DamageTaken(Unit* attacker, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo*/) override
+    {
+        // Molten Golems cannot die from foreign damage. They will kill themselves via suicide spell when getting shattered
+        if (damage >= me->GetHealth() && attacker != me)
+            damage = me->GetHealth() - 1;
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        _events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = _events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_IMMOLATION_STRIKE:
+                    DoCastVictim(SPELL_IMMOLATION_STRIKE);
+                    _events.Repeat(5s);
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+    }
+
+private:
+    EventMap _events;
+};
+
+// 52654, 52238 - Temper
+class spell_volkhan_temper_dummy : public SpellScript
+{
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo({ SPELL_TEMPER_DUMMY_COMBAT });
+    }
+
+    void HandleDummyEffect(SpellEffIndex /*effIndex*/)
+    {
+        Unit* target = GetHitUnit();
+        if (InstanceScript* instance = target->GetInstanceScript())
+            if (GameObject* temperVisual = instance->GetGameObject(DATA_VOLKHAN_TEMPER_VISUAL))
+                temperVisual->SendCustomAnim(0);
+
+        if (GetSpellInfo()->Id == SPELL_TEMPER_DUMMY_COMBAT)
+        {
+            for (uint8 i = 0; i < 2; ++i)
+                GetHitUnit()->CastSpell(nullptr, SPELL_SUMMON_MOLTEN_GOLEM);
+
+            if (Unit* caster = GetCaster())
+                if (Creature* creatureCaster = caster->ToCreature())
+                    if (CreatureAI* ai = creatureCaster->AI())
+                        ai->DoAction(ACTION_GOLEMS_TEMPERED);
+        }
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget += SpellEffectFn(spell_volkhan_temper_dummy::HandleDummyEffect, EFFECT_0, SPELL_EFFECT_DUMMY);
+    }
+};
+
+// 52441 - Cool Down
+class spell_volkhan_cool_down : public AuraScript
+{
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo({ SPELL_COOL_DOWN_SLOW, SPELL_COSMETIC_STUN_IMMUNE_FREEZE_AMNIM });
+    }
+
+    void HandlePeriodicDummyEffect(AuraEffect const* /*aurEff*/)
+    {
+        Unit* target = GetTarget();
+        if (target->GetHealthPct() > 1.f)
+        {
+            // This damage part feels weird but there is no trace of spells in sniffs that could do such thing otherwise.
+            Unit::DealDamage(target, target, CalculatePct(target->GetMaxHealth(), target->GetMap()->IsHeroic() ? 1 : 2));
+            int32 bp = 0 - static_cast<int32>(100.f - target->GetHealthPct());
+            target->CastSpell(nullptr, SPELL_COOL_DOWN_SLOW, CastSpellExtraArgs().AddSpellBP0(bp));
+        }
+        else
+        {
+            target->CastSpell(nullptr, SPELL_COSMETIC_STUN_IMMUNE_FREEZE_AMNIM);
+            target->RemoveAurasDueToSpell(SPELL_COOL_DOWN_SLOW);
+            GetAura()->Remove();
+        }
+    }
+
+    void Register() override
+    {
+        OnEffectPeriodic += AuraEffectPeriodicFn(spell_volkhan_cool_down::HandlePeriodicDummyEffect, EFFECT_0, SPELL_AURA_PERIODIC_DUMMY);
+    }
+};
+
+// 59123 Cosmetic - Stun + Immune Permanent (Freeze Anim)
+class spell_volkhan_cosmetic_stun_immune_permanent : public AuraScript
+{
+    void HandleApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
+    {
+        if (Creature* target = GetTarget()->ToCreature())
+            target->UpdateEntry(ENTRY_BRITTLE_GOLEM, nullptr, false);
+    }
+
+    void Register() override
+    {
+        AfterEffectApply += AuraEffectApplyFn(spell_volkhan_cosmetic_stun_immune_permanent::HandleApply, EFFECT_0, SPELL_AURA_MOD_STUN, AURA_EFFECT_HANDLE_REAL);
+    }
+};
+
+// 52237, 59529 - Shattering Stomp
+class spell_volkhan_shattering_stomp : public SpellScript
+{
+    void HandleShattering()
+    {
+        if (Creature* caster = GetCaster()->ToCreature())
+            if (CreatureAI* ai = caster->AI())
+                ai->DoAction(ACTION_SHATTER_GOLEMS);
+    }
+
+    void Register() override
+    {
+        AfterCast += SpellCastFn(spell_volkhan_shattering_stomp::HandleShattering);
+    }
+};
+
+class achievement_shatter_resistant : public AchievementCriteriaScript
+{
+    public:
+        achievement_shatter_resistant() : AchievementCriteriaScript("achievement_shatter_resistant") { }
+
+        bool OnCheck(Player* /*source*/, Unit* target) override
+        {
+            if (!target || !target->IsCreature())
+                return false;
+
+            if (Creature* creature = target->ToCreature())
+                if (CreatureAI* ai = creature->AI())
+                    return ai->GetData(DATA_SHATTER_RESISTANT) < 5;
+
+            return false;
+        }
 };
 
 void AddSC_boss_volkhan()
 {
-    new boss_volkhan();
-    new npc_molten_golem();
-    new npc_hol_monument();
+    RegisterHallsOfLightningCreatureAI(boss_volkhan);
+    RegisterHallsOfLightningCreatureAI(npc_volkhan_molten_golem);
+    RegisterSpellScript(spell_volkhan_temper_dummy);
+    RegisterSpellScript(spell_volkhan_cool_down);
+    RegisterSpellScript(spell_volkhan_cosmetic_stun_immune_permanent);
+    RegisterSpellScript(spell_volkhan_shattering_stomp);
+    new achievement_shatter_resistant();
 }

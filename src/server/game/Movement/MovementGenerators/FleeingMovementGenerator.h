@@ -1,39 +1,46 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef ACORE_FLEEINGMOVEMENTGENERATOR_H
-#define ACORE_FLEEINGMOVEMENTGENERATOR_H
+#ifndef TRINITY_FLEEINGMOVEMENTGENERATOR_H
+#define TRINITY_FLEEINGMOVEMENTGENERATOR_H
 
-#include "Creature.h"
 #include "MovementGenerator.h"
+#include "ObjectGuid.h"
 #include "Timer.h"
 
+class Creature;
+class PathGenerator;
+struct Position;
+
 template<class T>
-class FleeingMovementGenerator : public MovementGeneratorMedium< T, FleeingMovementGenerator<T> >
+class FleeingMovementGenerator : public MovementGeneratorMedium<T, FleeingMovementGenerator<T>>
 {
     public:
-        explicit FleeingMovementGenerator(ObjectGuid fleeTargetGUID) : _path(nullptr), _fleeTargetGUID(fleeTargetGUID), _timer(0), _interrupt(false), _shortPathsCount(0) { }
+        explicit FleeingMovementGenerator(ObjectGuid fleeTargetGUID);
 
-        MovementGeneratorType GetMovementGeneratorType() override { return FLEEING_MOTION_TYPE; }
+        MovementGeneratorType GetMovementGeneratorType() const override;
 
         void DoInitialize(T*);
-        void DoFinalize(T*);
         void DoReset(T*);
         bool DoUpdate(T*, uint32);
+        void DoDeactivate(T*);
+        void DoFinalize(T*, bool, bool);
+
+        void UnitSpeedChanged() override { FleeingMovementGenerator<T>::AddFlag(MOVEMENTGENERATOR_FLAG_SPEED_UPDATE_PENDING); }
 
     private:
         void SetTargetLocation(T*);
@@ -42,23 +49,19 @@ class FleeingMovementGenerator : public MovementGeneratorMedium< T, FleeingMovem
         std::unique_ptr<PathGenerator> _path;
         ObjectGuid _fleeTargetGUID;
         TimeTracker _timer;
-        bool _interrupt;
-        uint8 _shortPathsCount;
 };
 
 class TimedFleeingMovementGenerator : public FleeingMovementGenerator<Creature>
 {
-public:
-    TimedFleeingMovementGenerator(ObjectGuid fright, uint32 time) :
-        FleeingMovementGenerator<Creature>(fright),
-        i_totalFleeTime(time) {}
+    public:
+        explicit TimedFleeingMovementGenerator(ObjectGuid fleeTargetGUID, Milliseconds time) : FleeingMovementGenerator<Creature>(fleeTargetGUID), _totalFleeTime(time) { }
 
-    MovementGeneratorType GetMovementGeneratorType() { return TIMED_FLEEING_MOTION_TYPE; }
-    bool Update(Unit*, uint32);
-    void Finalize(Unit*);
+        bool Update(Unit*, uint32) override;
+        void Finalize(Unit*, bool, bool) override;
+        MovementGeneratorType GetMovementGeneratorType() const override;
 
-private:
-    TimeTracker i_totalFleeTime;
+    private:
+        TimeTracker _totalFleeTime;
 };
 
 #endif

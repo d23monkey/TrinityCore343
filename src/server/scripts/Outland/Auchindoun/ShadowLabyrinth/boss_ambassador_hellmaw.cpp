@@ -1,31 +1,39 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
+/* ScriptData
+SDName: Boss_Ambassador_Hellmaw
+SD%Complete: 80
+SDComment: Enrage spell missing/not known
+SDCategory: Auchindoun, Shadow Labyrinth
+EndScriptData */
+
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
+#include "ScriptedEscortAI.h"
 #include "shadow_labyrinth.h"
 
-enum Text
+enum Yells
 {
-    SAY_INTRO               = 0,
-    SAY_AGGRO               = 1,
-    SAY_HELP                = 2,
-    SAY_SLAY                = 3,
-    SAY_DEATH               = 4
+    SAY_INTRO       = 0,
+    SAY_AGGRO       = 1,
+    SAY_HELP        = 2,
+    SAY_SLAY        = 3,
+    SAY_DEATH       = 4
 };
 
 enum Spells
@@ -36,190 +44,132 @@ enum Spells
     SPELL_ENRAGE            = 34970
 };
 
-enum Misc
+enum Events
 {
-    PATH_ID_START           = 1873100,
-    PATH_ID_PATHING         = 1873101,
-
-    SOUND_INTRO             = 9349
+    EVENT_CORROSIVE_ACID = 1,
+    EVENT_FEAR,
+    EVENT_BERSERK
 };
 
-struct boss_ambassador_hellmaw : public BossAI
+static constexpr uint32 PATH_ESCORT_HELLMAW = 149850;
+
+struct boss_ambassador_hellmaw : public EscortAI
 {
-    boss_ambassador_hellmaw(Creature* creature) : BossAI(creature, TYPE_HELLMAW) { }
-
-    bool isBanished;
-
-    void InitializeAI() override
+    boss_ambassador_hellmaw(Creature* creature) : EscortAI(creature)
     {
-        Reset();
-
-        if (instance->GetPersistentData(TYPE_RITUALISTS) != DONE)
-        {
-            isBanished = true;
-            me->SetImmuneToAll(true);
-
-            me->m_Events.AddEventAtOffset([this]()
-            {
-                DoCastSelf(SPELL_BANISH, true);
-            }, 500ms);
-        }
-        else
-        {
-            me->GetMotionMaster()->MovePath(PATH_ID_START, false);
-        }
+        _instance = creature->GetInstanceScript();
+        _intro = false;
     }
 
     void Reset() override
     {
-        _Reset();
-        isBanished = false;
-        me->SetImmuneToAll(false);
-    }
-
-    void DoAction(int32 param) override
-    {
-        if (param != 1)
-        {
+        if (!me->IsAlive())
             return;
-        }
-        me->RemoveAurasDueToSpell(SPELL_BANISH);
-        Talk(SAY_INTRO);
-        DoPlaySoundToSet(me, SOUND_INTRO);
-        isBanished = false;
-        me->SetImmuneToAll(false);
-        me->GetMotionMaster()->MovePath(PATH_ID_START, false);
-    }
 
-    void JustEngagedWith(Unit*) override
-    {
-        if (isBanished)
-        {
-            return;
-        }
-        Talk(SAY_AGGRO);
-        scheduler.Schedule(23050ms, 30350ms, [this](TaskContext context)
-        {
-            DoCastVictim(SPELL_CORROSIVE_ACID);
-            context.Repeat(23050ms, 30350ms);
-        }).Schedule(23s, 33s, [this](TaskContext context)
-        {
-            DoCastAOE(SPELL_FEAR);
-            context.Repeat(23s, 33s);
-        });
+        _events.Reset();
+        _instance->SetBossState(DATA_AMBASSADOR_HELLMAW, NOT_STARTED);
 
+        _events.ScheduleEvent(EVENT_CORROSIVE_ACID, 5s, 10s);
+        _events.ScheduleEvent(EVENT_FEAR, 25s, 30s);
         if (IsHeroic())
-        {
-            scheduler.Schedule(3min, [this](TaskContext /*context*/)
-            {
-                DoCastSelf(SPELL_ENRAGE, true);
-            });
-        }
-        _JustEngagedWith();
+            _events.ScheduleEvent(EVENT_BERSERK, 3min);
+
+        DoAction(ACTION_AMBASSADOR_HELLMAW_BANISH);
     }
 
     void MoveInLineOfSight(Unit* who) override
     {
-        if (isBanished)
-        {
+        if (me->HasAura(SPELL_BANISH))
             return;
-        }
-        ScriptedAI::MoveInLineOfSight(who);
+
+        EscortAI::MoveInLineOfSight(who);
     }
 
-    void AttackStart(Unit* who) override
+    void DoAction(int32 actionId) override
     {
-        if (isBanished)
+        if (actionId == ACTION_AMBASSADOR_HELLMAW_INTRO)
+            DoIntro();
+        else if (actionId == ACTION_AMBASSADOR_HELLMAW_BANISH)
         {
+            if (_instance->GetData(DATA_FEL_OVERSEER) && me->HasAura(SPELL_BANISH))
+                DoCast(me, SPELL_BANISH, true); // this will not work, because he is immune to banish
+        }
+    }
+
+    void DoIntro()
+    {
+        if (_intro)
             return;
-        }
-        ScriptedAI::AttackStart(who);
+
+        _intro = true;
+
+        if (me->HasAura(SPELL_BANISH))
+            me->RemoveAurasDueToSpell(SPELL_BANISH);
+
+        Talk(SAY_INTRO);
+        LoadPath(PATH_ESCORT_HELLMAW);
+        Start(true, ObjectGuid::Empty, nullptr, false, true);
     }
 
-    void PathEndReached(uint32 pathId) override
+    void JustEngagedWith(Unit* /*who*/) override
     {
-        if (pathId == PATH_ID_START)
-        {
-            me->m_Events.AddEventAtOffset([this]()
-            {
-                me->GetMotionMaster()->MovePath(PATH_ID_PATHING, true);
-            }, 20s);
-        }
+        _instance->SetBossState(DATA_AMBASSADOR_HELLMAW, IN_PROGRESS);
+        Talk(SAY_AGGRO);
     }
 
-    void KilledUnit(Unit* victim) override
+    void KilledUnit(Unit* who) override
     {
-        if (victim->IsPlayer() && urand(0, 1))
-        {
+        if (who->GetTypeId() == TYPEID_PLAYER)
             Talk(SAY_SLAY);
-        }
     }
 
     void JustDied(Unit* /*killer*/) override
     {
+        _instance->SetBossState(DATA_AMBASSADOR_HELLMAW, DONE);
         Talk(SAY_DEATH);
-        _JustDied();
     }
 
-    bool CanAIAttack(Unit const* /*unit*/) const override
-    {
-        return !isBanished;
-    }
-
-    void DoMeleeAttackIfReady(bool ignoreCasting)
-    {
-        if (!ignoreCasting && me->HasUnitState(UNIT_STATE_CASTING))
-        {
-            return;
-        }
-
-        Unit* victim = me->GetVictim();
-        if (!victim || !victim->IsInWorld())
-        {
-            return;
-        }
-
-        if (!me->IsWithinMeleeRange(victim))
-        {
-            return;
-        }
-
-        // Make sure our attack is ready and we aren't currently casting before checking distance
-        if (me->isAttackReady())
-        {
-            // xinef: prevent base and off attack in same time, delay attack at 0.2 sec
-            if (me->haveOffhandWeapon())
-            {
-                if (me->getAttackTimer(OFF_ATTACK) < ATTACK_DISPLAY_DELAY)
-                {
-                    me->setAttackTimer(OFF_ATTACK, ATTACK_DISPLAY_DELAY);
-                }
-            }
-            me->AttackerStateUpdate(victim, BASE_ATTACK, false, ignoreCasting);
-            me->resetAttackTimer();
-        }
-
-        if (me->haveOffhandWeapon() && me->isAttackReady(OFF_ATTACK))
-        {
-            // xinef: delay main hand attack if both will hit at the same time (players code)
-            if (me->getAttackTimer(BASE_ATTACK) < ATTACK_DISPLAY_DELAY)
-            {
-                me->setAttackTimer(BASE_ATTACK, ATTACK_DISPLAY_DELAY);
-            }
-            me->AttackerStateUpdate(victim, OFF_ATTACK, false, ignoreCasting);
-            me->resetAttackTimer(OFF_ATTACK);
-        }
-    }
-
-    void UpdateAI(uint32 diff) override
+    void UpdateEscortAI(uint32 diff) override
     {
         if (!UpdateVictim())
             return;
 
-        scheduler.Update(diff);
+        if (me->HasAura(SPELL_BANISH))
+        {
+            EnterEvadeMode(EvadeReason::Other);
+            return;
+        }
 
-        DoMeleeAttackIfReady(me->FindCurrentSpellBySpellId(SPELL_CORROSIVE_ACID) != nullptr);
+        _events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = _events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_CORROSIVE_ACID:
+                    DoCastVictim(SPELL_CORROSIVE_ACID);
+                    _events.ScheduleEvent(EVENT_CORROSIVE_ACID, 15s, 25s);
+                    break;
+                case EVENT_FEAR:
+                    DoCastAOE(SPELL_FEAR);
+                    _events.ScheduleEvent(EVENT_FEAR, 20s, 35s);
+                    break;
+                case EVENT_BERSERK:
+                    DoCast(me, SPELL_ENRAGE, true);
+                    break;
+                default:
+                    break;
+            }
+        }
     }
+
+private:
+    InstanceScript* _instance;
+    EventMap _events;
+    bool _intro;
 };
 
 void AddSC_boss_ambassador_hellmaw()

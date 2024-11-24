@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -21,6 +21,7 @@
 #ifdef _WIN32 // Windows
 #include <Windows.h>
 #elif defined(__linux__)
+#include <cstring>
 #include <sched.h>
 #include <sys/resource.h>
 #define PROCESS_HIGH_PRIORITY -15 // [-20, 19], default is 0
@@ -43,30 +44,20 @@ void SetProcessPriority(std::string const& logChannel, uint32 affinity, bool hig
             ULONG_PTR currentAffinity = affinity & appAff;
 
             if (!currentAffinity)
-            {
-                LOG_ERROR(logChannel, "Processors marked in UseProcessors bitmask (hex) {:x} are not accessible. Accessible processors bitmask (hex): {:x}", affinity, appAff);
-            }
+                TC_LOG_ERROR(logChannel, "Processors marked in UseProcessors bitmask (hex) {:x} are not accessible. Accessible processors bitmask (hex): {:x}", affinity, appAff);
             else if (SetProcessAffinityMask(hProcess, currentAffinity))
-            {
-                LOG_INFO(logChannel, "Using processors (bitmask, hex): {:x}", currentAffinity);
-            }
+                TC_LOG_INFO(logChannel, "Using processors (bitmask, hex): {:x}", currentAffinity);
             else
-            {
-                LOG_ERROR(logChannel, "Can't set used processors (hex): {:x}", currentAffinity);
-            }
+                TC_LOG_ERROR(logChannel, "Can't set used processors (hex): {:x}", currentAffinity);
         }
     }
 
     if (highPriority)
     {
         if (SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS))
-        {
-            LOG_INFO(logChannel, "Process priority class set to HIGH");
-        }
+            TC_LOG_INFO(logChannel, "Process priority class set to HIGH");
         else
-        {
-            LOG_ERROR(logChannel, "Can't set process priority class.");
-        }
+            TC_LOG_ERROR(logChannel, "Can't set process priority class.");
     }
 
 #elif defined(__linux__) // Linux
@@ -78,32 +69,24 @@ void SetProcessPriority(std::string const& logChannel, uint32 affinity, bool hig
 
         for (unsigned int i = 0; i < sizeof(affinity) * 8; ++i)
             if (affinity & (1 << i))
-            {
                 CPU_SET(i, &mask);
-            }
 
         if (sched_setaffinity(0, sizeof(mask), &mask))
-        {
-            LOG_ERROR(logChannel, "Can't set used processors (hex): {:x}, error: {}", affinity, strerror(errno));
-        }
+            TC_LOG_ERROR(logChannel, "Can't set used processors (hex): {:x}, error: {}", affinity, strerror(errno));
         else
         {
             CPU_ZERO(&mask);
             sched_getaffinity(0, sizeof(mask), &mask);
-            LOG_INFO(logChannel, "Using processors (bitmask, hex): {:x}", *(__cpu_mask*)(&mask));
+            TC_LOG_INFO(logChannel, "Using processors (bitmask, hex): {:x}", *(__cpu_mask*)(&mask));
         }
     }
 
     if (highPriority)
     {
         if (setpriority(PRIO_PROCESS, 0, PROCESS_HIGH_PRIORITY))
-        {
-            LOG_ERROR(logChannel, "Can't set process priority class, error: {}", strerror(errno));
-        }
+            TC_LOG_ERROR(logChannel, "Can't set process priority class, error: {}", strerror(errno));
         else
-        {
-            LOG_INFO(logChannel, "Process priority class set to {}", getpriority(PRIO_PROCESS, 0));
-        }
+            TC_LOG_INFO(logChannel, "Process priority class set to {}", getpriority(PRIO_PROCESS, 0));
     }
 
 #else

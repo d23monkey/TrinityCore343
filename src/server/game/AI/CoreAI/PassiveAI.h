@@ -1,88 +1,93 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef ACORE_PASSIVEAI_H
-#define ACORE_PASSIVEAI_H
+#ifndef TRINITY_PASSIVEAI_H
+#define TRINITY_PASSIVEAI_H
 
 #include "CreatureAI.h"
-//#include "CreatureAIImpl.h"
 
-class PassiveAI : public CreatureAI
+class TC_GAME_API PassiveAI : public CreatureAI
 {
-public:
-    explicit PassiveAI(Creature* c);
+    public:
+        explicit PassiveAI(Creature* creature, uint32 scriptId = {});
 
-    void MoveInLineOfSight(Unit*) override {}
-    void AttackStart(Unit*) override {}
-    void UpdateAI(uint32) override;
+        void MoveInLineOfSight(Unit*) override { }
+        void AttackStart(Unit*) override { }
+        void UpdateAI(uint32) override;
 
-    static int32 Permissible(Creature const* /*creature*/) { return PERMIT_BASE_NO; }
+        static int32 Permissible(Creature const* /*creature*/) { return PERMIT_BASE_NO; }
 };
 
-class PossessedAI : public CreatureAI
+class TC_GAME_API PossessedAI : public CreatureAI
 {
-public:
-    explicit PossessedAI(Creature* c);
+    public:
+        explicit PossessedAI(Creature* creature, uint32 scriptId = {});
 
-    void MoveInLineOfSight(Unit*) override {}
-    void AttackStart(Unit* target) override;
-    void UpdateAI(uint32) override;
-    void EnterEvadeMode(EvadeReason /*why*/) override {}
+        void MoveInLineOfSight(Unit*) override { }
+        void AttackStart(Unit* target) override;
+        void JustEnteredCombat(Unit* who) override { EngagementStart(who); }
+        void JustExitedCombat() override { EngagementOver(); }
+        void JustStartedThreateningMe(Unit*) override { }
+        void UpdateAI(uint32) override;
+        void EnterEvadeMode(EvadeReason /*why*/) override { }
 
-    void JustDied(Unit*) override;
-    void KilledUnit(Unit* victim) override;
+        void JustDied(Unit*) override;
 
-    static int32 Permissible(Creature const* /*creature*/) { return PERMIT_BASE_NO; }
+        static int32 Permissible(Creature const* /*creature*/) { return PERMIT_BASE_NO; }
 };
 
-class NullCreatureAI : public CreatureAI
+class TC_GAME_API NullCreatureAI : public CreatureAI
 {
-public:
-    explicit NullCreatureAI(Creature* c);
+    public:
+        explicit NullCreatureAI(Creature* creature, uint32 scriptId = {});
 
-    void MoveInLineOfSight(Unit*) override {}
-    void AttackStart(Unit*) override {}
-    void UpdateAI(uint32) override {}
-    void EnterEvadeMode(EvadeReason /*why*/) override {}
-    void OnCharmed(bool /*apply*/) override {}
+        void MoveInLineOfSight(Unit*) override { }
+        void AttackStart(Unit*) override { }
+        void JustStartedThreateningMe(Unit*) override { }
+        void JustEnteredCombat(Unit*) override { }
+        void UpdateAI(uint32) override { }
+        void JustAppeared() override { }
+        void EnterEvadeMode(EvadeReason /*why*/) override { }
+        void OnCharmed(bool /*isNew*/) override { }
 
-    static int32 Permissible(Creature const* creature);
+        static int32 Permissible(Creature const* creature);
 };
 
-class CritterAI : public PassiveAI
+class TC_GAME_API CritterAI : public PassiveAI
 {
-public:
-    explicit CritterAI(Creature* c) : PassiveAI(c) { }
+    public:
+        using PassiveAI::PassiveAI;
 
-    void JustEngagedWith(Unit* /*who*/) override;
-    void EnterEvadeMode(EvadeReason why) override;
-    void MovementInform(uint32 type, uint32 id) override;
-    void UpdateAI(uint32 /*diff*/) override { }
+        void JustEngagedWith(Unit* /*who*/) override;
+        void EnterEvadeMode(EvadeReason why) override;
 
-    static int32 Permissible(Creature const* creature);
+        void MovementInform(uint32 type, uint32 id) override;
+
+        static int32 Permissible(Creature const* creature);
 };
 
-class TriggerAI : public NullCreatureAI
+class TC_GAME_API TriggerAI : public NullCreatureAI
 {
-public:
-    explicit TriggerAI(Creature* c) : NullCreatureAI(c) {}
-    void IsSummonedBy(WorldObject* summoner) override;
+    public:
+        using NullCreatureAI::NullCreatureAI;
 
-    static int32 Permissible(Creature const* creature);
+        void IsSummonedBy(WorldObject* summoner) override;
+
+        static int32 Permissible(Creature const* creature);
 };
 
 #endif

@@ -1,419 +1,330 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CombatAI.h"
-#include "CreatureScript.h"
-#include "CreatureTextMgr.h"
+#include "ScriptedGossip.h"
+#include "ScriptMgr.h"
+#include "GameObject.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
-#include "ScriptedEscortAI.h"
-#include "SpellInfo.h"
 #include "SpellScript.h"
 
-//How to win friends and influence enemies
-// texts signed for creature 28939 but used for 28939, 28940, 28610
-enum win_friends
+enum BloodyBreakoutTexts
 {
-    SAY_AGGRO                         = 0,
-    SAY_CRUSADER                      = 1,
-    SAY_PERSUADED1                    = 2,
-    SAY_PERSUADED2                    = 3,
-    SAY_PERSUADED3                    = 4,
-    SAY_PERSUADED4                    = 5,
-    SAY_PERSUADED5                    = 6,
-    SAY_PERSUADED6                    = 7,
-    SAY_PERSUADE_RAND                 = 8,
-    SPELL_PERSUASIVE_STRIKE           = 52781,
-    SPELL_THREAT_PULSE                = 58111,
-    QUEST_HOW_TO_WIN_FRIENDS          = 12720,
+    SAY_KOLTIRA_0 = 0,
+    SAY_KOLTIRA_1 = 1,
+    SAY_KOLTIRA_2 = 2,
+    SAY_KOLTIRA_3 = 3,
+    SAY_KOLTIRA_4 = 4,
+    SAY_KOLTIRA_5 = 5,
+    SAY_KOLTIRA_6 = 6,
+    SAY_KOLTIRA_7 = 7,
+    SAY_KOLTIRA_8 = 8,
+    SAY_KOLTIRA_9 = 9,
+    SAY_KOLTIRA_10 = 10,
+
+    SAY_VALROTH_0 = 0,
+    SAY_VALROTH_1 = 1,
+    SAY_VALROTH_2 = 2,
+    SAY_VALROTH_3 = 3,
+
+    TEXT_ID_EVENT = 13425
 };
 
-class npc_crusade_persuaded : public CreatureScript
+enum BloodyBreakoutEvents
 {
-public:
-    npc_crusade_persuaded() : CreatureScript("npc_crusade_persuaded") { }
+    EVENT_INTRO_0           = 1,
+    EVENT_INTRO_1           = 2,
+    EVENT_INTRO_2           = 3,
+    EVENT_INTRO_3           = 4,
+    EVENT_INTRO_4           = 5,
+    EVENT_INTRO_5           = 6,
+    EVENT_INTRO_6           = 7,
 
-    CreatureAI* GetAI(Creature* creature) const override
-    {
-        return new npc_crusade_persuadedAI(creature);
-    }
+    EVENT_SPAWN_WAVE_1      = 8,
+    EVENT_SPAWN_WAVE_2      = 9,
+    EVENT_SPAWN_WAVE_3      = 10,
+    EVENT_SPAWN_VALROTH     = 11,
 
-    struct npc_crusade_persuadedAI : public CombatAI
-    {
-        npc_crusade_persuadedAI(Creature* creature) : CombatAI(creature) { }
+    EVENT_KOLTIRA_ADVICE    = 12,
+    EVENT_OUTRO_1           = 13,
+    EVENT_OUTRO_2           = 14,
+    EVENT_OUTRO_3           = 15,
+    EVENT_OUTRO_4           = 16,
 
-        const uint32 SAY_AGGRO_CHANCE = 33;
-        const uint32 PERSUADE_SUCCESS_CHANCE = 3; // 30% chance
-        const uint32 SPEECH_TIMER_DEFAULT = 1000;
-        const uint32 SPEECH_TIMER_FOR_ROLEPLAY = 8000;
-        const uint32 SPEECH_COUNTER_PREVENT_SUCCESS_ROLEPLAY = 0;
-        const uint32 SPEECH_COUNTER_START_SUCCESS_ROLEPLAY = 1;
-
-        uint32 speechTimer;
-        uint32 speechCounter;
-        ObjectGuid playerGUID;
-        bool persuaded;
-
-        void Reset() override
-        {
-            speechTimer = 0;
-            speechCounter = SPEECH_COUNTER_PREVENT_SUCCESS_ROLEPLAY;
-            playerGUID.Clear();
-            me->SetReactState(REACT_AGGRESSIVE);
-            me->RestoreFaction();
-        }
-
-        void JustEngagedWith(Unit*) override
-        {
-            if (roll_chance_i(SAY_AGGRO_CHANCE))
-                Talk(SAY_AGGRO);
-        }
-
-        void SpellHit(Unit* caster, SpellInfo const* spell) override
-        {
-            if (spell->Id == SPELL_PERSUASIVE_STRIKE && caster->IsPlayer() && me->IsAlive() && !speechCounter)
-            {
-                if (Player* player = caster->ToPlayer())
-                {
-                    playerGUID = player->GetGUID();
-                    speechTimer = SPEECH_TIMER_DEFAULT;
-                    speechCounter = SPEECH_COUNTER_START_SUCCESS_ROLEPLAY;
-                    uint32 persuadeRoll = urand(1, 10);
-
-                    sCreatureTextMgr->SendChat(me, SAY_PERSUADE_RAND, nullptr, CHAT_MSG_ADDON, LANG_ADDON, TEXT_RANGE_NORMAL, 0, TEAM_NEUTRAL, false, player);
-
-                    if (persuadeRoll <= PERSUADE_SUCCESS_CHANCE && player->GetQuestStatus(QUEST_HOW_TO_WIN_FRIENDS) == QUEST_STATUS_INCOMPLETE)
-                    {
-                        persuaded = true;
-                        me->SetFaction(player->GetFaction());
-                        me->CombatStop(true);
-                        me->GetMotionMaster()->MoveIdle();
-                        me->SetReactState(REACT_PASSIVE);
-                    }
-                    else
-                        persuaded = false;
-                }
-            }
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (speechCounter)
-            {
-                if (speechTimer <= diff)
-                {
-                    Player* player = ObjectAccessor::GetPlayer(*me, playerGUID);
-                    if (!player)
-                    {
-                        EnterEvadeMode();
-                        return;
-                    }
-
-                    if (persuaded)
-                    {
-                        switch (speechCounter)
-                        {
-                        case 1:
-                            Talk(SAY_PERSUADED1);
-                            speechTimer = SPEECH_TIMER_FOR_ROLEPLAY;
-                            break;
-
-                        case 2:
-                            Talk(SAY_PERSUADED2);
-                            speechTimer = SPEECH_TIMER_FOR_ROLEPLAY;
-                            break;
-
-                        case 3:
-                            Talk(SAY_PERSUADED3);
-                            speechTimer = SPEECH_TIMER_FOR_ROLEPLAY;
-                            break;
-
-                        case 4:
-                            Talk(SAY_PERSUADED4);
-                            speechTimer = SPEECH_TIMER_FOR_ROLEPLAY;
-                            break;
-
-                        case 5:
-                            sCreatureTextMgr->SendChat(me, SAY_PERSUADED5, nullptr, CHAT_MSG_ADDON, LANG_ADDON, TEXT_RANGE_NORMAL, 0, TEAM_NEUTRAL, false, player);
-                            speechTimer = SPEECH_TIMER_FOR_ROLEPLAY;
-                            break;
-
-                        case 6:
-                            Talk(SAY_PERSUADED6);
-                            Unit::Kill(player, me);
-                            speechCounter = SPEECH_COUNTER_PREVENT_SUCCESS_ROLEPLAY;
-                            player->GroupEventHappens(QUEST_HOW_TO_WIN_FRIENDS, me);
-                            return;
-                        }
-
-                        ++speechCounter;
-                    }
-                    else
-                    {
-                        Talk(SAY_CRUSADER);
-                        speechCounter = SPEECH_COUNTER_PREVENT_SUCCESS_ROLEPLAY;
-                    }
-                }
-                else
-                    speechTimer = (speechTimer > diff) ? (speechTimer - diff) : 0;
-
-                return;
-            }
-
-            CombatAI::UpdateAI(diff);
-        }
-    };
+    EVENT_CHECK_PLAYER      = 17
 };
 
-/*######
-## npc_koltira_deathweaver
-######*/
-
-enum Koltira
+enum BloodyBreakout
 {
-    SAY_BREAKOUT1                   = 0,
-    SAY_BREAKOUT2                   = 1,
-    SAY_BREAKOUT3                   = 2,
-    SAY_BREAKOUT4                   = 3,
-    SAY_BREAKOUT5                   = 4,
-    SAY_BREAKOUT6                   = 5,
-    SAY_BREAKOUT7                   = 6,
-    SAY_BREAKOUT8                   = 7,
-    SAY_BREAKOUT9                   = 8,
-    SAY_BREAKOUT10                  = 9,
+    POINT_ID_1                  = 1,
+    POINT_ID_2                  = 2,
+    POINT_ID_6                  = 6,
+    POINT_ID_10                 = 10,
 
-    SPELL_KOLTIRA_TRANSFORM         = 52899,
-    SPELL_ANTI_MAGIC_ZONE           = 52894,
+    SUMMON_ACOLYTES_0           = 0,
+    SUMMON_ACOLYTES_1           = 1,
+    SUMMON_ACOLYTES_2           = 2,
+    SUMMON_VALROTH              = 3,
 
-    QUEST_BREAKOUT                  = 12727,
+    QUEST_BLOODY_BREAKOUT       = 12727,
 
-    NPC_CRIMSON_ACOLYTE             = 29007,
-    NPC_HIGH_INQUISITOR_VALROTH     = 29001,
+    NPC_FAKE_VALROTH            = 29011,
+    NPC_VALROTH                 = 29001,
+    NPC_ACOLYTE                 = 29007,
+    NPC_KOLTIRA                 = 28912,
+    NPC_KOLTIRA_MOUNT           = 25445,
 
-    //not sure about this id
-    //NPC_DEATH_KNIGHT_MOUNT        = 29201,
-    MODEL_DEATH_KNIGHT_MOUNT        = 25278
+    SPELL_KOLTIRA_TRANSFORM     = 52899,
+    SPELL_ANTI_MAGIC_ZONE       = 52894,
+    SPELL_HERO_AGGRO            = 53627
 };
 
-class npc_koltira_deathweaver : public CreatureScript
+Position const koltiraPos[3] =
 {
-public:
-    npc_koltira_deathweaver() : CreatureScript("npc_koltira_deathweaver") { }
+    { 1653.36f, -6038.34f, 127.584f },
+    { 1653.765f, -6035.075f, 127.5844f },
+    { 1651.89f, -6037.101f, 127.5844f }
+};
 
-    bool OnQuestAccept(Player* player, Creature* creature, const Quest* quest) override
+struct npc_koltira_deathweaver : public ScriptedAI
+{
+    npc_koltira_deathweaver(Creature* creature) : ScriptedAI(creature), _summons(me)
     {
-        if (quest->GetQuestId() == QUEST_BREAKOUT)
-        {
-            creature->SetStandState(UNIT_STAND_STATE_STAND);
-            creature->setActive(true);
-
-            if (npc_escortAI* pEscortAI = CAST_AI(npc_koltira_deathweaver::npc_koltira_deathweaverAI, creature->AI()))
-                pEscortAI->Start(false, false, player->GetGUID());
-        }
-        return true;
+        _eventGossip = false;
     }
 
-    CreatureAI* GetAI(Creature* creature) const override
+    bool OnGossipHello(Player* player) override
     {
-        return new npc_koltira_deathweaverAI(creature);
+        ObjectGuid const guid = me->GetGUID();
+        _playerGUID = player->GetGUID();
+
+        if (me->IsQuestGiver())
+            player->PrepareQuestMenu(guid);
+
+        // override default gossip
+        if (_eventGossip)
+        {
+            SendGossipMenuFor(player, TEXT_ID_EVENT, guid);
+            return true;
+        }
+
+        return false;
     }
 
-    struct npc_koltira_deathweaverAI : public npc_escortAI
+    void OnQuestAccept(Player* /* player */, Quest const* quest) override
     {
-        npc_koltira_deathweaverAI(Creature* creature) : npc_escortAI(creature), summons(me)
+        if (quest->GetQuestId() == QUEST_BLOODY_BREAKOUT)
         {
-            me->SetReactState(REACT_DEFENSIVE);
+            _events.ScheduleEvent(EVENT_INTRO_0, 500ms);
+            _events.ScheduleEvent(EVENT_CHECK_PLAYER, 5s);
         }
+    }
 
-        uint32 m_uiWave;
-        uint32 m_uiWave_Timer;
-        ObjectGuid m_uiValrothGUID;
-        SummonList summons;
+    void Reset() override
+    {
+        me->SetImmuneToNPC(true);
+        me->SetNpcFlag(UNIT_NPC_FLAG_GOSSIP);
+        me->SetStandState(UNIT_STAND_STATE_DEAD);
+        me->RemoveAllAuras();
 
-        void Reset() override
+        _events.Reset();
+        _summons.DespawnAll();
+        _playerGUID.Clear();
+        _eventGossip = false;
+    }
+
+    void FakeValrothTalk(uint32 id)
+    {
+        if (Creature* fakeValroth = me->FindNearestCreature(NPC_FAKE_VALROTH, INSPECT_DISTANCE * 2))
+            fakeValroth->AI()->Talk(id);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        _events.Update(diff);
+
+        while (uint32 eventId = _events.ExecuteEvent())
         {
-            if (!HasEscortState(STATE_ESCORT_ESCORTING))
+            switch (eventId)
             {
-                m_uiWave = 0;
-                m_uiWave_Timer = 3000;
-                m_uiValrothGUID.Clear();
-                me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                me->LoadEquipment(0, true);
-                me->RemoveAllAuras();
-                summons.DespawnAll();
-            }
-        }
+                case EVENT_INTRO_0:
+                    me->SetStandState(UNIT_STAND_STATE_SIT);
+                    me->RemoveNpcFlag(UNIT_NPC_FLAG_GOSSIP);
+                    Talk(SAY_KOLTIRA_0);
 
-        void EnterEvadeMode(EvadeReason /*why*/) override
-        {
-            me->GetThreatMgr().ClearAllThreat();
-            me->CombatStop(false);
-            me->SetLootRecipient(nullptr);
-
-            if (HasEscortState(STATE_ESCORT_ESCORTING))
-            {
-                AddEscortState(STATE_ESCORT_RETURNING);
-                ReturnToLastPoint();
-                LOG_DEBUG("scripts.ai", "EscortAI has left combat and is now returning to last point");
-            }
-            else
-            {
-                me->GetMotionMaster()->MoveTargetedHome();
-                me->SetImmuneToNPC(true);
-                Reset();
-            }
-        }
-
-        void AttackStart(Unit* who) override
-        {
-            if (HasEscortState(STATE_ESCORT_PAUSED))
-                return;
-
-            npc_escortAI::AttackStart(who);
-        }
-
-        void WaypointReached(uint32 waypointId) override
-        {
-            switch (waypointId)
-            {
-                case 0:
-                    Talk(SAY_BREAKOUT1);
-                    me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
+                    _events.ScheduleEvent(EVENT_INTRO_1, 5s);
                     break;
-                case 1:
-                    me->SetStandState(UNIT_STAND_STATE_KNEEL);
-                    break;
-                case 2:
+                case EVENT_INTRO_1:
                     me->SetStandState(UNIT_STAND_STATE_STAND);
-                    //me->UpdateEntry(NPC_KOLTIRA_ALT); //unclear if we must update or not
-                    DoCast(me, SPELL_KOLTIRA_TRANSFORM);
-                    me->LoadEquipment();
+                    Talk(SAY_KOLTIRA_1);
+
+                    _events.ScheduleEvent(EVENT_INTRO_2, 2s);
                     break;
-                case 3:
-                    SetEscortPaused(true);
+                case EVENT_INTRO_2:
+                    me->GetMotionMaster()->MoveJump(koltiraPos[0], 25.0f, 15.0f);
+
+                    _events.ScheduleEvent(EVENT_INTRO_3, 2s);
+                    break;
+
+                case EVENT_INTRO_3:
+                    me->SetWalk(true);
+                    me->GetMotionMaster()->MovePoint(POINT_ID_1, koltiraPos[1]);
+
+                    break;
+                case EVENT_INTRO_4:
+                    DoCastSelf(SPELL_KOLTIRA_TRANSFORM);
+                    me->LoadEquipment(POINT_ID_1);
+                    me->SetStandState(UNIT_STAND_STATE_STAND);
+                    me->GetMotionMaster()->MovePoint(POINT_ID_2, koltiraPos[2], true, 3.839724f);
+
+                    break;
+                case EVENT_INTRO_5:
+                    Talk(SAY_KOLTIRA_2);
+                    DoCastSelf(SPELL_ANTI_MAGIC_ZONE);
+
+                    _events.ScheduleEvent(EVENT_INTRO_6, 4s);
+                    break;
+                case EVENT_INTRO_6:
+                    Talk(SAY_KOLTIRA_3);
                     me->SetStandState(UNIT_STAND_STATE_KNEEL);
-                    Talk(SAY_BREAKOUT2);
-                    DoCast(me, SPELL_ANTI_MAGIC_ZONE);  // cast again that makes bubble up
+                    me->SetNpcFlag(UNIT_NPC_FLAG_GOSSIP);
+                    _eventGossip = true;
+
                     break;
-                case 4:
-                    me->ApplySpellImmune(0, IMMUNITY_DAMAGE, SPELL_SCHOOL_MASK_ALL, false);
-                    SetRun(true);
+                case EVENT_SPAWN_WAVE_1:
+                    me->SummonCreatureGroup(SUMMON_ACOLYTES_0);
+
+                    _events.ScheduleEvent(EVENT_SPAWN_WAVE_2, 29s);
                     break;
-                case 9:
-                    me->Mount(MODEL_DEATH_KNIGHT_MOUNT);
+                case EVENT_SPAWN_WAVE_2:
+                    Talk(SAY_KOLTIRA_4);
+                    FakeValrothTalk(SAY_VALROTH_1);
+                    me->SummonCreatureGroup(SUMMON_ACOLYTES_1);
+
+                    _events.ScheduleEvent(EVENT_SPAWN_WAVE_3, 21s);
                     break;
-                case 10:
-                    me->Dismount();
+                case EVENT_SPAWN_WAVE_3:
+                    Talk(SAY_KOLTIRA_5);
+                    FakeValrothTalk(SAY_VALROTH_2);
+                    me->SummonCreatureGroup(SUMMON_ACOLYTES_2);
+
+                    _events.ScheduleEvent(EVENT_SPAWN_VALROTH, 24s);
                     break;
-            }
-        }
+                case EVENT_SPAWN_VALROTH:
+                    Talk(SAY_KOLTIRA_6);
+                    FakeValrothTalk(SAY_VALROTH_3);
+                    me->SummonCreatureGroup(SUMMON_VALROTH);
 
-        void JustSummoned(Creature* summoned) override
-        {
-            if (Player* player = GetPlayerForEscort())
-                summoned->AI()->AttackStart(player);
+                    _events.ScheduleEvent(EVENT_KOLTIRA_ADVICE, 8s, 16s);
+                    break;
+                case EVENT_KOLTIRA_ADVICE:
+                    if (_summons.HasEntry(NPC_VALROTH))
+                        Talk(SAY_KOLTIRA_7);
 
-            if (summoned->GetEntry() == NPC_HIGH_INQUISITOR_VALROTH)
-                m_uiValrothGUID = summoned->GetGUID();
+                    break;
+                case EVENT_OUTRO_1:
+                    me->RemoveAurasDueToSpell(SPELL_ANTI_MAGIC_ZONE);
+                    me->SetStandState(UNIT_STAND_STATE_STAND);
+                    me->RemoveNpcFlag(UNIT_NPC_FLAG_GOSSIP);
+                    Talk(SAY_KOLTIRA_8);
 
-            summoned->AddThreat(me, 0.0f);
-            summoned->SetImmuneToPC(false);
-            summons.Summon(summoned);
-        }
+                    _events.ScheduleEvent(EVENT_OUTRO_2, 7s);
+                    _events.CancelEvent(EVENT_CHECK_PLAYER);
+                    break;
+                case EVENT_OUTRO_2:
+                    Talk(SAY_KOLTIRA_9);
 
-        void SummonAcolyte(uint32 uiAmount)
-        {
-            for (uint32 i = 0; i < uiAmount; ++i)
-                me->SummonCreature(NPC_CRIMSON_ACOLYTE, 1642.329f, -6045.818f, 127.583f, 0.0f, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 5000);
-        }
+                    _events.ScheduleEvent(EVENT_OUTRO_3, 4s);
+                    break;
+                case EVENT_OUTRO_3:
+                    Talk(SAY_KOLTIRA_10);
 
-        void UpdateAI(uint32 uiDiff) override
-        {
-            npc_escortAI::UpdateAI(uiDiff);
+                    _events.ScheduleEvent(EVENT_OUTRO_4, 3s);
+                    break;
+                case EVENT_OUTRO_4:
+                    me->SetWalk(false);
+                    me->SetImmuneToNPC(false);
+                    DoCastSelf(SPELL_HERO_AGGRO);
+                    me->GetMotionMaster()->MovePath(NPC_KOLTIRA << 3, false);
 
-            if (HasEscortState(STATE_ESCORT_PAUSED))
-            {
-                if (m_uiWave_Timer <= uiDiff)
-                {
-                    switch (m_uiWave)
+                    break;
+                case EVENT_CHECK_PLAYER:
+                    if (!_playerGUID)
+                        return;
+
+                    if (Player* player = ObjectAccessor::GetPlayer(*me, _playerGUID))
                     {
-                        case 0:
-                            Talk(SAY_BREAKOUT3);
-                            SummonAcolyte(3);
-                            m_uiWave_Timer = 20000;
-                            break;
-                        case 1:
-                            Talk(SAY_BREAKOUT4);
-                            SummonAcolyte(3);
-                            m_uiWave_Timer = 20000;
-                            break;
-                        case 2:
-                            Talk(SAY_BREAKOUT5);
-                            SummonAcolyte(4);
-                            m_uiWave_Timer = 20000;
-                            break;
-                        case 3:
-                            Talk(SAY_BREAKOUT6);
-                            me->SummonCreature(NPC_HIGH_INQUISITOR_VALROTH, 1642.329f, -6045.818f, 127.583f, 0.0f, TEMPSUMMON_TIMED_DESPAWN_OUT_OF_COMBAT, 1000);
-                            m_uiWave_Timer = 1000;
-                            break;
-                        case 4:
-                            {
-                                Creature* temp = ObjectAccessor::GetCreature(*me, m_uiValrothGUID);
-
-                                if (!temp || !temp->IsAlive())
-                                {
-                                    Talk(SAY_BREAKOUT8);
-                                    m_uiWave_Timer = 5000;
-                                }
-                                else
-                                {
-                                    // xinef: despawn check
-                                    Player* player = GetPlayerForEscort();
-                                    if (!player || me->GetDistance(player) > 60.0f)
-                                    {
-                                        me->DespawnOrUnsummon();
-                                        return;
-                                    }
-
-                                    m_uiWave_Timer = 2500;
-                                    return;                         //return, we don't want m_uiWave to increment now
-                                }
-                                break;
-                            }
-                        case 5:
-                            Talk(SAY_BREAKOUT9);
-                            me->RemoveAurasDueToSpell(SPELL_ANTI_MAGIC_ZONE);
-                            // i do not know why the armor will also be removed
-                            m_uiWave_Timer = 2500;
-                            break;
-                        case 6:
-                            Talk(SAY_BREAKOUT10);
-                            SetEscortPaused(false);
-                            break;
+                        if (!player->IsAlive() || !player->IsWithinDist(me, INTERACTION_DISTANCE * 6))
+                        {
+                            _summons.DespawnAll();
+                            me->DespawnOrUnsummon(1s);
+                            player->FailQuest(QUEST_BLOODY_BREAKOUT);
+                        }
                     }
 
-                    ++m_uiWave;
-                }
-                else
-                    m_uiWave_Timer -= uiDiff;
+                    _events.ScheduleEvent(EVENT_CHECK_PLAYER, 5s);
+                    break;
             }
         }
-    };
+    }
+
+    void MovementInform(uint32 type, uint32 pointId) override
+    {
+        if (type == POINT_MOTION_TYPE)
+        {
+            if (pointId == POINT_ID_1)
+            {
+                me->SetStandState(UNIT_STAND_STATE_KNEEL);
+                FakeValrothTalk(SAY_VALROTH_0);
+
+                _events.ScheduleEvent(EVENT_SPAWN_WAVE_1, 1s);
+                _events.ScheduleEvent(EVENT_INTRO_4, 3s);
+            }
+            else if (pointId == POINT_ID_2)
+                _events.ScheduleEvent(EVENT_INTRO_5, 1s);
+        }
+        else
+        {
+            if (pointId == POINT_ID_6)
+                me->Mount(NPC_KOLTIRA_MOUNT);
+        }
+    }
+
+    void JustSummoned(Creature* summon) override
+    {
+        _summons.Summon(summon);
+    }
+
+    void SummonedCreatureDespawn(Creature* summon) override
+    {
+        if (summon->GetEntry() == NPC_VALROTH)
+            _events.ScheduleEvent(EVENT_OUTRO_1, 1s);
+
+        _summons.Despawn(summon);
+    }
+
+private:
+    EventMap _events;
+    SummonList _summons;
+    ObjectGuid _playerGUID;
+
+    bool _eventGossip = false;
 };
 
 //Scarlet courier
@@ -438,7 +349,16 @@ public:
 
     struct npc_scarlet_courierAI : public ScriptedAI
     {
-        npc_scarlet_courierAI(Creature* creature) : ScriptedAI(creature) { }
+        npc_scarlet_courierAI(Creature* creature) : ScriptedAI(creature)
+        {
+            Initialize();
+        }
+
+        void Initialize()
+        {
+            uiStage = 1;
+            uiStage_timer = 3000;
+        }
 
         uint32 uiStage;
         uint32 uiStage_timer;
@@ -446,8 +366,7 @@ public:
         void Reset() override
         {
             me->Mount(14338); // not sure about this id
-            uiStage = 1;
-            uiStage_timer = 3000;
+            Initialize();
         }
 
         void JustEngagedWith(Unit* /*who*/) override
@@ -474,126 +393,32 @@ public:
                 {
                     switch (uiStage)
                     {
-                        case 1:
-                            me->SetWalk(true);
-                            if (GameObject* tree = me->FindNearestGameObject(GO_INCONSPICUOUS_TREE, 40.0f))
-                            {
-                                Talk(SAY_TREE1);
-                                float x, y, z;
-                                tree->GetContactPoint(me, x, y, z);
-                                me->GetMotionMaster()->MovePoint(1, x, y, z);
-                            }
-                            break;
-                        case 2:
-                            if (GameObject* tree = me->FindNearestGameObject(GO_INCONSPICUOUS_TREE, 40.0f))
-                                if (Unit* unit = tree->GetOwner())
-                                    AttackStart(unit);
-                            break;
+                    case 1:
+                        me->SetWalk(true);
+                        if (GameObject* tree = me->FindNearestGameObject(GO_INCONSPICUOUS_TREE, 40.0f))
+                        {
+                            Talk(SAY_TREE1);
+                            float x, y, z;
+                            tree->GetContactPoint(me, x, y, z);
+                            me->GetMotionMaster()->MovePoint(1, x, y, z);
+                        }
+                        break;
+                    case 2:
+                        if (GameObject* tree = me->FindNearestGameObject(GO_INCONSPICUOUS_TREE, 40.0f))
+                            if (Unit* unit = tree->GetOwner())
+                                AttackStart(unit);
+                        break;
                     }
                     uiStage_timer = 3000;
                     uiStage = 0;
-                }
-                else uiStage_timer -= diff;
+                } else uiStage_timer -= diff;
             }
 
             if (!UpdateVictim())
                 return;
-
-            DoMeleeAttackIfReady();
         }
     };
-};
 
-//Koltira & Valroth- Breakout
-
-enum valroth
-{
-    //SAY_VALROTH1                      = 0, Unused
-    SAY_VALROTH_AGGRO                 = 1,
-    SAY_VALROTH_RAND                  = 2,
-    SAY_VALROTH_DEATH                 = 3,
-    SPELL_RENEW                       = 38210,
-    SPELL_INQUISITOR_PENANCE          = 52922,
-    SPELL_VALROTH_SMITE               = 52926,
-    SPELL_SUMMON_VALROTH_REMAINS      = 52929
-};
-
-class npc_high_inquisitor_valroth : public CreatureScript
-{
-public:
-    npc_high_inquisitor_valroth() : CreatureScript("npc_high_inquisitor_valroth") { }
-
-    CreatureAI* GetAI(Creature* creature) const override
-    {
-        return new npc_high_inquisitor_valrothAI(creature);
-    }
-
-    struct npc_high_inquisitor_valrothAI : public ScriptedAI
-    {
-        npc_high_inquisitor_valrothAI(Creature* creature) : ScriptedAI(creature) { }
-
-        uint32 uiRenew_timer;
-        uint32 uiInquisitor_Penance_timer;
-        uint32 uiValroth_Smite_timer;
-
-        void Reset() override
-        {
-            uiRenew_timer = 1000;
-            uiInquisitor_Penance_timer = 2000;
-            uiValroth_Smite_timer = 1000;
-        }
-
-        void JustEngagedWith(Unit* who) override
-        {
-            Talk(SAY_VALROTH_AGGRO);
-            DoCast(who, SPELL_VALROTH_SMITE);
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (uiRenew_timer <= diff)
-            {
-                Shout();
-                DoCast(me, SPELL_RENEW);
-                uiRenew_timer = urand(1000, 6000);
-            }
-            else uiRenew_timer -= diff;
-
-            if (uiInquisitor_Penance_timer <= diff)
-            {
-                Shout();
-                DoCastVictim(SPELL_INQUISITOR_PENANCE);
-                uiInquisitor_Penance_timer = urand(2000, 7000);
-            }
-            else uiInquisitor_Penance_timer -= diff;
-
-            if (uiValroth_Smite_timer <= diff)
-            {
-                Shout();
-                DoCastVictim(SPELL_VALROTH_SMITE);
-                uiValroth_Smite_timer = urand(1000, 6000);
-            }
-            else uiValroth_Smite_timer -= diff;
-
-            DoMeleeAttackIfReady();
-        }
-
-        void Shout()
-        {
-            if (rand() % 100 < 15)
-                Talk(SAY_VALROTH_RAND);
-        }
-
-        void JustDied(Unit* killer) override
-        {
-            Talk(SAY_VALROTH_DEATH);
-
-            if (killer)
-            {
-                killer->CastSpell(me, SPELL_SUMMON_VALROTH_REMAINS, true);
-            }
-        }
-    };
 };
 
 /*######
@@ -602,19 +427,19 @@ public:
 //used by 29032, 29061, 29065, 29067, 29068, 29070, 29074, 29072, 29073, 29071 but signed for 29032
 enum SpecialSurprise
 {
-    SAY_EXEC_START = 0,
-    SAY_EXEC_PROG = 1,
-    SAY_EXEC_NAME = 2,
-    SAY_EXEC_RECOG = 3,
-    SAY_EXEC_NOREM = 4,
-    SAY_EXEC_THINK = 5,
-    SAY_EXEC_LISTEN = 6,
-    SAY_EXEC_TIME = 7,
-    SAY_EXEC_WAITING = 8,
-    EMOTE_DIES = 9,
+    SAY_EXEC_START            = 0,
+    SAY_EXEC_PROG             = 1,
+    SAY_EXEC_NAME             = 2,
+    SAY_EXEC_RECOG            = 3,
+    SAY_EXEC_NOREM            = 4,
+    SAY_EXEC_THINK            = 5,
+    SAY_EXEC_LISTEN           = 6,
+    SAY_EXEC_TIME             = 7,
+    SAY_EXEC_WAITING          = 8,
+    EMOTE_DIES                = 9,
 
-    SAY_PLAGUEFIST = 0,
-    NPC_PLAGUEFIST = 29053
+    SAY_PLAGUEFIST            = 0,
+    NPC_PLAGUEFIST            = 29053
 };
 
 class npc_a_special_surprise : public CreatureScript
@@ -629,7 +454,17 @@ public:
 
     struct npc_a_special_surpriseAI : public ScriptedAI
     {
-        npc_a_special_surpriseAI(Creature* creature) : ScriptedAI(creature) { }
+        npc_a_special_surpriseAI(Creature* creature) : ScriptedAI(creature)
+        {
+            Initialize();
+        }
+
+        void Initialize()
+        {
+            ExecuteSpeech_Timer = 0;
+            ExecuteSpeech_Counter = 0;
+            PlayerGUID.Clear();
+        }
 
         uint32 ExecuteSpeech_Timer;
         uint32 ExecuteSpeech_Counter;
@@ -637,11 +472,8 @@ public:
 
         void Reset() override
         {
-            ExecuteSpeech_Timer = 0;
-            ExecuteSpeech_Counter = 0;
-            PlayerGUID.Clear();
+            Initialize();
 
-            me->SetReactState(REACT_PASSIVE);
             me->SetImmuneToPC(true);
         }
 
@@ -697,7 +529,7 @@ public:
         void MoveInLineOfSight(Unit* who) override
 
         {
-            if (PlayerGUID || !who->IsPlayer() || !who->IsWithinDist(me, INTERACTION_DISTANCE))
+            if (!PlayerGUID.IsEmpty() || who->GetTypeId() != TYPEID_PLAYER || !who->IsWithinDist(me, INTERACTION_DISTANCE))
                 return;
 
             if (MeetQuestCondition(who->ToPlayer()))
@@ -706,7 +538,7 @@ public:
 
         void UpdateAI(uint32 diff) override
         {
-            if (PlayerGUID && !me->GetVictim() && me->IsAlive())
+            if (!PlayerGUID.IsEmpty() && !me->GetVictim() && me->IsAlive())
             {
                 if (ExecuteSpeech_Timer <= diff)
                 {
@@ -720,50 +552,47 @@ public:
 
                     switch (ExecuteSpeech_Counter)
                     {
-                    case 0:
-                        Talk(SAY_EXEC_START, player);
-                        break;
-                    case 1:
-                        me->SetStandState(UNIT_STAND_STATE_STAND);
-                        break;
-                    case 2:
-                        Talk(SAY_EXEC_PROG, player);
-                        break;
-                    case 3:
-                        Talk(SAY_EXEC_NAME, player);
-                        break;
-                    case 4:
-                        Talk(SAY_EXEC_RECOG, player);
-                        break;
-                    case 5:
-                        Talk(SAY_EXEC_NOREM, player);
-                        break;
-                    case 6:
-                        Talk(SAY_EXEC_THINK, player);
-                        break;
-                    case 7:
-                        Talk(SAY_EXEC_LISTEN, player);
-                        break;
-                    case 8:
-                        if (Creature* Plaguefist = GetClosestCreatureWithEntry(me, NPC_PLAGUEFIST, 85.0f))
-                        {
-                            Plaguefist->AI()->Talk(SAY_PLAGUEFIST, player);
-                        }
-                        break;
-                    case 9:
-                        Talk(SAY_EXEC_TIME, player);
-                        me->SetStandState(UNIT_STAND_STATE_KNEEL);
-                        me->SetReactState(REACT_PASSIVE);
-                        me->SetImmuneToPC(false);
-                        break;
-                    case 10:
-                        Talk(SAY_EXEC_WAITING, player);
-                        break;
-                    case 11:
-                        Talk(EMOTE_DIES);
-                        me->setDeathState(DeathState::JustDied);
-                        me->SetHealth(0);
-                        return;
+                        case 0:
+                            Talk(SAY_EXEC_START, player);
+                            break;
+                        case 1:
+                            me->SetStandState(UNIT_STAND_STATE_STAND);
+                            break;
+                        case 2:
+                            Talk(SAY_EXEC_PROG, player);
+                            break;
+                        case 3:
+                            Talk(SAY_EXEC_NAME, player);
+                            break;
+                        case 4:
+                            Talk(SAY_EXEC_RECOG, player);
+                            break;
+                        case 5:
+                            Talk(SAY_EXEC_NOREM, player);
+                            break;
+                        case 6:
+                            Talk(SAY_EXEC_THINK, player);
+                            break;
+                        case 7:
+                            Talk(SAY_EXEC_LISTEN, player);
+                            break;
+                        case 8:
+                            if (Creature* Plaguefist = GetClosestCreatureWithEntry(me, NPC_PLAGUEFIST, 85.0f))
+                                Plaguefist->AI()->Talk(SAY_PLAGUEFIST, player);
+                            break;
+                        case 9:
+                            Talk(SAY_EXEC_TIME, player);
+                            me->SetStandState(UNIT_STAND_STATE_KNEEL);
+                            me->SetImmuneToPC(false);
+                            break;
+                        case 10:
+                            Talk(SAY_EXEC_WAITING, player);
+                            break;
+                        case 11:
+                            Talk(EMOTE_DIES);
+                            me->setDeathState(JUST_DIED);
+                            me->SetHealth(0);
+                            return;
                     }
 
                     if (ExecuteSpeech_Counter >= 9)
@@ -780,11 +609,24 @@ public:
     };
 };
 
+// 53110 - Devour Humanoid
+class spell_death_knight_devour_humanoid : public SpellScript
+{
+    void HandleScriptEffect(SpellEffIndex /* effIndex */)
+    {
+        GetHitUnit()->CastSpell(GetCaster(), GetEffectValue(), true);
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget += SpellEffectFn(spell_death_knight_devour_humanoid::HandleScriptEffect, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
+    }
+};
+
 void AddSC_the_scarlet_enclave_c2()
 {
-    new npc_crusade_persuaded();
+    RegisterCreatureAI(npc_koltira_deathweaver);
     new npc_scarlet_courier();
-    new npc_koltira_deathweaver();
-    new npc_high_inquisitor_valroth();
     new npc_a_special_surprise();
+    RegisterSpellScript(spell_death_knight_devour_humanoid);
 }

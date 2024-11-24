@@ -1,65 +1,65 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _ACORE_ERRORS_H_
-#define _ACORE_ERRORS_H_
+#ifndef TRINITYCORE_ERRORS_H
+#define TRINITYCORE_ERRORS_H
 
-#include "StringFormat.h"
+#include "Define.h"
+#include <string>
 
-namespace Acore
+namespace Trinity
 {
-    // Default function
-    [[noreturn]] AC_COMMON_API void Assert(std::string_view file, uint32 line, std::string_view function, std::string_view debugInfo, std::string_view message, std::string_view fmtMessage = {});
-    [[noreturn]] AC_COMMON_API void Fatal(std::string_view file, uint32 line, std::string_view function, std::string_view message, std::string_view fmtMessage = {});
-    [[noreturn]] AC_COMMON_API void Error(std::string_view file, uint32 line, std::string_view function, std::string_view message);
-    [[noreturn]] AC_COMMON_API void Abort(std::string_view file, uint32 line, std::string_view function, std::string_view fmtMessage = {});
+    [[noreturn]] TC_COMMON_API void Assert(char const* file, int line, char const* function, std::string debugInfo, char const* message);
+    [[noreturn]] TC_COMMON_API void Assert(char const* file, int line, char const* function, std::string debugInfo, char const* message, char const* format, ...) ATTR_PRINTF(6, 7);
 
-    template<typename... Args>
-    AC_COMMON_API inline void Assert(std::string_view file, uint32 line, std::string_view function, std::string_view debugInfo, std::string_view message, std::string_view fmt, Args&&... args)
-    {
-        Assert(file, line, function, debugInfo, message, StringFormat(fmt, std::forward<Args>(args)...));
-    }
+    [[noreturn]] TC_COMMON_API void Fatal(char const* file, int line, char const* function, char const* message, ...) ATTR_PRINTF(4, 5);
 
-    template<typename... Args>
-    AC_COMMON_API inline void Fatal(std::string_view file, uint32 line, std::string_view function, std::string_view message, std::string_view fmt, Args&&... args)
-    {
-        Fatal(file, line, function, message, StringFormat(fmt, std::forward<Args>(args)...));
-    }
+    [[noreturn]] TC_COMMON_API void Error(char const* file, int line, char const* function, char const* message);
 
-    template<typename... Args>
-    AC_COMMON_API inline void Abort(std::string_view file, uint32 line, std::string_view function, std::string_view fmt, Args&&... args)
-    {
-        Abort(file, line, function, StringFormat(fmt, std::forward<Args>(args)...));
-    }
+    [[noreturn]] TC_COMMON_API void Abort(char const* file, int line, char const* function);
+    [[noreturn]] TC_COMMON_API void Abort(char const* file, int line, char const* function, char const* message, ...);
 
-    AC_COMMON_API void Warning(std::string_view file, uint32 line, std::string_view function, std::string_view message);
+    TC_COMMON_API void Warning(char const* file, int line, char const* function, char const* message);
 
-    [[noreturn]] AC_COMMON_API void AbortHandler(int sigval);
+    [[noreturn]] TC_COMMON_API void AbortHandler(int sigval);
 
-} // namespace Acore
+} // namespace Trinity
 
-AC_COMMON_API std::string GetDebugInfo();
+TC_COMMON_API std::string GetDebugInfo();
 
-#define WPAssert(cond, ...) do { if (!(cond)) Acore::Assert(__FILE__, __LINE__, __FUNCTION__, GetDebugInfo(), #cond, ##__VA_ARGS__); } while(0)
-#define WPAssert_NODEBUGINFO(cond) do { if (!(cond)) Acore::Assert(__FILE__, __LINE__, __FUNCTION__, "", #cond); } while(0)
-#define WPFatal(cond, ...) do { if (!(cond)) Acore::Fatal(__FILE__, __LINE__, __FUNCTION__, #cond, ##__VA_ARGS__); } while(0)
-#define WPError(cond, msg) do { if (!(cond)) Acore::Error(__FILE__, __LINE__, __FUNCTION__, (msg)); } while(0)
-#define WPWarning(cond, msg) do { if (!(cond)) Acore::Warning(__FILE__, __LINE__, __FUNCTION__, (msg)); } while(0)
-#define WPAbort(...) do { Acore::Abort(__FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__); } while(0)
+#if TRINITY_COMPILER == TRINITY_COMPILER_MICROSOFT
+#define ASSERT_BEGIN __pragma(warning(push)) __pragma(warning(disable: 4127))
+#define ASSERT_END __pragma(warning(pop))
+#else
+#define ASSERT_BEGIN
+#define ASSERT_END
+#endif
+
+#if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
+#define EXCEPTION_ASSERTION_FAILURE 0xC0000420L
+#endif
+
+#define WPAssert(cond, ...) ASSERT_BEGIN do { if (!(cond)) [[unlikely]] Trinity::Assert(__FILE__, __LINE__, __FUNCTION__, GetDebugInfo(), #cond, ##__VA_ARGS__); } while(0) ASSERT_END
+#define WPAssert_NODEBUGINFO(cond, ...) ASSERT_BEGIN do { if (!(cond)) [[unlikely]] Trinity::Assert(__FILE__, __LINE__, __FUNCTION__, "", #cond, ##__VA_ARGS__); } while(0) ASSERT_END
+#define WPFatal(cond, ...) ASSERT_BEGIN do { if (!(cond)) [[unlikely]] Trinity::Fatal(__FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__); } while(0) ASSERT_END
+#define WPError(cond, msg) ASSERT_BEGIN do { if (!(cond)) [[unlikely]] Trinity::Error(__FILE__, __LINE__, __FUNCTION__, (msg)); } while(0) ASSERT_END
+#define WPWarning(cond, msg) ASSERT_BEGIN do { if (!(cond)) [[unlikely]] Trinity::Warning(__FILE__, __LINE__, __FUNCTION__, (msg)); } while(0) ASSERT_END
+#define WPAbort() ASSERT_BEGIN do { Trinity::Abort(__FILE__, __LINE__, __FUNCTION__); } while(0) ASSERT_END
+#define WPAbort_MSG(msg, ...) ASSERT_BEGIN do { Trinity::Abort(__FILE__, __LINE__, __FUNCTION__, (msg), ##__VA_ARGS__); } while(0) ASSERT_END
 
 #ifdef PERFORMANCE_PROFILING
 #define ASSERT(cond, ...) ((void)0)
@@ -69,16 +69,15 @@ AC_COMMON_API std::string GetDebugInfo();
 #define ASSERT_NODEBUGINFO WPAssert_NODEBUGINFO
 #endif
 
-#if AC_PLATFORM == AC_PLATFORM_WINDOWS
-#define EXCEPTION_ASSERTION_FAILURE 0xC0000420L
-#endif
+#define ASSERT_WITH_SIDE_EFFECTS WPAssert
 
 #define ABORT WPAbort
+#define ABORT_MSG WPAbort_MSG
 
 template <typename T>
-inline T* ASSERT_NOTNULL_IMPL(T* pointer, std::string_view expr)
+inline T* ASSERT_NOTNULL_IMPL(T* pointer, char const* expr)
 {
-    ASSERT(pointer, "{}", expr);
+    ASSERT(pointer, "%s", expr);
     return pointer;
 }
 

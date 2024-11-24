@@ -1,34 +1,33 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
+#include "Containers.h"
 #include "ScriptedCreature.h"
-#include "SpellScript.h"
-#include "SpellScriptLoader.h"
 #include "sethekk_halls.h"
-#include "SpellMgr.h"
+#include "SpellScript.h"
 
-enum Text
+enum Says
 {
     SAY_INTRO                   = 0,
     SAY_AGGRO                   = 1,
     SAY_SLAY                    = 2,
     SAY_DEATH                   = 3,
-    EMOTE_ARCANE_EXP            = 4
+    EMOTE_ARCANE_EXPLOSION      = 4
 };
 
 enum Spells
@@ -40,85 +39,98 @@ enum Spells
     SPELL_SLOW                  = 35032,
     SPELL_POLYMORPH             = 38245,
     SPELL_ARCANE_VOLLEY         = 35059,
-    SPELL_ARCANE_EXPLOSION      = 38197
+    SPELL_ARCANE_EXPLOSION      = 38197,
+};
+
+enum Events
+{
+    EVENT_POLYMORPH = 1,
+    EVENT_BLINK,
+    EVENT_SLOW,
+    EVENT_ARCANE_VOLLEY,
+    EVENT_ARCANE_EXPLOSION
 };
 
 struct boss_talon_king_ikiss : public BossAI
 {
-    boss_talon_king_ikiss(Creature* creature) : BossAI(creature, DATA_IKISS), _spoken(false)
+    boss_talon_king_ikiss(Creature* creature) : BossAI(creature, DATA_TALON_KING_IKISS)
     {
-        scheduler.SetValidator([this]
-        {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
+        Intro = false;
+        ManaShield = false;
     }
 
     void Reset() override
     {
         _Reset();
-        _spoken = false;
-        ScheduleHealthCheckEvent({ 80, 50, 25 }, [&] {
-            me->InterruptNonMeleeSpells(false);
-            DoCastAOE(SPELL_BLINK);
-            DoCastSelf(SPELL_ARCANE_BUBBLE, true);
-            Talk(EMOTE_ARCANE_EXP);
-            scheduler.Schedule(1s, [this](TaskContext /*context*/)
-            {
-                DoCastAOE(SPELL_ARCANE_EXPLOSION);
-            }).Schedule(6500ms, [this](TaskContext /*context*/)
-            {
-                me->GetThreatMgr().ResetAllThreat();
-            });
-        });
-
-        ScheduleHealthCheckEvent(20, [&] {
-            DoCastSelf(SPELL_MANA_SHIELD);
-        });
-    }
-
-    /// @todo: remove this once pets stop going through doors.
-    bool CanAIAttack(Unit const* /*victim*/) const override
-    {
-        return _spoken;
+        Intro = false;
+        ManaShield = false;
     }
 
     void MoveInLineOfSight(Unit* who) override
     {
-        if (!_spoken && who->IsPlayer())
+        if (!Intro && who->GetTypeId() == TYPEID_PLAYER && me->IsWithinDistInMap(who, 100.0f))
         {
+            Intro = true;
             Talk(SAY_INTRO);
-            _spoken = true;
         }
-        ScriptedAI::MoveInLineOfSight(who);
+
+        BossAI::MoveInLineOfSight(who);
     }
 
-    void JustEngagedWith(Unit* /*who*/) override
+    void JustEngagedWith(Unit* who) override
     {
-        _JustEngagedWith();
+        BossAI::JustEngagedWith(who);
         Talk(SAY_AGGRO);
-        scheduler.Schedule(5s, [this](TaskContext context)
-        {
-            DoCastAOE(SPELL_ARCANE_VOLLEY);
-            context.Repeat(7s, 12s);
-        }).Schedule(8s, [this](TaskContext context)
-        {
-            SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(SPELL_POLYMORPH);
-            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1, [&](Unit* target) -> bool
-                {
-                    return target && !target->IsImmunedToSpell(spellInfo);
-                }))
-            {
-                DoCast(target, SPELL_POLYMORPH);
-            }
-            context.Repeat(15s, 17500ms);
-        });
+        events.ScheduleEvent(EVENT_ARCANE_VOLLEY, 5s);
+        events.ScheduleEvent(EVENT_POLYMORPH, 8s);
+        events.ScheduleEvent(EVENT_BLINK, 35s);
         if (IsHeroic())
+            events.ScheduleEvent(EVENT_SLOW, 15s, 30s);
+    }
+
+    void ExecuteEvent(uint32 eventId) override
+    {
+        switch (eventId)
         {
-            scheduler.Schedule(15s, 25s, [this](TaskContext context)
-            {
-                DoCastAOE(SPELL_SLOW);
-                context.Repeat(15s, 30s);
-            });
+            case EVENT_POLYMORPH:
+                // Second top aggro in normal, random target in heroic.
+                if (IsHeroic())
+                    DoCast(SelectTarget(SelectTargetMethod::Random, 0), SPELL_POLYMORPH);
+                else
+                    DoCast(SelectTarget(SelectTargetMethod::MaxThreat, 1), SPELL_POLYMORPH);
+                events.ScheduleEvent(EVENT_POLYMORPH, 15s, 17500ms);
+                break;
+            case EVENT_ARCANE_VOLLEY:
+                DoCast(me, SPELL_ARCANE_VOLLEY);
+                events.ScheduleEvent(EVENT_ARCANE_VOLLEY, 7s, 12s);
+                break;
+            case EVENT_SLOW:
+                DoCast(me, SPELL_SLOW);
+                events.ScheduleEvent(EVENT_SLOW, 15s, 40s);
+                break;
+            case EVENT_BLINK:
+                if (me->IsNonMeleeSpellCast(false))
+                    me->InterruptNonMeleeSpells(false);
+                Talk(EMOTE_ARCANE_EXPLOSION);
+                DoCastAOE(SPELL_BLINK);
+                events.ScheduleEvent(EVENT_BLINK, 35s, 40s);
+                events.ScheduleEvent(EVENT_ARCANE_EXPLOSION, 1s);
+                break;
+            case EVENT_ARCANE_EXPLOSION:
+                DoCast(me, SPELL_ARCANE_EXPLOSION);
+                DoCast(me, SPELL_ARCANE_BUBBLE, true);
+                break;
+            default:
+                break;
+        }
+    }
+
+    void DamageTaken(Unit* /*who*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
+    {
+        if (!ManaShield && me->HealthBelowPctDamaged(20, damage))
+        {
+            DoCast(me, SPELL_MANA_SHIELD);
+            ManaShield = true;
         }
     }
 
@@ -126,41 +138,35 @@ struct boss_talon_king_ikiss : public BossAI
     {
         _JustDied();
         Talk(SAY_DEATH);
-        if (GameObject* coffer = instance->GetGameObject(DATA_GO_TALON_KING_COFFER))
-        {
-            coffer->RemoveGameObjectFlag(GO_FLAG_NOT_SELECTABLE | GO_FLAG_INTERACT_COND);
-        }
     }
 
-    void KilledUnit(Unit* victim) override
+    void KilledUnit(Unit* who) override
     {
-        if (victim->IsPlayer() && urand(0, 1))
-        {
+        if (who->GetTypeId() == TYPEID_PLAYER)
             Talk(SAY_SLAY);
-        }
     }
 
-private:
-    bool _spoken;
+    private:
+        bool ManaShield;
+        bool Intro;
 };
 
 // 38194 - Blink
 class spell_talon_king_ikiss_blink : public SpellScript
 {
-    PrepareSpellScript(spell_talon_king_ikiss_blink);
-
     bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        return sSpellMgr->GetSpellInfo(SPELL_BLINK);
+        return ValidateSpellInfo({ SPELL_BLINK_TELEPORT });
     }
 
     void FilterTargets(std::list<WorldObject*>& targets)
     {
-        uint8 maxSize = 1;
-        if (targets.size() > maxSize)
-        {
-            Acore::Containers::RandomResize(targets, maxSize);
-        }
+        if (targets.empty())
+            return;
+
+        WorldObject* target = Trinity::Containers::SelectRandomContainerElement(targets);
+        targets.clear();
+        targets.push_back(target);
     }
 
     void HandleDummyHitTarget(SpellEffIndex effIndex)

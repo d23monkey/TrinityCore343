@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -22,703 +22,292 @@ Comment: All reset related commands
 Category: commandscripts
 EndScriptData */
 
+#include "ScriptMgr.h"
 #include "AchievementMgr.h"
 #include "Chat.h"
-#include "CommandScript.h"
+#include "ChatCommand.h"
+#include "DatabaseEnv.h"
+#include "DB2Stores.h"
 #include "Language.h"
+#include "Log.h"
+#include "ObjectAccessor.h"
 #include "Pet.h"
 #include "Player.h"
-#include "ScriptMgr.h"
+#include "RBAC.h"
+#include "World.h"
+#include "WorldSession.h"
 
-using namespace Acore::ChatCommands;
+#if TRINITY_COMPILER == TRINITY_COMPILER_GNU
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 
 class reset_commandscript : public CommandScript
 {
 public:
-
     reset_commandscript() : CommandScript("reset_commandscript") { }
 
-    ChatCommandTable GetCommands() const override
+    std::vector<ChatCommand> GetCommands() const override
     {
-        static ChatCommandTable resetItemsCommandTable =
+        static std::vector<ChatCommand> resetCommandTable =
         {
-            { "equipped",       HandleResetItemsEquippedCommand,             SEC_ADMINISTRATOR, Console::Yes },
-            { "bags",           HandleResetItemsInBagsCommand,              SEC_ADMINISTRATOR, Console::Yes },
-            { "bank",           HandleResetItemsInBankCommand,              SEC_ADMINISTRATOR, Console::Yes },
-            { "keyring",        HandleResetItemsKeyringCommand,             SEC_ADMINISTRATOR, Console::Yes },
-            { "currency",       HandleResetItemsInCurrenciesListCommand,    SEC_ADMINISTRATOR, Console::Yes },
-            { "vendor_buyback", HandleResetItemsInVendorBuyBackTabCommand,  SEC_ADMINISTRATOR, Console::Yes },
-            { "all",            HandleResetItemsAllCommand,                 SEC_ADMINISTRATOR, Console::Yes },
-            { "allbags",        HandleResetItemsAllAndDeleteBagsCommand,    SEC_ADMINISTRATOR, Console::Yes },
+            { "achievements", rbac::RBAC_PERM_COMMAND_RESET_ACHIEVEMENTS, true, &HandleResetAchievementsCommand, "" },
+            { "honor",        rbac::RBAC_PERM_COMMAND_RESET_HONOR,        true, &HandleResetHonorCommand,        "" },
+            { "level",        rbac::RBAC_PERM_COMMAND_RESET_LEVEL,        true, &HandleResetLevelCommand,        "" },
+            { "spells",       rbac::RBAC_PERM_COMMAND_RESET_SPELLS,       true, &HandleResetSpellsCommand,       "" },
+            { "stats",        rbac::RBAC_PERM_COMMAND_RESET_STATS,        true, &HandleResetStatsCommand,        "" },
+            { "talents",      rbac::RBAC_PERM_COMMAND_RESET_TALENTS,      true, &HandleResetTalentsCommand,      "" },
+            { "all",          rbac::RBAC_PERM_COMMAND_RESET_ALL,          true, &HandleResetAllCommand,          "" },
         };
-        static ChatCommandTable resetCommandTable =
+        static std::vector<ChatCommand> commandTable =
         {
-            { "achievements",   HandleResetAchievementsCommand, SEC_CONSOLE,       Console::Yes },
-            { "honor",          HandleResetHonorCommand,        SEC_ADMINISTRATOR, Console::Yes },
-            { "level",          HandleResetLevelCommand,        SEC_ADMINISTRATOR, Console::Yes },
-            { "spells",         HandleResetSpellsCommand,       SEC_ADMINISTRATOR, Console::Yes },
-            { "stats",          HandleResetStatsCommand,        SEC_ADMINISTRATOR, Console::Yes },
-            { "talents",        HandleResetTalentsCommand,      SEC_ADMINISTRATOR, Console::Yes },
-            { "items",          resetItemsCommandTable                                          },
-            { "all",            HandleResetAllCommand,          SEC_CONSOLE,       Console::Yes }
-        };
-        static ChatCommandTable commandTable =
-        {
-            { "reset", resetCommandTable }
+            { "reset", rbac::RBAC_PERM_COMMAND_RESET, true, nullptr, "", resetCommandTable },
         };
         return commandTable;
     }
 
-    static bool HandleResetAchievementsCommand(ChatHandler*, Optional<PlayerIdentifier> target)
+    static bool HandleResetAchievementsCommand(ChatHandler* handler, char const* args)
     {
-        if (!target)
-        {
+        Player* target;
+        ObjectGuid targetGuid;
+        if (!handler->extractPlayerTarget((char*)args, &target, &targetGuid))
             return false;
-        }
 
-        Player* playerTarget = target->GetConnectedPlayer();
-
-        if (playerTarget)
-            playerTarget->ResetAchievements();
+        if (target)
+            target->ResetAchievements();
         else
-            AchievementMgr::DeleteFromDB(target->GetGUID().GetCounter());
+            PlayerAchievementMgr::DeleteFromDB(targetGuid);
 
         return true;
     }
 
-    static bool HandleResetHonorCommand(ChatHandler*, Optional<PlayerIdentifier> target)
+    static bool HandleResetHonorCommand(ChatHandler* handler, char const* args)
     {
-        if (!target)
-        {
+        Player* target;
+        if (!handler->extractPlayerTarget((char*)args, &target))
             return false;
-        }
 
-        Player* playerTarget = target->GetConnectedPlayer();
-
-        playerTarget->SetHonorPoints(0);
-        playerTarget->SetUInt32Value(PLAYER_FIELD_KILLS, 0);
-        playerTarget->SetUInt32Value(PLAYER_FIELD_LIFETIME_HONORABLE_KILLS, 0);
-        playerTarget->SetUInt32Value(PLAYER_FIELD_TODAY_CONTRIBUTION, 0);
-        playerTarget->SetUInt32Value(PLAYER_FIELD_YESTERDAY_CONTRIBUTION, 0);
-        playerTarget->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_EARN_HONORABLE_KILL);
+        target->ResetHonorStats();
+        target->UpdateCriteria(CriteriaType::HonorableKills);
 
         return true;
     }
 
     static bool HandleResetStatsOrLevelHelper(Player* player)
     {
-        ChrClassesEntry const* classEntry = sChrClassesStore.LookupEntry(player->getClass());
+        ChrClassesEntry const* classEntry = sChrClassesStore.LookupEntry(player->GetClass());
         if (!classEntry)
         {
-            LOG_ERROR("dbc", "Class {} not found in DBC (Wrong DBC files?)", player->getClass());
+            TC_LOG_ERROR("misc", "Class {} not found in DBC (Wrong DBC files?)", player->GetClass());
             return false;
         }
 
-        uint8 powerType = classEntry->powerType;
+        uint8 powerType = classEntry->DisplayPower;
 
         // reset m_form if no aura
         if (!player->HasAuraType(SPELL_AURA_MOD_SHAPESHIFT))
             player->SetShapeshiftForm(FORM_NONE);
 
-        player->SetFactionForRace(player->getRace());
-
-        player->SetUInt32Value(UNIT_FIELD_BYTES_0, ((player->getRace()) | (player->getClass() << 8) | (player->getGender() << 16) | (powerType << 24)));
+        player->SetFactionForRace(player->GetRace());
+        player->SetPowerType(Powers(powerType));
 
         // reset only if player not in some form;
         if (player->GetShapeshiftForm() == FORM_NONE)
             player->InitDisplayIds();
 
-        player->SetByteValue(UNIT_FIELD_BYTES_2, 1, UNIT_BYTE2_FLAG_PVP);
+        player->ReplaceAllPvpFlags(UNIT_BYTE2_FLAG_PVP);
 
         player->ReplaceAllUnitFlags(UNIT_FLAG_PLAYER_CONTROLLED);
 
         //-1 is default value
-        player->SetUInt32Value(PLAYER_FIELD_WATCHED_FACTION_INDEX, uint32(-1));
+        player->SetWatchedFactionIndex(-1);
         return true;
     }
 
-    static bool HandleResetLevelCommand(ChatHandler*, Optional<PlayerIdentifier> target)
+    static bool HandleResetLevelCommand(ChatHandler* handler, char const* args)
     {
-        if (!target)
-        {
-            return false;
-        }
-
-        Player* playerTarget = target->GetConnectedPlayer();
-
-        if (!HandleResetStatsOrLevelHelper(playerTarget))
+        Player* target;
+        if (!handler->extractPlayerTarget((char*)args, &target))
             return false;
 
-        uint8 oldLevel = playerTarget->GetLevel();
+        if (!HandleResetStatsOrLevelHelper(target))
+            return false;
+
+        uint8 oldLevel = target->GetLevel();
 
         // set starting level
-        uint32 startLevel = !playerTarget->IsClass(CLASS_DEATH_KNIGHT, CLASS_CONTEXT_INIT)
-                            ? sWorld->getIntConfig(CONFIG_START_PLAYER_LEVEL)
-                            : sWorld->getIntConfig(CONFIG_START_HEROIC_PLAYER_LEVEL);
+        uint8 startLevel = target->GetStartLevel(target->GetRace(), target->GetClass(), {});
 
-        playerTarget->_ApplyAllLevelScaleItemMods(false);
-        playerTarget->SetLevel(startLevel);
-        playerTarget->InitRunes();
-        playerTarget->InitStatsForLevel(true);
-        playerTarget->InitTaxiNodesForLevel();
-        playerTarget->InitGlyphsForLevel();
-        playerTarget->InitTalentForLevel();
-        playerTarget->SetUInt32Value(PLAYER_XP, 0);
+        target->_ApplyAllLevelScaleItemMods(false);
+        target->SetLevel(startLevel);
+        target->InitRunes();
+        target->InitStatsForLevel(true);
+        target->InitTaxiNodesForLevel();
+        target->InitTalentForLevel();
+        target->SetXP(0);
 
-        playerTarget->_ApplyAllLevelScaleItemMods(true);
+        target->_ApplyAllLevelScaleItemMods(true);
 
         // reset level for pet
-        if (Pet* pet = playerTarget->GetPet())
+        if (Pet* pet = target->GetPet())
             pet->SynchronizeLevelWithOwner();
 
-        sScriptMgr->OnPlayerLevelChanged(playerTarget, oldLevel);
+        sScriptMgr->OnPlayerLevelChanged(target, oldLevel);
 
         return true;
     }
 
-    static bool HandleResetSpellsCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
+    static bool HandleResetSpellsCommand(ChatHandler* handler, char const* args)
     {
-        if (!target)
-        {
-            target = PlayerIdentifier::FromTargetOrSelf(handler);
-        }
-
-        if (!target)
-        {
+        Player* target;
+        ObjectGuid targetGuid;
+        std::string targetName;
+        if (!handler->extractPlayerTarget((char*)args, &target, &targetGuid, &targetName))
             return false;
-        }
-
-        Player* playerTarget = target->GetConnectedPlayer();
 
         if (target)
         {
-            playerTarget->resetSpells(/* bool myClassOnly */);
+            target->ResetSpells(/* bool myClassOnly */);
 
-            ChatHandler(playerTarget->GetSession()).SendSysMessage(LANG_RESET_SPELLS);
-            if (!handler->GetSession() || handler->GetSession()->GetPlayer() != playerTarget)
-                handler->PSendSysMessage(LANG_RESET_SPELLS_ONLINE, handler->GetNameLink(playerTarget));
+            ChatHandler(target->GetSession()).SendSysMessage(LANG_RESET_SPELLS);
+            if (!handler->GetSession() || handler->GetSession()->GetPlayer() != target)
+                handler->PSendSysMessage(LANG_RESET_SPELLS_ONLINE, handler->GetNameLink(target).c_str());
         }
         else
         {
             CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_ADD_AT_LOGIN_FLAG);
-            stmt->SetData(0, uint16(AT_LOGIN_RESET_SPELLS));
-            stmt->SetData(1, playerTarget->GetGUID().GetCounter());
+            stmt->setUInt16(0, uint16(AT_LOGIN_RESET_SPELLS));
+            stmt->setUInt64(1, targetGuid.GetCounter());
             CharacterDatabase.Execute(stmt);
 
-            handler->PSendSysMessage(LANG_RESET_SPELLS_OFFLINE, target->GetName());
+            handler->PSendSysMessage(LANG_RESET_SPELLS_OFFLINE, targetName.c_str());
         }
 
         return true;
     }
 
-    static bool HandleResetStatsCommand(ChatHandler*, Optional<PlayerIdentifier> target)
+    static bool HandleResetStatsCommand(ChatHandler* handler, char const* args)
     {
-        if (!target)
+        Player* target;
+        if (!handler->extractPlayerTarget((char*)args, &target))
+            return false;
+
+        if (!HandleResetStatsOrLevelHelper(target))
+            return false;
+
+        target->InitRunes();
+        target->InitStatsForLevel(true);
+        target->InitTaxiNodesForLevel();
+        target->InitTalentForLevel();
+
+        return true;
+    }
+
+    static bool HandleResetTalentsCommand(ChatHandler* handler, char const* args)
+    {
+        Player* target;
+        ObjectGuid targetGuid;
+        std::string targetName;
+
+        if (!handler->extractPlayerTarget((char*)args, &target, &targetGuid, &targetName))
         {
+            /* TODO: 6.x remove/update pet talents
+            // Try reset talents as Hunter Pet
+            Creature* creature = handler->getSelectedCreature();
+            if (!*args && creature && creature->IsPet())
+            {
+                Unit* owner = creature->GetOwner();
+                if (owner && owner->GetTypeId() == TYPEID_PLAYER && creature->ToPet()->IsPermanentPetFor(owner->ToPlayer()))
+                {
+                    creature->ToPet()->resetTalents();
+                    owner->ToPlayer()->SendTalentsInfoData(true);
+
+                    ChatHandler(owner->ToPlayer()->GetSession()).SendSysMessage(LANG_RESET_PET_TALENTS);
+                    if (!handler->GetSession() || handler->GetSession()->GetPlayer() != owner->ToPlayer())
+                        handler->PSendSysMessage(LANG_RESET_PET_TALENTS_ONLINE, handler->GetNameLink(owner->ToPlayer()).c_str());
+                }
+                return true;
+            }
+            */
+
+            handler->SendSysMessage(LANG_NO_CHAR_SELECTED);
+            handler->SetSentErrorMessage(true);
             return false;
         }
-
-        Player* playerTarget = target->GetConnectedPlayer();
-
-        if (!HandleResetStatsOrLevelHelper(playerTarget))
-            return false;
-
-        playerTarget->InitRunes();
-        playerTarget->InitStatsForLevel(true);
-        playerTarget->InitTaxiNodesForLevel();
-        playerTarget->InitGlyphsForLevel();
-        playerTarget->InitTalentForLevel();
-
-        return true;
-    }
-
-    static bool HandleResetTalentsCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
-    {
-        Player* targetPlayer = nullptr;
 
         if (target)
         {
-            targetPlayer = target->GetConnectedPlayer();
-        }
-        else
-        {
-            handler->SendErrorMessage(LANG_NO_CHAR_SELECTED);
-            return false;
-        }
+            target->ResetTalents(true);
+            target->SendTalentsInfoData();
+            ChatHandler(target->GetSession()).SendSysMessage(LANG_RESET_TALENTS);
+            if (!handler->GetSession() || handler->GetSession()->GetPlayer() != target)
+                handler->PSendSysMessage(LANG_RESET_TALENTS_ONLINE, handler->GetNameLink(target).c_str());
 
-        if (targetPlayer)
-        {
-            targetPlayer->resetTalents(true);
-            targetPlayer->SendTalentsInfoData(false);
-            ChatHandler(targetPlayer->GetSession()).SendSysMessage(LANG_RESET_TALENTS);
-            if (!handler->GetSession() || handler->GetSession()->GetPlayer() != targetPlayer)
-                handler->PSendSysMessage(LANG_RESET_TALENTS_ONLINE, handler->GetNameLink(targetPlayer));
-
-            Pet* pet = targetPlayer->GetPet();
-            Pet::resetTalentsForAllPetsOf(targetPlayer, pet);
+            /* TODO: 6.x remove/update pet talents
+            Pet* pet = target->GetPet();
+            Pet::resetTalentsForAllPetsOf(target, pet);
             if (pet)
-                targetPlayer->SendTalentsInfoData(true);
+                target->SendTalentsInfoData(true);
+            */
             return true;
         }
-        else
+        else if (!targetGuid.IsEmpty())
         {
             CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_ADD_AT_LOGIN_FLAG);
-            stmt->SetData(0, uint16(AT_LOGIN_RESET_TALENTS | AT_LOGIN_RESET_PET_TALENTS));
-            stmt->SetData(1, target->GetGUID().GetCounter());
+            stmt->setUInt16(0, uint16(AT_LOGIN_NONE | AT_LOGIN_RESET_PET_TALENTS));
+            stmt->setUInt64(1, targetGuid.GetCounter());
             CharacterDatabase.Execute(stmt);
 
-            std::string nameLink = handler->playerLink(target->GetName());
-            handler->PSendSysMessage(LANG_RESET_TALENTS_OFFLINE, nameLink);
+            std::string nameLink = handler->playerLink(targetName);
+            handler->PSendSysMessage(LANG_RESET_TALENTS_OFFLINE, nameLink.c_str());
             return true;
         }
+
+        handler->SendSysMessage(LANG_NO_CHAR_SELECTED);
+        handler->SetSentErrorMessage(true);
+        return false;
     }
 
-    static bool HandleResetAllCommand(ChatHandler* handler, std::string_view caseName)
+    static bool HandleResetAllCommand(ChatHandler* handler, char const* args)
     {
+        if (!*args)
+            return false;
+
+        std::string caseName = args;
+
         AtLoginFlags atLogin;
 
         // Command specially created as single command to prevent using short case names
         if (caseName == "spells")
         {
             atLogin = AT_LOGIN_RESET_SPELLS;
-            handler->SendWorldText(LANG_RESETALL_SPELLS);
+            sWorld->SendWorldText(LANG_RESETALL_SPELLS);
             if (!handler->GetSession())
                 handler->SendSysMessage(LANG_RESETALL_SPELLS);
         }
         else if (caseName == "talents")
         {
             atLogin = AtLoginFlags(AT_LOGIN_RESET_TALENTS | AT_LOGIN_RESET_PET_TALENTS);
-            handler->SendWorldText(LANG_RESETALL_TALENTS);
+            sWorld->SendWorldText(LANG_RESETALL_TALENTS);
             if (!handler->GetSession())
-                handler->SendSysMessage(LANG_RESETALL_TALENTS);
+               handler->SendSysMessage(LANG_RESETALL_TALENTS);
         }
         else
         {
-            handler->SendErrorMessage(LANG_RESETALL_UNKNOWN_CASE, caseName);
+            handler->PSendSysMessage(LANG_RESETALL_UNKNOWN_CASE, args);
+            handler->SetSentErrorMessage(true);
             return false;
         }
 
         CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_ALL_AT_LOGIN_FLAGS);
-        stmt->SetData(0, uint16(atLogin));
+        stmt->setUInt16(0, uint16(atLogin));
         CharacterDatabase.Execute(stmt);
 
-        sWorld->DoForAllOnlinePlayers([&] (Player* player){
-            player->SetAtLoginFlag(atLogin);
-        });
+        std::shared_lock<std::shared_mutex> lock(*HashMapHolder<Player>::GetLock());
+        HashMapHolder<Player>::MapType const& plist = ObjectAccessor::GetPlayers();
+        for (HashMapHolder<Player>::MapType::const_iterator itr = plist.begin(); itr != plist.end(); ++itr)
+            itr->second->SetAtLoginFlag(atLogin);
 
         return true;
-    }
-
-    static bool HandleResetItemsEquippedCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
-    {
-        Player* targetPlayer = GetPlayerFromIdentifierOrSelectedTarget(handler, target);
-
-        if (!targetPlayer)
-        {
-            return false;
-        }
-        else
-        {
-            int16 deletedItemsCount = ResetItemsEquipped(targetPlayer);
-            handler->PSendSysMessage(LANG_COMMAND_RESET_ITEMS_EQUIPPED, deletedItemsCount, handler->GetNameLink(targetPlayer));
-        }
-
-        return true;
-    }
-
-    static bool HandleResetItemsInBagsCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
-    {
-        Player* targetPlayer = GetPlayerFromIdentifierOrSelectedTarget(handler, target);
-
-        if (!targetPlayer)
-        {
-            return false;
-        }
-        else
-        {
-            int16 deletedItemsCount = ResetItemsInBags(targetPlayer);
-            handler->PSendSysMessage(LANG_COMMAND_RESET_ITEMS_BAGS, deletedItemsCount, handler->GetNameLink(targetPlayer));
-        }
-
-        return true;
-    }
-
-    static bool HandleResetItemsKeyringCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
-    {
-        Player* targetPlayer = GetPlayerFromIdentifierOrSelectedTarget(handler, target);
-
-        if (!targetPlayer)
-        {
-            return false;
-        }
-        else
-        {
-            int16 deletedItemsCount = ResetItemsInKeyring(targetPlayer);
-            handler->PSendSysMessage(LANG_COMMAND_RESET_ITEMS_KEYRING, deletedItemsCount, handler->GetNameLink(targetPlayer));
-        }
-
-        return true;
-    }
-
-    static bool HandleResetItemsInCurrenciesListCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
-    {
-        Player* targetPlayer = GetPlayerFromIdentifierOrSelectedTarget(handler, target);
-
-        if (!targetPlayer)
-        {
-            return false;
-        }
-        else
-        {
-            int16 deletedItemsCount = ResetItemsInCurrenciesList(targetPlayer);
-            handler->PSendSysMessage(LANG_COMMAND_RESET_ITEMS_CURRENCY, deletedItemsCount, handler->GetNameLink(targetPlayer));
-        }
-
-        return true;
-    }
-
-    static bool HandleResetItemsInBankCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
-    {
-        Player* targetPlayer = GetPlayerFromIdentifierOrSelectedTarget(handler, target);
-
-        if (!targetPlayer)
-        {
-            return false;
-        }
-        else
-        {
-            int16 deletedItemsCount = ResetItemsInBank(targetPlayer);
-            handler->PSendSysMessage(LANG_COMMAND_RESET_ITEMS_BANK, deletedItemsCount, handler->GetNameLink(targetPlayer));
-        }
-
-        return true;
-    }
-
-    static bool HandleResetItemsInVendorBuyBackTabCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
-    {
-        Player* targetPlayer = GetPlayerFromIdentifierOrSelectedTarget(handler, target);
-
-        if (!targetPlayer)
-        {
-            return false;
-        }
-        else
-        {
-            int16 deletedItemsCount = ResetItemsInVendorBuyBackTab(targetPlayer);
-            handler->PSendSysMessage(LANG_COMMAND_RESET_ITEMS_BUYBACK, deletedItemsCount, handler->GetNameLink(targetPlayer));
-        }
-
-        return true;
-    }
-
-    static bool HandleResetItemsAllCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
-    {
-        Player* targetPlayer = GetPlayerFromIdentifierOrSelectedTarget(handler, target);
-
-        if (!targetPlayer)
-        {
-            return false;
-        }
-        else
-        {
-
-            // Delete all items destinations
-            int16 deletedItemsEquippedCount            = ResetItemsEquipped(targetPlayer);
-            int16 deletedItemsInBagsCount             = ResetItemsInBags(targetPlayer);
-            int16 deletedItemsInBankCount             = ResetItemsInBank(targetPlayer);
-            int16 deletedItemsInKeyringCount          = ResetItemsInKeyring(targetPlayer);
-            int16 deletedItemsInCurrenciesListCount   = ResetItemsInCurrenciesList(targetPlayer);
-            int16 deletedItemsInVendorBuyBackTabCount = ResetItemsInVendorBuyBackTab(targetPlayer);
-
-            handler->PSendSysMessage(LANG_COMMAND_RESET_ITEMS_ALL, handler->GetNameLink(targetPlayer),
-                deletedItemsEquippedCount,
-                deletedItemsInBagsCount,
-                deletedItemsInBankCount,
-                deletedItemsInKeyringCount,
-                deletedItemsInCurrenciesListCount,
-                deletedItemsInVendorBuyBackTabCount);
-        }
-
-        return true;
-    }
-
-    static bool HandleResetItemsAllAndDeleteBagsCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
-    {
-        Player* targetPlayer = GetPlayerFromIdentifierOrSelectedTarget(handler, target);
-
-        if (!targetPlayer)
-        {
-           return false;
-        }
-        else
-        {
-
-            // Delete all items destinations
-            int16 deletedItemsEquippedCount = ResetItemsEquipped(targetPlayer);
-            int16 deletedItemsInBagsCount = ResetItemsInBags(targetPlayer);
-            int16 deletedItemsInBankCount = ResetItemsInBank(targetPlayer);
-            int16 deletedItemsInKeyringCount = ResetItemsInKeyring(targetPlayer);
-            int16 deletedItemsInCurrenciesListCount = ResetItemsInCurrenciesList(targetPlayer);
-            int16 deletedItemsInVendorBuyBackTabCount = ResetItemsInVendorBuyBackTab(targetPlayer);
-            int16 deletedItemsStandardBagsCount = ResetItemsDeleteStandardBags(targetPlayer);
-            int16 deletedItemsBankBagsCount = ResetItemsDeleteBankBags(targetPlayer);
-
-            handler->PSendSysMessage(LANG_COMMAND_RESET_ITEMS_ALL_BAGS, handler->GetNameLink(targetPlayer),
-                deletedItemsEquippedCount,
-                deletedItemsInBagsCount,
-                deletedItemsInBankCount,
-                deletedItemsInKeyringCount,
-                deletedItemsInCurrenciesListCount,
-                deletedItemsInVendorBuyBackTabCount,
-                deletedItemsStandardBagsCount,
-                deletedItemsBankBagsCount);
-        }
-
-        return true;
-    }
-
-private:
-    static Player* GetPlayerFromIdentifierOrSelectedTarget(ChatHandler* handler, Optional<PlayerIdentifier> target)
-    {
-        Player* targetPlayer = nullptr;
-
-        // Check if there is an optional target player name
-        // Do not use TargetOrSelf, we must be sure to select ourself
-        if (!target)
-        {
-            // No optional target, so try to get selected target
-            target = PlayerIdentifier::FromTarget(handler);
-
-            if (!target)
-            {
-                // No character selected
-                handler->SendSysMessage(LANG_NO_CHAR_SELECTED);
-                return targetPlayer;
-            }
-
-            targetPlayer = target->GetConnectedPlayer();
-        }
-        else
-        {
-            targetPlayer = target->GetConnectedPlayer();
-
-            if (!targetPlayer || !target->IsConnected())
-            {
-                // No character selected
-                handler->SendSysMessage(LANG_PLAYER_NOT_EXIST_OR_OFFLINE);
-            }
-        }
-
-        return targetPlayer;
-    }
-
-    static int16 ResetItemsEquipped(Player* playerTarget)
-    {
-        if (!playerTarget)
-        {
-            return -1;
-        }
-
-        int16 count = 0;
-        for (uint8 i = EQUIPMENT_SLOT_START; i < EQUIPMENT_SLOT_END; ++i)
-        {
-            Item* pItem = playerTarget->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-            if (pItem)
-            {
-                playerTarget->DestroyItem(INVENTORY_SLOT_BAG_0, i, true);
-                ++count;
-            }
-        }
-
-        return count;
-    }
-
-    static int16 ResetItemsInBags(Player* playerTarget)
-    {
-        if (!playerTarget)
-        {
-            return -1;
-        }
-
-        int16 count = 0;
-        // Default bagpack :
-        for (uint8 i = INVENTORY_SLOT_ITEM_START; i < INVENTORY_SLOT_ITEM_END; ++i)
-        {
-            Item* pItem = playerTarget->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-            if (pItem)
-            {
-                playerTarget->DestroyItem(INVENTORY_SLOT_BAG_0, i, true);
-                ++count;
-            }
-        }
-
-        // Bag slots
-        for (uint8 i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
-        {
-            Bag* pBag = (Bag*)playerTarget->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-            if (pBag)
-            {
-                for (uint8 j = 0; j < pBag->GetBagSize(); ++j)
-                {
-                    Item* pItem = pBag->GetItemByPos(j);
-                    if (pItem)
-                    {
-                        playerTarget->DestroyItem(i, j, true);
-                        ++count;
-                    }
-                }
-            }
-        }
-
-        return count;
-    }
-
-    static int16 ResetItemsInBank(Player* playerTarget)
-    {
-        if (!playerTarget)
-        {
-            return -1;
-        }
-
-        int16 count = 0;
-        // Normal bank slot
-        for (uint8 i = BANK_SLOT_ITEM_START; i < BANK_SLOT_ITEM_END; ++i)
-        {
-            Item* pItem = playerTarget->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-            if (pItem)
-            {
-                playerTarget->DestroyItem(INVENTORY_SLOT_BAG_0, i, true);
-                ++count;
-            }
-        }
-
-        // Bank bagslots
-        for (uint8 i = BANK_SLOT_BAG_START; i < BANK_SLOT_BAG_END; ++i)
-        {
-            Bag* pBag = (Bag*)playerTarget->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-            if (pBag)
-            {
-                for (uint8 j = 0; j < pBag->GetBagSize(); ++j)
-                {
-                    Item* pItem = pBag->GetItemByPos(j);
-                    if (pItem)
-                    {
-                        playerTarget->DestroyItem(i, j, true);
-                        ++count;
-                    }
-                }
-            }
-        }
-
-        return count;
-    }
-
-    static int16 ResetItemsInKeyring(Player* playerTarget)
-    {
-        if (!playerTarget)
-        {
-            return -1;
-        }
-
-        int16 count = 0;
-        for (uint8 i = KEYRING_SLOT_START; i < KEYRING_SLOT_END; ++i)
-        {
-            Item* pItem = playerTarget->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-            if (pItem)
-            {
-                playerTarget->DestroyItem(INVENTORY_SLOT_BAG_0, i, true);
-                ++count;
-            }
-        }
-
-        return count;
-    }
-
-    static int16 ResetItemsInCurrenciesList(Player* playerTarget)
-    {
-        if (!playerTarget)
-        {
-            return -1;
-        }
-
-        int16 count = 0;
-        for (uint8 i = CURRENCYTOKEN_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
-        {
-            Item* pItem = playerTarget->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-            if (pItem)
-            {
-                playerTarget->DestroyItem(INVENTORY_SLOT_BAG_0, i, true);
-                ++count;
-            }
-        }
-
-        return count;
-    }
-
-    static int16 ResetItemsInVendorBuyBackTab(Player* playerTarget)
-    {
-        if (!playerTarget)
-        {
-            return -1;
-        }
-
-        int16 count = 0;
-        for (uint8 i = BUYBACK_SLOT_START; i < BUYBACK_SLOT_END; ++i)
-        {
-            Item* pItem = playerTarget->GetItemFromBuyBackSlot(i);
-            if (pItem)
-            {
-                playerTarget->RemoveItemFromBuyBackSlot(i, true);
-                ++count;
-            }
-        }
-
-        return count;
-    }
-
-    static int16 ResetItemsDeleteStandardBags(Player* playerTarget)
-    {
-        if (!playerTarget)
-        {
-            return -1;
-        }
-
-        int16 count = 0;
-        // Standard bag slots
-        for (uint8 i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
-        {
-            Bag* pBag = (Bag*)playerTarget->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-            if (pBag)
-            {
-                playerTarget->DestroyItem(INVENTORY_SLOT_BAG_0, i, true);
-                ++count;
-            }
-        }
-
-        return count;
-    }
-
-    static int16 ResetItemsDeleteBankBags(Player* playerTarget)
-    {
-        if (!playerTarget)
-        {
-            return -1;
-        }
-
-        int16 count = 0;
-        // Bank bags
-        for (uint8 i = BANK_SLOT_BAG_START; i < BANK_SLOT_BAG_END; ++i)
-        {
-            Bag* pBag = (Bag*)playerTarget->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-            if (pBag)
-            {
-                // prevent no empty ?
-                playerTarget->DestroyItem(INVENTORY_SLOT_BAG_0, i, true);
-                ++count;
-            }
-        }
-
-        return count;
     }
 };
 

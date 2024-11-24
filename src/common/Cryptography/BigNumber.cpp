@@ -1,26 +1,25 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "BigNumber.h"
+#include "Cryptography/BigNumber.h"
 #include "Errors.h"
-#include <algorithm>
-#include <cstring>
-#include <memory>
 #include <openssl/bn.h>
+#include <algorithm>
+#include <memory>
 
 BigNumber::BigNumber()
     : _bn(BN_new())
@@ -37,7 +36,7 @@ BigNumber::~BigNumber()
 
 void BigNumber::SetDword(int32 val)
 {
-    SetDword(uint32(std::abs(val)));
+    SetDword(uint32(abs(val)));
     if (val < 0)
         BN_set_negative(_bn, 1);
 }
@@ -121,7 +120,7 @@ BigNumber& BigNumber::operator%=(BigNumber const& bn)
     BN_CTX *bnctx;
 
     bnctx = BN_CTX_new();
-    BN_mod(_bn, _bn, bn._bn, bnctx);
+    BN_nnmod(_bn, _bn, bn._bn, bnctx);
     BN_CTX_free(bnctx);
 
     return *this;
@@ -133,7 +132,7 @@ BigNumber& BigNumber::operator<<=(int n)
     return *this;
 }
 
-int BigNumber::CompareTo(BigNumber const& bn) const
+int32 BigNumber::CompareTo(BigNumber const& bn) const
 {
     return BN_cmp(_bn, bn._bn);
 }
@@ -167,6 +166,11 @@ int32 BigNumber::GetNumBytes() const
     return BN_num_bytes(_bn);
 }
 
+int32 BigNumber::GetNumBits() const
+{
+    return BN_num_bits(_bn);
+}
+
 uint32 BigNumber::AsDword() const
 {
     return (uint32)BN_get_word(_bn);
@@ -182,10 +186,10 @@ bool BigNumber::IsNegative() const
     return BN_is_negative(_bn);
 }
 
-void BigNumber::GetBytes(uint8* buf, std::size_t bufsize, bool littleEndian) const
+void BigNumber::GetBytes(uint8* buf, size_t bufsize, bool littleEndian) const
 {
     int res = littleEndian ? BN_bn2lebinpad(_bn, buf, bufsize) : BN_bn2binpad(_bn, buf, bufsize);
-    ASSERT(res > 0, "Buffer of size {} is too small to hold bignum with {} bytes.\n", bufsize, BN_num_bytes(_bn));
+    ASSERT(res > 0, "Buffer of size %zu is too small to hold bignum with %d bytes.\n", bufsize, BN_num_bytes(_bn));
 }
 
 std::vector<uint8> BigNumber::ToByteVector(int32 minSize, bool littleEndian) const

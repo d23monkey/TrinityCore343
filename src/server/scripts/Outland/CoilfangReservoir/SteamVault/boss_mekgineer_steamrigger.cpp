@@ -1,129 +1,274 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+/* ScriptData
+SDName: Boss_Mekgineer_Steamrigger
+SD%Complete: 60
+SDComment: Mechanics' interrrupt heal doesn't work very well, also a proper movement needs to be implemented -> summon further away and move towards target to repair.
+SDCategory: Coilfang Resevoir, The Steamvault
+EndScriptData */
+
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
 #include "ScriptedCreature.h"
 #include "steam_vault.h"
 
-enum MekgineerSteamrigger
+enum Yells
 {
     SAY_MECHANICS               = 0,
     SAY_AGGRO                   = 1,
     SAY_SLAY                    = 2,
-    SAY_DEATH                   = 3,
+    SAY_DEATH                   = 3
+};
 
+enum Spells
+{
     SPELL_SUPER_SHRINK_RAY      = 31485,
     SPELL_SAW_BLADE             = 31486,
     SPELL_ELECTRIFIED_NET       = 35107,
-    SPELL_ENRAGE                = 26662,
 
-    SPELL_SUMMON_MECHANICS_1    = 31528,
-    SPELL_SUMMON_MECHANICS_2    = 31529,
-    SPELL_SUMMON_MECHANICS_3    = 31530,
+    SPELL_DISPEL_MAGIC          = 17201,
+    SPELL_REPAIR                = 31532,
+    H_SPELL_REPAIR              = 37936
+};
 
+enum Creatures
+{
     NPC_STREAMRIGGER_MECHANIC   = 17951
 };
 
-struct boss_mekgineer_steamrigger : public BossAI
+class boss_mekgineer_steamrigger : public CreatureScript
 {
-    boss_mekgineer_steamrigger(Creature* creature) : BossAI(creature, DATA_MEKGINEER_STEAMRIGGER)
+public:
+    boss_mekgineer_steamrigger() : CreatureScript("boss_mekgineer_steamrigger") { }
+
+    CreatureAI* GetAI(Creature* creature) const override
     {
-        scheduler.SetValidator([this]
+        return GetSteamVaultAI<boss_mekgineer_steamriggerAI>(creature);
+    }
+
+    struct boss_mekgineer_steamriggerAI : public ScriptedAI
+    {
+        boss_mekgineer_steamriggerAI(Creature* creature) : ScriptedAI(creature)
         {
-            return !me->HasUnitState(UNIT_STATE_CASTING);
-        });
-    }
+            Initialize();
+            instance = creature->GetInstanceScript();
+        }
 
-    void JustDied(Unit* /*killer*/) override
-    {
-        Talk(SAY_DEATH);
-        _JustDied();
-    }
+        void Initialize()
+        {
+            Shrink_Timer = 20000;
+            Saw_Blade_Timer = 15000;
+            Electrified_Net_Timer = 10000;
 
-    void KilledUnit(Unit* victim) override
-    {
-        if (victim->IsPlayer())
+            Summon75 = false;
+            Summon50 = false;
+            Summon25 = false;
+        }
+
+        InstanceScript* instance;
+
+        uint32 Shrink_Timer;
+        uint32 Saw_Blade_Timer;
+        uint32 Electrified_Net_Timer;
+        bool Summon75;
+        bool Summon50;
+        bool Summon25;
+
+        void Reset() override
+        {
+            Initialize();
+
+            instance->SetBossState(DATA_MEKGINEER_STEAMRIGGER, NOT_STARTED);
+        }
+
+        void JustDied(Unit* /*killer*/) override
+        {
+            Talk(SAY_DEATH);
+
+            instance->SetBossState(DATA_MEKGINEER_STEAMRIGGER, DONE);
+        }
+
+        void KilledUnit(Unit* /*victim*/) override
         {
             Talk(SAY_SLAY);
         }
-    }
 
-    void JustEngagedWith(Unit* /*who*/) override
-    {
-        Talk(SAY_AGGRO);
-        _JustEngagedWith();
+        void JustEngagedWith(Unit* /*who*/) override
+        {
+            Talk(SAY_AGGRO);
 
-        scheduler.Schedule(26550ms, [this](TaskContext context)
+            instance->SetBossState(DATA_MEKGINEER_STEAMRIGGER, IN_PROGRESS);
+        }
+
+        //no known summon spells exist
+        void SummonMechanichs()
         {
-            DoCastVictim(SPELL_SUPER_SHRINK_RAY);
-            context.Repeat(35100ms, 54100ms);
-        }).Schedule(6050ms, 17650ms, [this](TaskContext context)
+            Talk(SAY_MECHANICS);
+
+            DoSpawnCreature(NPC_STREAMRIGGER_MECHANIC, 5, 5, 0, 0, TEMPSUMMON_TIMED_OR_CORPSE_DESPAWN, 240s);
+            DoSpawnCreature(NPC_STREAMRIGGER_MECHANIC, -5, 5, 0, 0, TEMPSUMMON_TIMED_OR_CORPSE_DESPAWN, 240s);
+            DoSpawnCreature(NPC_STREAMRIGGER_MECHANIC, -5, -5, 0, 0, TEMPSUMMON_TIMED_OR_CORPSE_DESPAWN, 240s);
+
+            if (rand32() % 2)
+                DoSpawnCreature(NPC_STREAMRIGGER_MECHANIC, 5, -7, 0, 0, TEMPSUMMON_TIMED_OR_CORPSE_DESPAWN, 240s);
+            if (rand32() % 2)
+                DoSpawnCreature(NPC_STREAMRIGGER_MECHANIC, 7, -5, 0, 0, TEMPSUMMON_TIMED_OR_CORPSE_DESPAWN, 240s);
+        }
+
+        void UpdateAI(uint32 diff) override
         {
-            if (DoCastRandomTarget(SPELL_SAW_BLADE, 1) != SPELL_CAST_OK)
+            if (!UpdateVictim())
+                return;
+
+            if (Shrink_Timer <= diff)
             {
-                DoCastVictim(SPELL_SAW_BLADE);
+                DoCastVictim(SPELL_SUPER_SHRINK_RAY);
+                Shrink_Timer = 20000;
+            } else Shrink_Timer -= diff;
+
+            if (Saw_Blade_Timer <= diff)
+            {
+                if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1))
+                    DoCast(target, SPELL_SAW_BLADE);
+                else
+                    DoCastVictim(SPELL_SAW_BLADE);
+
+                Saw_Blade_Timer = 15000;
+            } else Saw_Blade_Timer -= diff;
+
+            if (Electrified_Net_Timer <= diff)
+            {
+                DoCastVictim(SPELL_ELECTRIFIED_NET);
+                Electrified_Net_Timer = 10000;
+            }
+            else Electrified_Net_Timer -= diff;
+
+            if (!Summon75)
+            {
+                if (HealthBelowPct(75))
+                {
+                    SummonMechanichs();
+                    Summon75 = true;
+                }
             }
 
-            context.Repeat(6050ms, 17650ms);
-        }).Schedule(14400ms, [this](TaskContext context)
-        {
-            DoCastRandomTarget(SPELL_ELECTRIFIED_NET);
-            context.Repeat(21800ms, 34200ms);
-        }).Schedule(5min, [this](TaskContext /*context*/)
-        {
-            DoCastSelf(SPELL_ENRAGE, true);
-        });
-
-        if (!IsHeroic())
-        {
-            ScheduleHealthCheckEvent({ 75, 50, 25 }, [&] {
-                Talk(SAY_MECHANICS);
-
-                for (auto const& spell : { SPELL_SUMMON_MECHANICS_1, SPELL_SUMMON_MECHANICS_2, SPELL_SUMMON_MECHANICS_3 })
-                {
-                    DoCastAOE(spell, true);
-                }
-            });
-        }
-        else
-        {
-            scheduler.Schedule(15600ms, [this](TaskContext context)
+            if (!Summon50)
             {
-                if (roll_chance_i(15))
+                if (HealthBelowPct(50))
                 {
-                    Talk(SAY_MECHANICS);
+                    SummonMechanichs();
+                    Summon50 = true;
                 }
+            }
 
-                DoCastAOE(RAND(SPELL_SUMMON_MECHANICS_1, SPELL_SUMMON_MECHANICS_2, SPELL_SUMMON_MECHANICS_3), true);
-                context.Repeat(15600ms, 25400ms);
-            });
+            if (!Summon25)
+            {
+                if (HealthBelowPct(25))
+                {
+                    SummonMechanichs();
+                    Summon25 = true;
+                }
+            }
         }
-    }
+    };
 
-    void JustSummoned(Creature* creature) override
+};
+
+#define MAX_REPAIR_RANGE            (13.0f)                 //we should be at least at this range for repair
+#define MIN_REPAIR_RANGE            (7.0f)                  //we can stop movement at this range to repair but not required
+
+class npc_steamrigger_mechanic : public CreatureScript
+{
+public:
+    npc_steamrigger_mechanic() : CreatureScript("npc_steamrigger_mechanic") { }
+
+    CreatureAI* GetAI(Creature* creature) const override
     {
-        if (creature->GetEntry() == NPC_STREAMRIGGER_MECHANIC)
-        {
-            creature->GetMotionMaster()->MoveFollow(me, 5.0f, 0.0f);
-        }
+        return GetSteamVaultAI<npc_steamrigger_mechanicAI>(creature);
     }
+
+    struct npc_steamrigger_mechanicAI : public ScriptedAI
+    {
+        npc_steamrigger_mechanicAI(Creature* creature) : ScriptedAI(creature)
+        {
+            Initialize();
+            instance = creature->GetInstanceScript();
+        }
+
+        void Initialize()
+        {
+            Repair_Timer = 2000;
+        }
+
+        InstanceScript* instance;
+
+        uint32 Repair_Timer;
+
+        void Reset() override
+        {
+            Initialize();
+        }
+
+        void MoveInLineOfSight(Unit* /*who*/) override
+        {
+            //react only if attacked
+        }
+
+        void JustEngagedWith(Unit* /*who*/) override { }
+
+        void UpdateAI(uint32 diff) override
+        {
+            if (Repair_Timer <= diff)
+            {
+                if (instance->GetBossState(DATA_MEKGINEER_STEAMRIGGER) == IN_PROGRESS)
+                {
+                    if (Creature* mekgineer = instance->GetCreature(DATA_MEKGINEER_STEAMRIGGER))
+                    {
+                        if (me->IsWithinDistInMap(mekgineer, MAX_REPAIR_RANGE))
+                        {
+                            //are we already channeling? Doesn't work very well, find better check?
+                            if (!me->GetChannelSpellId())
+                            {
+                                //me->GetMotionMaster()->MovementExpired();
+                                //me->GetMotionMaster()->MoveIdle();
+
+                                DoCast(me, SPELL_REPAIR, true);
+                            }
+                            Repair_Timer = 5000;
+                        }
+                        else
+                        {
+                            //me->GetMotionMaster()->MovementExpired();
+                            //me->GetMotionMaster()->MoveFollow(pMekgineer, 0, 0);
+                        }
+                    }
+                } else Repair_Timer = 5000;
+            } else Repair_Timer -= diff;
+
+            if (!UpdateVictim())
+                return;
+        }
+    };
+
 };
 
 void AddSC_boss_mekgineer_steamrigger()
 {
-    RegisterSteamvaultCreatureAI(boss_mekgineer_steamrigger);
+    new boss_mekgineer_steamrigger();
+    new npc_steamrigger_mechanic();
 }

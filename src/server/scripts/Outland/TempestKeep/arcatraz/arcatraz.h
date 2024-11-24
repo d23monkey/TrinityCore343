@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,38 +20,40 @@
 
 #include "CreatureAIImpl.h"
 
-#define DataHeader "AZ"
-
 #define ArcatrazScriptName "instance_arcatraz"
+#define DataHeader         "AZ"
 
-enum DataTypes
+uint32 const EncounterCount = 4;
+
+enum AZDataTypes
 {
     // Encounter States/Boss GUIDs
     DATA_ZEREKETH                               = 0,
     DATA_DALLIAH                                = 1,
     DATA_SOCCOTHRATES                           = 2,
-    DATA_WARDEN_MELLICHAR                       = 3,
-    MAX_ENCOUTER                                = 4,
+    DATA_HARBINGER_SKYRISS                      = 3,
 
     // Additional Data
+    DATA_CONVERSATION                           = 4,
     DATA_WARDEN_1                               = 5, // used by SmartAI
     DATA_WARDEN_2                               = 6, // used by SmartAI
     DATA_WARDEN_3                               = 7, // used by SmartAI
     DATA_WARDEN_4                               = 8, // used by SmartAI
     DATA_WARDEN_5                               = 9, // used by SmartAI
-    DATA_WARDENS_SHIELD                         = 10
+    DATA_MELLICHAR                              = 10,
+    DATA_WARDENS_SHIELD                         = 11
 };
 
-enum CreatureIds
+enum AZCreatureIds
 {
     NPC_DALLIAH                                 = 20885,
     NPC_SOCCOTHRATES                            = 20886,
-    NPC_MELLICHAR                               = 20904,
-    NPC_HARBINGER_SKYRISS                       = 20912,
-    NPC_ALPHA_POD_TARGET                        = 21436
+    NPC_MELLICHAR                               = 20904, // skyriss will kill this unit
+    NPC_ALPHA_POD_TARGET                        = 21436,
+    NPC_MILLHOUSE                               = 20977
 };
 
-enum GameObjectIds
+enum AZGameObjectIds
 {
     GO_CONTAINMENT_CORE_SECURITY_FIELD_ALPHA    = 184318, // door opened when Wrath-Scryer Soccothrates dies
     GO_CONTAINMENT_CORE_SECURITY_FIELD_BETA     = 184319, // door opened when Dalliah the Doomsayer dies
@@ -63,15 +65,9 @@ enum GameObjectIds
     GO_WARDENS_SHIELD                           = 184802  // shield 'protecting' mellichar
 };
 
-enum SpellIds
+enum AZSpellIds
 {
-    SPELL_TELEPORT_VISUAL                   = 35517,
-    SPELL_SOUL_STEAL                        = 36782
-};
-
-enum Texts
-{
-    SAY_RIVAL_DIED = 6 // Soccothrates & Delliah
+    SPELL_QID_10886                             = 39564
 };
 
 template <class AI, class T>

@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -21,7 +21,10 @@
 #include "IpAddress.h"
 #include "Log.h"
 #include "StringConvert.h"
+#include "Util.h"
+#include <algorithm>
 #include <fstream>
+
 IpLocationStore::IpLocationStore()
 {
 }
@@ -33,26 +36,23 @@ IpLocationStore::~IpLocationStore()
 void IpLocationStore::Load()
 {
     _ipLocationStore.clear();
-    LOG_INFO("server.loading", "Loading IP Location Database...");
+    TC_LOG_INFO("server.loading", "Loading IP Location Database...");
 
-    std::string databaseFilePath = sConfigMgr->GetOption<std::string>("IPLocationFile", "");
+    std::string databaseFilePath = sConfigMgr->GetStringDefault("IPLocationFile", "");
     if (databaseFilePath.empty())
-    {
-        LOG_INFO("server.loading", " ");
         return;
-    }
 
     // Check if file exists
     std::ifstream databaseFile(databaseFilePath);
     if (!databaseFile)
     {
-        LOG_ERROR("server.loading", "IPLocation: No ip database file exists ({}).", databaseFilePath);
+        TC_LOG_ERROR("server.loading", "IPLocation: No ip database file exists ({}).", databaseFilePath);
         return;
     }
 
     if (!databaseFile.is_open())
     {
-        LOG_ERROR("server.loading", "IPLocation: Ip database file ({}) can not be opened.", databaseFilePath);
+        TC_LOG_ERROR("server.loading", "IPLocation: Ip database file ({}) can not be opened.", databaseFilePath);
         return;
     }
 
@@ -84,15 +84,17 @@ void IpLocationStore::Load()
         countryName.erase(std::remove(countryName.begin(), countryName.end(), '"'), countryName.end());
 
         // Convert country code to lowercase
-        std::transform(countryCode.begin(), countryCode.end(), countryCode.begin(), ::tolower);
+        strToLower(countryCode);
 
-        auto IpFrom = Acore::StringTo<uint32>(ipFrom);
-        auto IpTo = Acore::StringTo<uint32>(ipTo);
-
-        if (!IpFrom || !IpTo)
+        Optional<uint32> from = Trinity::StringTo<uint32>(ipFrom);
+        if (!from)
             continue;
 
-        _ipLocationStore.emplace_back(*IpFrom, *IpTo, std::move(countryCode), std::move(countryName));
+        Optional<uint32> to = Trinity::StringTo<uint32>(ipTo);
+        if (!to)
+            continue;
+
+        _ipLocationStore.emplace_back(*from, *to, std::move(countryCode), std::move(countryName));
     }
 
     std::sort(_ipLocationStore.begin(), _ipLocationStore.end(), [](IpLocationRecord const& a, IpLocationRecord const& b) { return a.IpFrom < b.IpFrom; });
@@ -101,28 +103,28 @@ void IpLocationStore::Load()
 
     databaseFile.close();
 
-    LOG_INFO("server.loading", ">> Loaded {} ip location entries.", static_cast<uint32>(_ipLocationStore.size()));
-    LOG_INFO("server.loading", " ");
+    TC_LOG_INFO("server.loading", ">> Loaded {} ip location entries.", _ipLocationStore.size());
 }
 
 IpLocationRecord const* IpLocationStore::GetLocationRecord(std::string const& ipAddress) const
 {
-    uint32 ip = Acore::Net::address_to_uint(Acore::Net::make_address_v4(ipAddress));
+    boost::system::error_code error;
+    boost::asio::ip::address_v4 address = Trinity::Net::make_address_v4(ipAddress, error);
+    if (error)
+        return nullptr;
+
+    uint32 ip = Trinity::Net::address_to_uint(address);
     auto itr = std::upper_bound(_ipLocationStore.begin(), _ipLocationStore.end(), ip, [](uint32 ip, IpLocationRecord const& loc) { return ip < loc.IpTo; });
     if (itr == _ipLocationStore.end())
-    {
         return nullptr;
-    }
 
     if (ip < itr->IpFrom)
-    {
         return nullptr;
-    }
 
     return &(*itr);
 }
 
-IpLocationStore* IpLocationStore::instance()
+IpLocationStore* IpLocationStore::Instance()
 {
     static IpLocationStore instance;
     return &instance;

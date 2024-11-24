@@ -1,27 +1,36 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+/* ScriptData
+Name: cheat_commandscript
+%Complete: 100
+Comment: All cheat related commands
+Category: commandscripts
+EndScriptData */
+
+#include "ScriptMgr.h"
 #include "Chat.h"
-#include "CommandScript.h"
+#include "ChatCommand.h"
 #include "Language.h"
 #include "Player.h"
+#include "RBAC.h"
 #include "WorldSession.h"
 
-using namespace Acore::ChatCommands;
+using namespace Trinity::ChatCommands;
 
 class cheat_commandscript : public CommandScript
 {
@@ -32,19 +41,20 @@ public:
     {
         static ChatCommandTable cheatCommandTable =
         {
-            { "god",       HandleGodModeCheatCommand,   SEC_GAMEMASTER, Console::No },
-            { "casttime",  HandleCasttimeCheatCommand,  SEC_GAMEMASTER, Console::No },
-            { "cooldown",  HandleCoolDownCheatCommand,  SEC_GAMEMASTER, Console::No },
-            { "power",     HandlePowerCheatCommand,     SEC_GAMEMASTER, Console::No },
-            { "waterwalk", HandleWaterWalkCheatCommand, SEC_GAMEMASTER, Console::No },
-            { "status",    HandleCheatStatusCommand,    SEC_GAMEMASTER, Console::No },
-            { "taxi",      HandleTaxiCheatCommand,      SEC_GAMEMASTER, Console::No },
-            { "explore",   HandleExploreCheatCommand,   SEC_GAMEMASTER, Console::No }
+            { "god",            HandleGodModeCheatCommand,   rbac::RBAC_PERM_COMMAND_CHEAT_GOD,       Console::No },
+            { "casttime",       HandleCasttimeCheatCommand,  rbac::RBAC_PERM_COMMAND_CHEAT_CASTTIME,  Console::No },
+            { "cooldown",       HandleCoolDownCheatCommand,  rbac::RBAC_PERM_COMMAND_CHEAT_COOLDOWN,  Console::No },
+            { "power",          HandlePowerCheatCommand,     rbac::RBAC_PERM_COMMAND_CHEAT_POWER,     Console::No },
+            { "waterwalk",      HandleWaterWalkCheatCommand, rbac::RBAC_PERM_COMMAND_CHEAT_WATERWALK, Console::No },
+            { "status",         HandleCheatStatusCommand,    rbac::RBAC_PERM_COMMAND_CHEAT_STATUS,    Console::No },
+            { "taxi",           HandleTaxiCheatCommand,      rbac::RBAC_PERM_COMMAND_CHEAT_TAXI,      Console::No },
+            { "explore",        HandleExploreCheatCommand,   rbac::RBAC_PERM_COMMAND_CHEAT_EXPLORE,   Console::No },
+
         };
 
         static ChatCommandTable commandTable =
         {
-            { "cheat", cheatCommandTable }
+            { "cheat", cheatCommandTable },
         };
         return commandTable;
     }
@@ -117,7 +127,11 @@ public:
 
         if (enable)
         {
-            handler->GetSession()->GetPlayer()->SetCommandStatusOn(CHEAT_POWER);
+            Player* player = handler->GetSession()->GetPlayer();
+            // Set max power to all powers
+            for (uint32 i = 0; i < MAX_POWERS; ++i)
+                player->SetFullPower(Powers(i));
+            player->SetCommandStatusOn(CHEAT_POWER);
             handler->SendSysMessage("Power Cheat is ON. You don't need mana/rage/energy to use spells.");
         }
         else
@@ -143,7 +157,6 @@ public:
         handler->PSendSysMessage(LANG_COMMAND_CHEAT_POWER, player->GetCommandStatus(CHEAT_POWER) ? enabled : disabled);
         handler->PSendSysMessage(LANG_COMMAND_CHEAT_WW, player->GetCommandStatus(CHEAT_WATERWALK) ? enabled : disabled);
         handler->PSendSysMessage(LANG_COMMAND_CHEAT_TAXINODES, player->isTaxiCheater() ? enabled : disabled);
-
         return true;
     }
 
@@ -156,13 +169,13 @@ public:
         if (enable)
         {
             handler->GetSession()->GetPlayer()->SetCommandStatusOn(CHEAT_WATERWALK);
-            handler->GetSession()->GetPlayer()->SetMovement(MOVE_WATER_WALK);               // ON
+            handler->GetSession()->GetPlayer()->SetWaterWalking(true);                      // ON
             handler->SendSysMessage("Waterwalking is ON. You can walk on water.");
         }
         else
         {
             handler->GetSession()->GetPlayer()->SetCommandStatusOff(CHEAT_WATERWALK);
-            handler->GetSession()->GetPlayer()->SetMovement(MOVE_LAND_WALK);                // OFF
+            handler->GetSession()->GetPlayer()->SetWaterWalking(false);                     // OFF
             handler->SendSysMessage("Waterwalking is OFF. You can't walk on water.");
         }
 
@@ -185,16 +198,16 @@ public:
         if (enable)
         {
             chr->SetTaxiCheater(true);
-            handler->PSendSysMessage(LANG_YOU_GIVE_TAXIS, handler->GetNameLink(chr));
+            handler->PSendSysMessage(LANG_YOU_GIVE_TAXIS, handler->GetNameLink(chr).c_str());
             if (handler->needReportToTarget(chr))
-                ChatHandler(chr->GetSession()).PSendSysMessage(LANG_YOURS_TAXIS_ADDED, handler->GetNameLink());
+                ChatHandler(chr->GetSession()).PSendSysMessage(LANG_YOURS_TAXIS_ADDED, handler->GetNameLink().c_str());
         }
         else
         {
             chr->SetTaxiCheater(false);
-            handler->PSendSysMessage(LANG_YOU_REMOVE_TAXIS, handler->GetNameLink(chr));
+            handler->PSendSysMessage(LANG_YOU_REMOVE_TAXIS, handler->GetNameLink(chr).c_str());
             if (handler->needReportToTarget(chr))
-                ChatHandler(chr->GetSession()).PSendSysMessage(LANG_YOURS_TAXIS_REMOVED, handler->GetNameLink());
+                ChatHandler(chr->GetSession()).PSendSysMessage(LANG_YOURS_TAXIS_REMOVED, handler->GetNameLink().c_str());
         }
 
         return true;
@@ -205,29 +218,30 @@ public:
         Player* chr = handler->getSelectedPlayer();
         if (!chr)
         {
-            handler->SendErrorMessage(LANG_NO_CHAR_SELECTED);
+            handler->SendSysMessage(LANG_NO_CHAR_SELECTED);
+            handler->SetSentErrorMessage(true);
             return false;
         }
 
         if (reveal)
         {
-            handler->PSendSysMessage(LANG_YOU_SET_EXPLORE_ALL, handler->GetNameLink(chr));
+            handler->PSendSysMessage(LANG_YOU_SET_EXPLORE_ALL, handler->GetNameLink(chr).c_str());
             if (handler->needReportToTarget(chr))
-                ChatHandler(chr->GetSession()).PSendSysMessage(LANG_YOURS_EXPLORE_SET_ALL, handler->GetNameLink());
+            ChatHandler(chr->GetSession()).PSendSysMessage(LANG_YOURS_EXPLORE_SET_ALL, handler->GetNameLink().c_str());
         }
         else
         {
-            handler->PSendSysMessage(LANG_YOU_SET_EXPLORE_NOTHING, handler->GetNameLink(chr));
+            handler->PSendSysMessage(LANG_YOU_SET_EXPLORE_NOTHING, handler->GetNameLink(chr).c_str());
             if (handler->needReportToTarget(chr))
-                ChatHandler(chr->GetSession()).PSendSysMessage(LANG_YOURS_EXPLORE_SET_NOTHING, handler->GetNameLink());
+                ChatHandler(chr->GetSession()).PSendSysMessage(LANG_YOURS_EXPLORE_SET_NOTHING, handler->GetNameLink().c_str());
         }
 
-        for (uint8 i = 0; i < PLAYER_EXPLORED_ZONES_SIZE; ++i)
+        for (uint16 i = 0; i < PLAYER_EXPLORED_ZONES_SIZE; ++i)
         {
             if (reveal)
-                handler->GetSession()->GetPlayer()->SetFlag(PLAYER_EXPLORED_ZONES_1+i, 0xFFFFFFFF);
+                handler->GetSession()->GetPlayer()->AddExploredZones(i, 0xFFFFFFFFFFFFFFFF);
             else
-                handler->GetSession()->GetPlayer()->SetFlag(PLAYER_EXPLORED_ZONES_1+i, 0);
+                handler->GetSession()->GetPlayer()->RemoveExploredZones(i, 0xFFFFFFFFFFFFFFFF);
         }
 
         return true;

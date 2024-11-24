@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,14 +20,14 @@
 
 #include "Battleground.h"
 #include "BattlegroundScore.h"
+#include "Object.h"
 
 #define BG_SA_FLAG_AMOUNT           3
 #define BG_SA_DEMOLISHER_AMOUNT     4
-#define SPELL_SA_END_OF_ROUND 52459
 
 enum BG_SA_Status
 {
-    BG_SA_NOTSTARTED = 0,
+    BG_SA_NOT_STARTED = 0,
     BG_SA_WARMUP,
     BG_SA_ROUND_ONE,
     BG_SA_SECOND_WARMUP,
@@ -37,16 +37,126 @@ enum BG_SA_Status
 
 enum BG_SA_GateState
 {
-    BG_SA_GATE_OK           = 1,
-    BG_SA_GATE_DAMAGED      = 2,
-    BG_SA_GATE_DESTROYED    = 3
+    // alliance is defender
+    BG_SA_ALLIANCE_GATE_OK          = 1,
+    BG_SA_ALLIANCE_GATE_DAMAGED     = 2,
+    BG_SA_ALLIANCE_GATE_DESTROYED   = 3,
+    // horde is defender
+    BG_SA_HORDE_GATE_OK             = 4,
+    BG_SA_HORDE_GATE_DAMAGED        = 5,
+    BG_SA_HORDE_GATE_DESTROYED      = 6,
 };
 
-enum BG_SA_WorldStates
+enum BG_SA_EventIds
 {
-    BG_SA_TIMER_MINS                = 3559,
-    BG_SA_TIMER_SEC_TENS            = 3560,
-    BG_SA_TIMER_SEC_DECS            = 3561,
+    BG_SA_EVENT_BLUE_GATE_DAMAGED           = 19040,
+    BG_SA_EVENT_BLUE_GATE_DESTROYED         = 19045,
+
+    BG_SA_EVENT_GREEN_GATE_DAMAGED          = 19041,
+    BG_SA_EVENT_GREEN_GATE_DESTROYED        = 19046,
+
+    BG_SA_EVENT_RED_GATE_DAMAGED            = 19042,
+    BG_SA_EVENT_RED_GATE_DESTROYED          = 19047,
+
+    BG_SA_EVENT_PURPLE_GATE_DAMAGED         = 19043,
+    BG_SA_EVENT_PURPLE_GATE_DESTROYED       = 19048,
+
+    BG_SA_EVENT_YELLOW_GATE_DAMAGED         = 19044,
+    BG_SA_EVENT_YELLOW_GATE_DESTROYED       = 19049,
+
+    BG_SA_EVENT_ANCIENT_GATE_DAMAGED        = 19836,
+    BG_SA_EVENT_ANCIENT_GATE_DESTROYED      = 19837,
+
+    BG_SA_EVENT_TITAN_RELIC_ACTIVATED       = 22097
+};
+
+enum SASpellIds
+{
+    SPELL_TELEPORT_DEFENDER                 = 52364,
+    SPELL_TELEPORT_ATTACKERS                = 60178,
+    SPELL_END_OF_ROUND                      = 52459,
+    SPELL_REMOVE_SEAFORIUM                  = 59077,
+    SPELL_ALLIANCE_CONTROL_PHASE_SHIFT      = 60027,
+    SPELL_HORDE_CONTROL_PHASE_SHIFT         = 60028
+};
+
+enum SACreatureIds
+{
+    NPC_KANRETHAD                                   = 29,
+    NPC_INVISIBLE_STALKER                           = 15214,
+    NPC_WORLD_TRIGGER                               = 22515,
+    NPC_WORLD_TRIGGER_LARGE_AOI_NOT_IMMUNE_PC_NPC   = 23472,
+
+    NPC_ANTI_PERSONNAL_CANNON                       = 27894,
+    NPC_DEMOLISHER_SA                               = 28781,
+    NPC_RIGGER_SPARKLIGHT                           = 29260,
+    NPC_GORGRIL_RIGSPARK                            = 29262
+};
+
+enum SAGameObjectIds
+{
+    GO_GATE_OF_THE_GREEN_EMERALD            = 190722,
+    GO_GATE_OF_THE_PURPLE_AMETHYST          = 190723,
+    GO_GATE_OF_THE_BLUE_SAPPHIRE            = 190724,
+    GO_GATE_OF_THE_RED_SUN                  = 190726,
+    GO_GATE_OF_THE_YELLOW_MOON              = 190727,
+    GO_CHAMBER_OF_ANCIENT_RELICS            = 192549,
+};
+
+enum BG_SA_Timers
+{
+    BG_SA_BOAT_START    =  60 * IN_MILLISECONDS,
+    BG_SA_WARMUPLENGTH  = 120 * IN_MILLISECONDS,
+    BG_SA_ROUNDLENGTH   = 600 * IN_MILLISECONDS
+};
+
+enum SASounds
+{
+    SOUND_GRAVEYARD_TAKEN_HORDE     = 8174,
+    SOUND_GRAVEYARD_TAKEN_ALLIANCE  = 8212,
+    SOUND_DEFEAT_HORDE              = 15905,
+    SOUND_VICTORY_HORDE             = 15906,
+    SOUND_VICTORY_ALLIANCE          = 15907,
+    SOUND_DEFEAT_ALLIANCE           = 15908,
+    SOUND_WALL_DESTROYED_ALLIANCE   = 15909,
+    SOUND_WALL_DESTROYED_HORDE      = 15910,
+    SOUND_WALL_ATTACKED_HORDE       = 15911,
+    SOUND_WALL_ATTACKED_ALLIANCE    = 15912
+};
+
+enum SATexts
+{
+    // Kanrethad
+    TEXT_ROUND_STARTED              = 1,
+    TEXT_ROUND_1_FINISHED           = 2,
+
+    // Rigger Sparklight / Gorgril Rigspark
+    TEXT_SPARKLIGHT_RIGSPARK_SPAWN  = 1,
+
+    // World Trigger
+    TEXT_BLUE_GATE_UNDER_ATTACK     = 1,
+    TEXT_GREEN_GATE_UNDER_ATTACK    = 2,
+    TEXT_RED_GATE_UNDER_ATTACK      = 3,
+    TEXT_PURPLE_GATE_UNDER_ATTACK   = 4,
+    TEXT_YELLOW_GATE_UNDER_ATTACK   = 5,
+    TEXT_YELLOW_GATE_DESTROYED      = 6,
+    TEXT_PURPLE_GATE_DESTROYED      = 7,
+    TEXT_RED_GATE_DESTROYED         = 8,
+    TEXT_GREEN_GATE_DESTROYED       = 9,
+    TEXT_BLUE_GATE_DESTROYED        = 10,
+    TEXT_EAST_GRAVEYARD_CAPTURED_A  = 11,
+    TEXT_WEST_GRAVEYARD_CAPTURED_A  = 12,
+    TEXT_SOUTH_GRAVEYARD_CAPTURED_A = 13,
+    TEXT_EAST_GRAVEYARD_CAPTURED_H  = 14,
+    TEXT_WEST_GRAVEYARD_CAPTURED_H  = 15,
+    TEXT_SOUTH_GRAVEYARD_CAPTURED_H = 16,
+    TEXT_ANCIENT_GATE_UNDER_ATTACK  = 17,
+    TEXT_ANCIENT_GATE_DESTROYED     = 18
+};
+
+enum SAWorldStates
+{
+    BG_SA_TIMER                     = 3557,
     BG_SA_ALLY_ATTACKS              = 4352,
     BG_SA_HORDE_ATTACKS             = 4353,
     BG_SA_PURPLE_GATEWS             = 3614,
@@ -67,16 +177,11 @@ enum BG_SA_WorldStates
     BG_SA_RIGHT_GY_HORDE            = 3632,
     BG_SA_LEFT_GY_HORDE             = 3633,
     BG_SA_CENTER_GY_HORDE           = 3634,
-    BG_SA_BONUS_TIMER               = 0xdf3,
+    BG_SA_BONUS_TIMER               = 3571,
     BG_SA_ENABLE_TIMER              = 3564,
-};
-
-enum npc
-{
-    NPC_ANTI_PERSONNAL_CANNON       = 27894,
-    NPC_DEMOLISHER_SA               = 28781,
-    NPC_RIGGER_SPARKLIGHT           = 29260,
-    NPC_GORGRIL_RIGSPARK            = 29262,
+    BG_SA_ATTACKER_TEAM             = 3690,
+    BG_SA_DESTROYED_ALLIANCE_VEHICLES   = 3955,
+    BG_SA_DESTROYED_HORDE_VEHICLES      = 3956,
 };
 
 enum BG_SA_NPCs
@@ -91,11 +196,6 @@ enum BG_SA_NPCs
     BG_SA_GUN_8,
     BG_SA_GUN_9,
     BG_SA_GUN_10,
-    BG_SA_NPC_TRIGGER_1,
-    BG_SA_NPC_TRIGGER_2,
-    BG_SA_NPC_TRIGGER_3,
-    BG_SA_NPC_TRIGGER_4,
-    BG_SA_NPC_TRIGGER_5,
     BG_SA_DEMOLISHER_1,
     BG_SA_DEMOLISHER_2,
     BG_SA_DEMOLISHER_3,
@@ -106,6 +206,7 @@ enum BG_SA_NPCs
     BG_SA_DEMOLISHER_8,
     BG_SA_NPC_SPARKLIGHT,
     BG_SA_NPC_RIGSPARK,
+    BG_SA_NPC_KANRETHAD,
     BG_SA_MAXNPC
 };
 
@@ -114,7 +215,7 @@ enum BG_SA_Boat
     BG_SA_BOAT_ONE_A    = 193182,
     BG_SA_BOAT_TWO_H    = 193183,
     BG_SA_BOAT_ONE_H    = 193184,
-    BG_SA_BOAT_TWO_A    = 193185,
+    BG_SA_BOAT_TWO_A    = 193185
 };
 
 uint32 const BG_SA_NpcEntries[BG_SA_MAXNPC] =
@@ -129,12 +230,6 @@ uint32 const BG_SA_NpcEntries[BG_SA_MAXNPC] =
     NPC_ANTI_PERSONNAL_CANNON,
     NPC_ANTI_PERSONNAL_CANNON,
     NPC_ANTI_PERSONNAL_CANNON,
-    // Triggers
-    23472,
-    23472,
-    23472,
-    23472,
-    23472,
     // 4 beach demolishers
     NPC_DEMOLISHER_SA,
     NPC_DEMOLISHER_SA,
@@ -147,10 +242,12 @@ uint32 const BG_SA_NpcEntries[BG_SA_MAXNPC] =
     NPC_DEMOLISHER_SA,
     // Used Demolisher Salesman
     NPC_RIGGER_SPARKLIGHT,
-    NPC_GORGRIL_RIGSPARK
+    NPC_GORGRIL_RIGSPARK,
+    // Kanrethad
+    NPC_KANRETHAD
 };
 
-float const BG_SA_NpcSpawnlocs[BG_SA_MAXNPC][4] =
+Position const BG_SA_NpcSpawnlocs[BG_SA_MAXNPC] =
 {
     // Cannons
     { 1436.429f, 110.05f, 41.407f, 5.4f },
@@ -163,12 +260,6 @@ float const BG_SA_NpcSpawnlocs[BG_SA_MAXNPC][4] =
     { 1249.634f, -224.189f, 66.72f, 0.635f },
     { 1236.213f, 92.287f, 64.965f, 5.751f },
     { 1215.11f, 57.772f, 64.739f, 5.78f },
-    // Triggers
-    { 1453.49f, -250.453f, 30.896f, 4.2883f},
-    { 1377.05f, 97.036f, 30.8605f, 2.46539f},
-    { 1186.05f, 58.8048f, 56.5491f, 2.75992f},
-    { 1042.83f, -72.839f, 84.8145f, 3.58615f},
-    { 1233.62f, -250.49f, 55.4036f, 3.7016f},
     // Demolishers
     { 1611.597656f, -117.270073f, 8.719355f, 2.513274f},
     { 1575.562500f, -158.421875f, 5.024450f, 2.129302f},
@@ -181,7 +272,8 @@ float const BG_SA_NpcSpawnlocs[BG_SA_MAXNPC][4] =
     { 1404.809570f, 197.027237f, 32.046032f, 3.605401f},
     // Npcs
     { 1348.644165f, -298.786469f, 31.080130f, 1.710423f},
-    { 1358.191040f, 195.527786f, 31.018187f, 4.171337f}
+    { 1358.191040f, 195.527786f, 31.018187f, 4.171337f},
+    { 841.921f, -134.194f, 196.838f, 6.23082f }
 };
 
 enum BG_SA_Objects
@@ -193,6 +285,11 @@ enum BG_SA_Objects
     BG_SA_PURPLE_GATE,
     BG_SA_ANCIENT_GATE,
     BG_SA_TITAN_RELIC,
+    BG_SA_PORTAL_DEFFENDER_BLUE,
+    BG_SA_PORTAL_DEFFENDER_GREEN,
+    BG_SA_PORTAL_DEFFENDER_YELLOW,
+    BG_SA_PORTAL_DEFFENDER_PURPLE,
+    BG_SA_PORTAL_DEFFENDER_RED,
     BG_SA_BOAT_ONE,
     BG_SA_BOAT_TWO,
     BG_SA_SIGIL_1,
@@ -206,16 +303,17 @@ enum BG_SA_Objects
     BG_SA_CENTRAL_FLAG,
     BG_SA_RIGHT_FLAG,
     BG_SA_LEFT_FLAG,
-    BG_SA_PORTAL_DEFFENDER_BLUE,
-    BG_SA_PORTAL_DEFFENDER_GREEN,
-    BG_SA_PORTAL_DEFFENDER_YELLOW,
-    BG_SA_PORTAL_DEFFENDER_PURPLE,
-    BG_SA_PORTAL_DEFFENDER_RED,
     BG_SA_BOMB,
-    BG_SA_MAXOBJ = BG_SA_BOMB + 68
+    BG_SA_MAXOBJ = BG_SA_BOMB+68
 };
 
-float const BG_SA_ObjSpawnlocs[BG_SA_MAXOBJ][4] =
+enum BG_SA_Objectives
+{
+    BG_SA_GATES_DESTROYED       = 231,
+    BG_SA_DEMOLISHERS_DESTROYED = 232
+};
+
+Position const BG_SA_ObjSpawnlocs[BG_SA_MAXOBJ] =
 {
     { 1411.57f, 108.163f, 28.692f, 5.441f },
     { 1055.452f, -108.1f, 82.134f, 0.034f },
@@ -224,6 +322,12 @@ float const BG_SA_ObjSpawnlocs[BG_SA_MAXOBJ][4] =
     { 1214.681f, 81.21f, 53.413f, 5.745f },
     { 878.555f, -108.2f, 117.845f, 0.0f },
     { 836.5f, -108.8f, 120.219f, 0.0f },
+    // Portal
+    {1468.380005f, -225.798996f, 30.896200f, 0.0f}, //blue
+    {1394.270020f, 72.551399f, 31.054300f, 0.0f}, //green
+    {1065.260010f, -89.79501f, 81.073402f, 0.0f}, //yellow
+    {1216.069946f, 47.904301f, 54.278198f, 0.0f}, //purple
+    {1255.569946f, -233.548996f, 56.43699f, 0.0f}, //red
     // Ships
     { 2679.696777f, -826.891235f, 3.712860f, 5.78367f}, //rot2 1 rot3 0.0002f
     { 2574.003662f, 981.261475f, 2.603424f, 0.807696f},
@@ -241,12 +345,6 @@ float const BG_SA_ObjSpawnlocs[BG_SA_MAXOBJ][4] =
     { 1215.108032f, -65.715767f, 70.084267f, -3.124123f},
     { 1338.859253f, -153.327316f, 30.895077f, -2.530723f},
     { 1309.192017f, 9.416233f, 30.893402f, 1.518436f},
-    // Portal
-    {1468.380005f, -225.798996f, 30.896200f, 0.0f}, //blue
-    {1394.270020f, 72.551399f, 31.054300f, 0.0f}, //green
-    {1065.260010f, -89.79501f, 81.073402f, 0.0f}, //yellow
-    {1216.069946f, 47.904301f, 54.278198f, 0.0f}, //purple
-    {1255.569946f, -233.548996f, 56.43699f, 0.0f}, //red
     // Bombs
     {1333.45f, 211.354f, 31.0538f, 5.03666f},
     {1334.29f, 209.582f, 31.0532f, 1.28088f},
@@ -340,6 +438,11 @@ uint32 const BG_SA_ObjEntries[BG_SA_MAXOBJ + BG_SA_FLAG_AMOUNT] =
     190723,
     192549,
     192834,
+    192819,
+    192819,
+    192819,
+    192819,
+    192819,
     0, // Boat
     0, // Boat
     192687,
@@ -353,11 +456,6 @@ uint32 const BG_SA_ObjEntries[BG_SA_MAXOBJ + BG_SA_FLAG_AMOUNT] =
     191310,
     191306,
     191308,
-    192819,
-    192819,
-    192819,
-    192819,
-    192819,
     190753
 };
 
@@ -397,256 +495,216 @@ float const BG_SA_GYOrientation[BG_SA_MAX_GY] =
 
 enum BG_SA_BroadcastTexts
 {
-    BG_SA_TEXT_ALLIANCE_CAPTURED_TITAN_PORTAL = 28944,
-    BG_SA_TEXT_HORDE_CAPTURED_TITAN_PORTAL = 28945,
+    BG_SA_TEXT_ALLIANCE_CAPTURED_TITAN_PORTAL   = 28944,
+    BG_SA_TEXT_HORDE_CAPTURED_TITAN_PORTAL      = 28945,
 
-    BG_SA_TEXT_ROUND_TWO_START_ONE_MINUTE = 29448,
-    BG_SA_TEXT_ROUND_TWO_START_HALF_MINUTE = 29449
+    BG_SA_TEXT_ROUND_TWO_START_ONE_MINUTE       = 29448,
+    BG_SA_TEXT_ROUND_TWO_START_HALF_MINUTE      = 29449
+};
+
+struct GateInfo
+{
+    uint8 GateId;
+    uint32 GameObjectId;
+    uint32 WorldState;
+    uint8 DamagedText;
+    uint8 DestroyedText;
+};
+
+#define MAX_GATES 6
+GateInfo const Gates[MAX_GATES] =
+{
+    { BG_SA_GREEN_GATE,   GO_GATE_OF_THE_GREEN_EMERALD,   BG_SA_GREEN_GATEWS,   TEXT_GREEN_GATE_UNDER_ATTACK,   TEXT_GREEN_GATE_DESTROYED   },
+    { BG_SA_YELLOW_GATE,  GO_GATE_OF_THE_YELLOW_MOON,     BG_SA_YELLOW_GATEWS,  TEXT_YELLOW_GATE_UNDER_ATTACK,  TEXT_YELLOW_GATE_DESTROYED  },
+    { BG_SA_BLUE_GATE,    GO_GATE_OF_THE_BLUE_SAPPHIRE,   BG_SA_BLUE_GATEWS,    TEXT_BLUE_GATE_UNDER_ATTACK,    TEXT_BLUE_GATE_DESTROYED    },
+    { BG_SA_RED_GATE,     GO_GATE_OF_THE_RED_SUN,         BG_SA_RED_GATEWS,     TEXT_RED_GATE_UNDER_ATTACK,     TEXT_RED_GATE_DESTROYED     },
+    { BG_SA_PURPLE_GATE,  GO_GATE_OF_THE_PURPLE_AMETHYST, BG_SA_PURPLE_GATEWS,  TEXT_PURPLE_GATE_UNDER_ATTACK,  TEXT_PURPLE_GATE_DESTROYED  },
+    { BG_SA_ANCIENT_GATE, GO_CHAMBER_OF_ANCIENT_RELICS,   BG_SA_ANCIENT_GATEWS, TEXT_ANCIENT_GATE_UNDER_ATTACK, TEXT_ANCIENT_GATE_DESTROYED }
 };
 
 struct BG_SA_RoundScore
 {
     TeamId winner;
-    Milliseconds time;
-};
-
-const float SOTADefPortalDest[5][4] =
-{
-    { 1388.94f, 103.067f, 34.49f, 5.4571f },
-    { 1043.69f, -87.95f, 87.12f, 0.003f },
-    { 1441.0411f, -240.974f, 35.264f, 0.949f },
-    { 1228.342f, -235.234f, 60.03f, 0.4584f },
-    { 1193.857f, 69.9f, 58.046f, 5.7245f },
+    uint32 time;
 };
 
 struct BattlegroundSAScore final : public BattlegroundScore
 {
     friend class BattlegroundSA;
 
-protected:
-    BattlegroundSAScore(ObjectGuid playerGuid) : BattlegroundScore(playerGuid) { }
+    protected:
+        BattlegroundSAScore(ObjectGuid playerGuid, uint32 team) : BattlegroundScore(playerGuid, team), DemolishersDestroyed(0), GatesDestroyed(0) { }
 
-    void UpdateScore(uint32 type, uint32 value) override
-    {
-        switch (type)
+        void UpdateScore(uint32 type, uint32 value) override
         {
-        case SCORE_DESTROYED_DEMOLISHER:
-            DemolishersDestroyed += value;
-            break;
-        case SCORE_DESTROYED_WALL:
-            GatesDestroyed += value;
-            break;
-        default:
-            BattlegroundScore::UpdateScore(type, value);
-            break;
+            switch (type)
+            {
+                case SCORE_DESTROYED_DEMOLISHER:
+                    DemolishersDestroyed += value;
+                    break;
+                case SCORE_DESTROYED_WALL:
+                    GatesDestroyed += value;
+                    break;
+                default:
+                    BattlegroundScore::UpdateScore(type, value);
+                    break;
+            }
         }
-    }
 
-    void BuildObjectivesBlock(WorldPacket& data) final;
+        void BuildPvPLogPlayerDataPacket(WorldPackets::Battleground::PVPMatchStatistics::PVPMatchPlayerStatistics& playerData) const override
+        {
+            BattlegroundScore::BuildPvPLogPlayerDataPacket(playerData);
 
-    uint32 GetAttr1() const override { return DemolishersDestroyed; }
-    uint32 GetAttr2() const override { return GatesDestroyed; }
+            playerData.Stats.emplace_back(BG_SA_DEMOLISHERS_DESTROYED, DemolishersDestroyed);
+            playerData.Stats.emplace_back(BG_SA_GATES_DESTROYED, GatesDestroyed);
+        }
 
-    uint32 DemolishersDestroyed = 0;
-    uint32 GatesDestroyed = 0;
+        uint32 GetAttr1() const final override { return DemolishersDestroyed; }
+        uint32 GetAttr2() const final override { return GatesDestroyed; }
+
+        uint32 DemolishersDestroyed;
+        uint32 GatesDestroyed;
 };
 
 /// Class for manage Strand of Ancient battleground
-class AC_GAME_API BattlegroundSA : public Battleground
+class BattlegroundSA : public Battleground
 {
-public:
-    BattlegroundSA();
-    ~BattlegroundSA() override;
+    public:
+        BattlegroundSA(BattlegroundTemplate const* battlegroundTemplate);
+        ~BattlegroundSA();
 
-    /**
-     * \brief Called every time for update battle data
-     * -Update timer
-     * -Round switch
-     */
-    void PostUpdateImpl(uint32 diff) override;
+        /**
+         * \brief Called every time for update battle data
+         * -Update timer
+         * -Round switch
+         */
+        void PostUpdateImpl(uint32 diff) override;
 
-    /* inherited from BattlegroundClass */
-    /// Called when a player join battle
-    void AddPlayer(Player* player) override;
-    /// Called when battle start
-    void StartingEventCloseDoors() override;
-    void StartingEventOpenDoors() override;
-    /// Called for ini battleground, after that the first player be entered
-    bool SetupBattleground() override;
-    void Init() override;
-    /// Called for generate packet contain worldstate data
-    void FillInitialWorldStates(WorldPacket& data) override;
-    /// Called when a player deal damage to building (door)
-    void EventPlayerDamagedGO(Player* player, GameObject* go, uint32 eventType) override;
-    /// Called when a player kill a unit in bg
-    void HandleKillUnit(Creature* creature, Player* killer) override;
-    /// Return the nearest graveyard where player can respawn
-    GraveyardStruct const* GetClosestGraveyard(Player* player) override;
-    /// Called when a player click on flag (graveyard flag)
-    void EventPlayerClickedOnFlag(Player* Source, GameObject* gameObject) override;
-    /// Called when a player use a gamobject (relic)
-    void EventPlayerUsedGO(Player* Source, GameObject* object) override;
+        /* inherited from BattlegroundClass */
+        /// Called when a player join battle
+        void AddPlayer(Player* player, BattlegroundQueueTypeId queueId) override;
+        /// Called for ini battleground, after that the first player be entered
+        bool SetupBattleground() override;
+        void Reset() override;
+        /// Called when a player kill a unit in bg
+        void HandleKillUnit(Creature* creature, Unit* killer) override;
+        /// Return the nearest graveyard where player can respawn
+        WorldSafeLocsEntry const* GetClosestGraveyard(Player* player) override;
+        /// Called when someone activates an event
+        void ProcessEvent(WorldObject* /*obj*/, uint32 /*eventId*/, WorldObject* /*invoker*/ = nullptr) override;
+        /// Called when a player click on flag (graveyard flag)
+        void EventPlayerClickedOnFlag(Player* source, GameObject* go) override;
+        /// Called when a player clicked on relic
+        void TitanRelicActivated(Player* clicker);
 
-    /// Return worldstate id, according to door id
-    uint32 GetWorldStateFromGateID(uint32 id)
-    {
-        uint32 uws = 0;
-        switch (id)
+        /// Return GateInfo, relative to bg data, according to gameobject entry
+        GateInfo const* GetGate(uint32 entry)
         {
-            case BG_SA_GREEN_GATE:
-                uws = BG_SA_GREEN_GATEWS;
-                break;
-            case BG_SA_YELLOW_GATE:
-                uws = BG_SA_YELLOW_GATEWS;
-                break;
-            case BG_SA_BLUE_GATE:
-                uws = BG_SA_BLUE_GATEWS;
-                break;
-            case BG_SA_RED_GATE:
-                uws = BG_SA_RED_GATEWS;
-                break;
-            case BG_SA_PURPLE_GATE:
-                uws = BG_SA_PURPLE_GATEWS;
-                break;
-            case BG_SA_ANCIENT_GATE:
-                uws = BG_SA_ANCIENT_GATEWS;
-                break;
+            for (uint8 i = 0; i < MAX_GATES; ++i)
+                if (Gates[i].GameObjectId == entry)
+                    return &Gates[i];
+            return nullptr;
         }
-        return uws;
-    }
 
-    /// Called on battleground ending
-    void EndBattleground(TeamId winnerTeamId) override;
+        /// Called on battleground ending
+        void EndBattleground(Team winner) override;
 
-    /// CAlled when a player leave battleground
-    void RemovePlayer(Player* player) override;
-    void HandleAreaTrigger(Player* player, uint32 trigger) override;
+        /// Called when a player leave battleground
+        void RemovePlayer(Player* player, ObjectGuid guid, uint32 team) override;
+        void HandleAreaTrigger(Player* source, uint32 trigger, bool entered) override;
 
-    // Teleporters
-    void DefendersPortalTeleport(GameObject* portal, Player* plr);
+        /* Scorekeeping */
 
-    // Achievements
-    bool AllowDefenseOfTheAncients(Player* source);
+        // Control Phase Shift
+        bool IsSpellAllowed(uint32 spellId, Player const* player) const override;
 
-    // Achievement: Not Even a Scratch
-    bool notEvenAScratch(TeamId teamId) const { return _notEvenAScratch[teamId]; }
+        bool UpdatePlayerScore(Player* player, uint32 type, uint32 value, bool doAddHonor = true) override;
 
-private:
-    /// Return gate id, relative to bg data, according to gameobject id
-    uint32 GetGateIDFromEntry(uint32 id)
-    {
-        uint32 i = 0;
-        switch (id)
-        {
-            case 190722:
-                i = BG_SA_GREEN_GATE;
-                break; //Green gate destroyed
-            case 190724:
-                i = BG_SA_BLUE_GATE;
-                break; //blue gate
-            case 190726:
-                i = BG_SA_RED_GATE;
-                break; //red gate
-            case 190723:
-                i = BG_SA_PURPLE_GATE;
-                break; //purple gate
-            case 190727:
-                i = BG_SA_YELLOW_GATE;
-                break; //yellow gate
-            case 192549:
-                i = BG_SA_ANCIENT_GATE;
-                break; //ancient gate
-        }
-        return i;
-    }
-    /**
-     * \brief Called on setup and between the two round
-     * -Delete all gameobject / creature
-     * -Respawn all gameobject / creature to have good faction
-     */
-    bool ResetObjs();
-    /// Called for start ship movement
-    void StartShips();
-    /**
-     * \brief Called between the two round
-     * -Teleport all players to good location
-     */
-    void TeleportPlayers();
-    void TeleportToEntrancePosition(Player* player);
-    /**
-     * \brief Called on start and between the two round
-     * -Update faction of all vehicle
-     */
-    void OverrideGunFaction();
-    /// Set selectable or not demolisher, called on battle start, when boats arrive to dock
-    void DemolisherStartState(bool start);
-    /// Checks if a player can interact with the given object
-    bool CanInteractWithObject(uint32 objectId);
-    /// Updates interaction flags of specific objects
-    void UpdateObjectInteractionFlags(uint32 objectId);
-    void UpdateObjectInteractionFlags();
-    /**
-     * \brief Called when a gate is destroy
-     * -Give honor to player witch destroy it
-     * -Update worldstate
-     * -Delete gameobject in front of door (lighting object, with different colours for each door)
-     */
-    void DestroyGate(Player* player, GameObject* go) override;
-    /// Update timer worldstate
-    void SendTime();
-    /**
-     * \brief Called when a graveyard is capture
-     * -Update spiritguide
-     * -Update gameobject (flag)
-     * -Update Worldstate
-     * -Send warning for announce this
-     * \param i : id of graveyard
-     * \param Source : Player who capture gy
-     */
-    void CaptureGraveyard(BG_SA_Graveyards i, Player* Source);
-    /// Switch on/off timer worldstate
-    void ToggleTimer();
+    private:
 
-    /// Respawn dead demolisher
-    void UpdateDemolisherSpawns();
+        /**
+         * \brief Called on setup and between the two round
+         * -Delete all gameobject / creature
+         * -Respawn all gameobject / creature to have good faction
+         */
+        bool ResetObjs();
+        /// Called for start ship movement
+        void StartShips();
+        /**
+         * \brief Called between the two round
+         * -Teleport all players to good location
+         */
+        void TeleportPlayers();
+        void TeleportToEntrancePosition(Player* player);
+        /**
+         * \brief Called on start and between the two round
+         * -Update faction of all vehicle
+         */
+        void OverrideGunFaction();
+        /// Set selectable or not demolisher, called on battle start, when boats arrive to dock
+        void DemolisherStartState(bool start);
+        /// Checks if a player can interact with the given object
+        bool CanInteractWithObject(uint32 objectId);
+        /// Updates interaction flags of specific objects
+        void UpdateObjectInteractionFlags(uint32 objectId);
+        void UpdateObjectInteractionFlags();
+        /**
+         * \brief Called when a gate is destroy
+         * -Give honor to player witch destroy it
+         * -Update worldstate
+         * -Delete gameobject in front of door (lighting object, with different colours for each door)
+         */
+        void DestroyGate(Player* player, GameObject* go) override;
+        /**
+         * \brief Called when a graveyard is capture
+         * -Update spiritguide
+         * -Update gameobject (flag)
+         * -Update Worldstate
+         * -Send warning for announce this
+         * \param i : id of graveyard
+         * \param Source : Player who capture gy
+         */
+        void CaptureGraveyard(BG_SA_Graveyards i, Player* Source);
+        /// Switch on/off timer worldstate
+        void ToggleTimer();
 
-    /// Send packet to player for create boats (client part)
-    void SendTransportInit(Player* player);
-    /// Send packet to player for destroy boats (client part)
-    void SendTransportsRemove(Player* player);
+        /// Respawn dead demolisher
+        void UpdateDemolisherSpawns();
 
-    /// Id of attacker team
-    TeamId Attackers;
-    /// Totale elapsed time of current round
-    Milliseconds TotalTime;
-    /// Max time of round
-    Milliseconds EndRoundTimer;
-    /// For know if boats has start moving or not yet
-    bool ShipsStarted;
-    /// Status of each gate (Destroy/Damage/Intact)
-    BG_SA_GateState GateStatus[6];
-    /// Statu of battle (Start or not, and what round)
-    BG_SA_Status Status;
-    /// Team witch conntrol each graveyard
-    TeamId GraveyardStatus[BG_SA_MAX_GY];
-    /// Score of each round
-    BG_SA_RoundScore RoundScores[2];
-    /// used for know we are in timer phase or not (used for worldstate update)
-    bool TimerEnabled;
-    /// 5secs before starting the 1min countdown for second round
-    uint32 UpdateWaitTimer;
-    /// for know if warning about second round start has been sent
-    bool SignaledRoundTwo;
-    /// for know if warning about second round start has been sent
-    bool SignaledRoundTwoHalfMin;
-    /// for know if second round has been init
-    bool InitSecondRound;
-    std::map<uint32/*id*/, uint32/*timer*/> DemoliserRespawnList;
+        /// Send packet to player for create boats (client part)
+        void SendTransportInit(Player* player);
+        /// Send packet to player for destroy boats (client part)
+        void SendTransportsRemove(Player* player);
 
-    // xinef:
-    bool _relicClicked;
+        bool IsGateDestroyed(BG_SA_Objects gateId) const;
 
-    // Achievement: Not Even a Scratch
-    bool _notEvenAScratch[PVP_TEAMS_COUNT];
+        /// Id of attacker team
+        TeamId Attackers;
+
+        /// Totale elapsed time of current round
+        uint32 TotalTime;
+        /// Max time of round
+        uint32 EndRoundTimer;
+        /// For know if boats has start moving or not yet
+        bool ShipsStarted;
+        /// Status of each gate (Destroy/Damage/Intact)
+        BG_SA_GateState GateStatus[MAX_GATES];
+        /// Statu of battle (Start or not, and what round)
+        BG_SA_Status Status;
+        /// Team witch conntrol each graveyard
+        TeamId GraveyardStatus[BG_SA_MAX_GY];
+        /// Score of each round
+        BG_SA_RoundScore RoundScores[2];
+        /// used for know we are in timer phase or not (used for worldstate update)
+        bool TimerEnabled;
+        /// 5secs before starting the 1min countdown for second round
+        uint32 UpdateWaitTimer;
+        /// for know if warning about second round start has been sent
+        bool SignaledRoundTwo;
+        /// for know if warning about second round start has been sent
+        bool SignaledRoundTwoHalfMin;
+        /// for know if second round has been init
+        bool InitSecondRound;
+        std::map<uint32/*id*/, uint32/*timer*/> DemoliserRespawnList;
 };
 #endif

@@ -1,155 +1,128 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "GameTime.h"
-#include "InstanceMapScript.h"
+#include "ScriptMgr.h"
+#include "Creature.h"
 #include "InstanceScript.h"
-#include "SpellScript.h"
-#include "SpellScriptLoader.h"
 #include "the_botanica.h"
+
+DungeonEncounterData const encounters[] =
+{
+    { DATA_COMMANDER_SARANNIS, {{ 1925 }} },
+    { DATA_HIGH_BOTANIST_FREYWINN, {{ 1926 }} },
+    { DATA_THORNGRIN_THE_TENDER, {{ 1928 }} },
+    { DATA_LAJ, {{ 1927 }} },
+    { DATA_WARP_SPLINTER, {{ 1929 }} }
+};
 
 class instance_the_botanica : public InstanceMapScript
 {
-public:
-    instance_the_botanica() : InstanceMapScript("instance_the_botanica", 553) { }
+    public:
+        instance_the_botanica() : InstanceMapScript(BotanicaScriptName, 553) { }
 
-    struct instance_the_botanica_InstanceMapScript : public InstanceScript
-    {
-        instance_the_botanica_InstanceMapScript(Map* map) : InstanceScript(map)
+        struct instance_the_botanica_InstanceMapScript : public InstanceScript
         {
-            SetHeaders(DataHeader);
-            SetBossNumber(MAX_ENCOUNTER);
-        }
-    };
-
-    InstanceScript* GetInstanceScript(InstanceMap* map) const override
-    {
-        return new instance_the_botanica_InstanceMapScript(map);
-    }
-};
-
-class spell_botanica_call_of_the_falcon_aura : public AuraScript
-{
-    PrepareAuraScript(spell_botanica_call_of_the_falcon_aura);
-
-    bool Load() override
-    {
-        _falconSet.clear();
-        return true;
-    }
-
-    void HandleEffectApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        std::list<Creature*> creatureList;
-        GetUnitOwner()->GetCreaturesWithEntryInRange(creatureList, 80.0f, NPC_BLOODFALCON);
-        for (std::list<Creature*>::const_iterator itr = creatureList.begin(); itr != creatureList.end(); ++itr)
-        {
-            (*itr)->TauntApply(GetUnitOwner());
-            (*itr)->AddThreat(GetUnitOwner(), 10000000.0f);
-            _falconSet.insert((*itr)->GetGUID());
-        }
-    }
-
-    void HandleEffectRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        for (ObjectGuid const& guid : _falconSet)
-            if (Creature* falcon = ObjectAccessor::GetCreature(*GetUnitOwner(), guid))
+            instance_the_botanica_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
             {
-                falcon->TauntFadeOut(GetUnitOwner());
-                falcon->AddThreat(GetUnitOwner(), -10000000.0f);
-            }
-    }
-
-    void Register() override
-    {
-        OnEffectApply += AuraEffectApplyFn(spell_botanica_call_of_the_falcon_aura::HandleEffectApply, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
-        OnEffectRemove += AuraEffectRemoveFn(spell_botanica_call_of_the_falcon_aura::HandleEffectRemove, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
-    }
-
-private:
-    GuidSet _falconSet;
-};
-
-class spell_botanica_shift_form_aura : public AuraScript
-{
-    PrepareAuraScript(spell_botanica_shift_form_aura);
-
-    bool Load() override
-    {
-        _lastSchool = 0;
-        _lastForm = 0;
-        _swapTime = 0;
-        return true;
-    }
-
-    bool CheckProc(ProcEventInfo& eventInfo)
-    {
-        if (SpellInfo const* spellInfo = eventInfo.GetSpellInfo())
-        {
-            if ((spellInfo->GetSchoolMask() & _lastSchool) && _swapTime > GameTime::GetGameTime().count())
-                return false;
-
-            uint32 form = 0;
-            switch (GetFirstSchoolInMask(spellInfo->GetSchoolMask()))
-            {
-                case SPELL_SCHOOL_FIRE:
-                    form = SPELL_FIRE_FORM;
-                    break;
-                case SPELL_SCHOOL_FROST:
-                    form = SPELL_FROST_FORM;
-                    break;
-                case SPELL_SCHOOL_ARCANE:
-                    form = SPELL_ARCANE_FORM;
-                    break;
-                case SPELL_SCHOOL_SHADOW:
-                    form = SPELL_SHADOW_FORM;
-                    break;
-                default:
-                    break;
+                SetHeaders(DataHeader);
+                SetBossNumber(EncounterCount);
+                LoadDungeonEncounterData(encounters);
             }
 
-            if (form)
+            void OnCreatureCreate(Creature* creature) override
             {
-                _swapTime = GameTime::GetGameTime().count() + 6;
-                _lastSchool = spellInfo->GetSchoolMask();
-                GetUnitOwner()->RemoveAurasDueToSpell(_lastForm);
-                _lastForm = form;
-                GetUnitOwner()->CastSpell(GetUnitOwner(), _lastForm, true);
+                switch (creature->GetEntry())
+                {
+                    case NPC_COMMANDER_SARANNIS:
+                        CommanderSarannisGUID = creature->GetGUID();
+                        break;
+                    case NPC_HIGH_BOTANIST_FREYWINN:
+                        HighBotanistFreywinnGUID = creature->GetGUID();
+                        break;
+                    case NPC_THORNGRIN_THE_TENDER:
+                        ThorngrinTheTenderGUID = creature->GetGUID();
+                        break;
+                    case NPC_LAJ:
+                        LajGUID = creature->GetGUID();
+                        break;
+                    case NPC_WARP_SPLINTER:
+                        WarpSplinterGUID = creature->GetGUID();
+                        break;
+                    default:
+                        break;
+                }
             }
+
+            ObjectGuid GetGuidData(uint32 type) const override
+            {
+                switch (type)
+                {
+                    case DATA_COMMANDER_SARANNIS:
+                        return CommanderSarannisGUID;
+                    case DATA_HIGH_BOTANIST_FREYWINN:
+                        return HighBotanistFreywinnGUID;
+                    case DATA_THORNGRIN_THE_TENDER:
+                        return ThorngrinTheTenderGUID;
+                    case DATA_LAJ:
+                        return LajGUID;
+                    case DATA_WARP_SPLINTER:
+                        return WarpSplinterGUID;
+                    default:
+                        break;
+                }
+
+                return ObjectGuid::Empty;
+            }
+
+            bool SetBossState(uint32 type, EncounterState state) override
+            {
+                if (!InstanceScript::SetBossState(type, state))
+                    return false;
+
+                switch (type)
+                {
+                    case DATA_COMMANDER_SARANNIS:
+                    case DATA_HIGH_BOTANIST_FREYWINN:
+                    case DATA_THORNGRIN_THE_TENDER:
+                    case DATA_LAJ:
+                    case DATA_WARP_SPLINTER:
+                        break;
+                    default:
+                        break;
+                }
+
+                return true;
+            }
+
+        protected:
+            ObjectGuid CommanderSarannisGUID;
+            ObjectGuid HighBotanistFreywinnGUID;
+            ObjectGuid ThorngrinTheTenderGUID;
+            ObjectGuid LajGUID;
+            ObjectGuid WarpSplinterGUID;
+        };
+
+        InstanceScript* GetInstanceScript(InstanceMap* map) const override
+        {
+            return new instance_the_botanica_InstanceMapScript(map);
         }
-
-        return false;
-    }
-
-    void Register() override
-    {
-        DoCheckProc += AuraCheckProcFn(spell_botanica_shift_form_aura::CheckProc);
-    }
-
-private:
-    uint32 _lastSchool;
-    uint32 _lastForm;
-    uint32 _swapTime;
 };
 
 void AddSC_instance_the_botanica()
 {
-    new instance_the_botanica();
-    RegisterSpellScript(spell_botanica_call_of_the_falcon_aura);
-    RegisterSpellScript(spell_botanica_shift_form_aura);
+    new instance_the_botanica;
 }

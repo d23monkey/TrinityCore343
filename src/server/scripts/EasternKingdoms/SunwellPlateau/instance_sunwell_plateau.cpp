@@ -1,153 +1,140 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "InstanceMapScript.h"
+#include "ScriptMgr.h"
+#include "AreaBoundary.h"
 #include "InstanceScript.h"
+#include "Log.h"
+#include "Map.h"
 #include "Player.h"
-#include "SpellScript.h"
-#include "SpellScriptLoader.h"
 #include "sunwell_plateau.h"
+
+/* Sunwell Plateau:
+0 - Kalecgos and Sathrovarr
+1 - Brutallus
+2 - Felmyst
+3 - Eredar Twins (Alythess and Sacrolash)
+4 - M'uru
+5 - Kil'Jaeden
+*/
 
 DoorData const doorData[] =
 {
-    { GO_FIRE_BARRIER,     DATA_FELMYST_DOORS,  DOOR_TYPE_PASSAGE },
-    { GO_MURUS_GATE_1,     DATA_MURU,     DOOR_TYPE_ROOM   },
-    { GO_MURUS_GATE_2,     DATA_MURU,     DOOR_TYPE_PASSAGE },
-    { GO_BOSS_COLLISION_1, DATA_KALECGOS, DOOR_TYPE_ROOM   },
-    { GO_BOSS_COLLISION_2, DATA_KALECGOS, DOOR_TYPE_ROOM   },
-    { GO_FORCE_FIELD,      DATA_KALECGOS, DOOR_TYPE_ROOM   },
-    { 0,                   0,             DOOR_TYPE_ROOM   } // END
+    { GO_FIRE_BARRIER,     DATA_FELMYST,  EncounterDoorBehavior::OpenWhenDone },
+    { GO_MURUS_GATE_1,     DATA_MURU,     EncounterDoorBehavior::OpenWhenNotInProgress },
+    { GO_MURUS_GATE_2,     DATA_MURU,     EncounterDoorBehavior::OpenWhenDone },
+    { GO_BOSS_COLLISION_1, DATA_KALECGOS, EncounterDoorBehavior::OpenWhenNotInProgress },
+    { GO_BOSS_COLLISION_2, DATA_KALECGOS, EncounterDoorBehavior::OpenWhenNotInProgress },
+    { GO_FORCE_FIELD,      DATA_KALECGOS, EncounterDoorBehavior::OpenWhenNotInProgress },
+    { 0,                   0,             EncounterDoorBehavior::OpenWhenNotInProgress } // END
 };
 
 ObjectData const creatureData[] =
 {
-    { NPC_KALECGOS,               DATA_KALECGOS      },
-    { NPC_BRUTALLUS,              DATA_BRUTALLUS     },
-    { NPC_FELMYST,                DATA_FELMYST       },
-    { NPC_MURU,                   DATA_MURU          },
-    { NPC_LADY_SACROLASH,         DATA_SACROLASH     },
-    { NPC_GRAND_WARLOCK_ALYTHESS, DATA_ALYTHESS      },
-    { NPC_MADRIGOSA,              DATA_MADRIGOSA     },
-    { NPC_SATHROVARR,             DATA_SATHROVARR    },
-    { NPC_KILJAEDEN_CONTROLLER,   DATA_KJ_CONTROLLER },
-    { NPC_ANVEENA,                DATA_ANVEENA       },
-    { NPC_KALECGOS_KJ,            DATA_KALECGOS_KJ   },
-    { 0,                          0                  }
+    { NPC_KALECGOS,               DATA_KALECGOS_DRAGON      },
+    { NPC_KALECGOS_HUMAN,         DATA_KALECGOS_HUMAN       },
+    { NPC_SATHROVARR,             DATA_SATHROVARR           },
+    { NPC_BRUTALLUS,              DATA_BRUTALLUS            },
+    { NPC_MADRIGOSA,              DATA_MADRIGOSA            },
+    { NPC_FELMYST,                DATA_FELMYST              },
+    { NPC_GRAND_WARLOCK_ALYTHESS, DATA_ALYTHESS             },
+    { NPC_LADY_SACROLASH,         DATA_SACROLASH            },
+    { NPC_MURU,                   DATA_MURU                 },
+    { NPC_KILJAEDEN,              DATA_KILJAEDEN            },
+    { NPC_KILJAEDEN_CONTROLLER,   DATA_KILJAEDEN_CONTROLLER },
+    { NPC_ANVEENA,                DATA_ANVEENA              },
+    { NPC_KALECGOS_KJ,            DATA_KALECGOS_KJ          },
+    { 0,                          0                         } // END
 };
 
-ObjectData const gameObjectData[] =
+BossBoundaryData const boundaries =
 {
-    { GO_ICE_BARRIER,                   DATA_ICEBARRIER                     },
-    { GO_ORB_OF_THE_BLUE_DRAGONFLIGHT1, DATA_ORB_OF_THE_BLUE_DRAGONFLIGHT_1 },
-    { GO_ORB_OF_THE_BLUE_DRAGONFLIGHT2, DATA_ORB_OF_THE_BLUE_DRAGONFLIGHT_2 },
-    { GO_ORB_OF_THE_BLUE_DRAGONFLIGHT3, DATA_ORB_OF_THE_BLUE_DRAGONFLIGHT_3 },
-    { GO_ORB_OF_THE_BLUE_DRAGONFLIGHT4, DATA_ORB_OF_THE_BLUE_DRAGONFLIGHT_4 },
-    { 0,                                0                                   }
+    { DATA_KALECGOS, new BoundaryUnionBoundary(new CircleBoundary(Position(1704.9f, 928.4f), 34.0), new RectangleBoundary(1689.2f, 1713.3f, 762.2f, 1074.8f)) }
 };
 
-ObjectData const summonData[] =
+DungeonEncounterData const encounters[] =
 {
-    { NPC_DEMONIC_VAPOR_TRAIL,    DATA_FELMYST       },
-    { NPC_UNYIELDING_DEAD,        DATA_FELMYST       },
-    { NPC_DARKNESS,               DATA_MURU          },
-    { NPC_VOID_SENTINEL,          DATA_MURU          },
-    { NPC_VOID_SPAWN,             DATA_MURU          },
-    { NPC_FELFIRE_PORTAL,         DATA_KJ_CONTROLLER },
-    { NPC_VOLATILE_FELFIRE_FIEND, DATA_KJ_CONTROLLER },
-    { NPC_SHIELD_ORB,             DATA_KJ_CONTROLLER },
-    { NPC_SINISTER_REFLECTION,    DATA_KJ_CONTROLLER },
-    { 0,                          0                  }
+    { DATA_KALECGOS, {{ 724 }} },
+    { DATA_BRUTALLUS, {{ 725 }} },
+    { DATA_FELMYST, {{ 726 }} },
+    { DATA_EREDAR_TWINS, {{ 727 }} },
+    { DATA_MURU, {{ 728 }} },
+    { DATA_KILJAEDEN, {{ 729 }} }
 };
 
 class instance_sunwell_plateau : public InstanceMapScript
 {
-public:
-    instance_sunwell_plateau() : InstanceMapScript("instance_sunwell_plateau", 580) { }
+    public:
+        instance_sunwell_plateau() : InstanceMapScript(SunwellPlateauScriptName, 580) { }
 
-    struct instance_sunwell_plateau_InstanceMapScript : public InstanceScript
-    {
-        instance_sunwell_plateau_InstanceMapScript(Map* map) : InstanceScript(map)
+        struct instance_sunwell_plateau_InstanceMapScript : public InstanceScript
         {
-            SetHeaders(DataHeader);
-            SetBossNumber(MAX_ENCOUNTERS);
-            LoadDoorData(doorData);
-            LoadObjectData(creatureData, gameObjectData);
-            LoadSummonData(summonData);
-        }
+            instance_sunwell_plateau_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
+            {
+                SetHeaders(DataHeader);
+                SetBossNumber(EncounterCount);
+                LoadDoorData(doorData);
+                LoadObjectData(creatureData, nullptr);
+                LoadBossBoundaries(boundaries);
+                LoadDungeonEncounterData(encounters);
+            }
 
-        void OnPlayerEnter(Player* player) override
+            Player const* GetPlayerInMap() const
+            {
+                Map::PlayerList const& players = instance->GetPlayers();
+
+                if (!players.isEmpty())
+                {
+                    for (Map::PlayerList::const_iterator itr = players.begin(); itr != players.end(); ++itr)
+                    {
+                        Player* player = itr->GetSource();
+                        if (player && !player->HasAura(45839))
+                            return player;
+                    }
+                }
+                else
+                    TC_LOG_DEBUG("scripts", "Instance Sunwell Plateau: GetPlayerInMap, but PlayerList is empty!");
+
+                return nullptr;
+            }
+
+            ObjectGuid GetGuidData(uint32 id) const override
+            {
+                switch (id)
+                {
+                    case DATA_PLAYER_GUID:
+                    {
+                        Player const* target = GetPlayerInMap();
+                        return target ? target->GetGUID() : ObjectGuid::Empty;
+                    }
+                    default:
+                        break;
+                }
+                return ObjectGuid::Empty;
+            }
+        };
+
+        InstanceScript* GetInstanceScript(InstanceMap* map) const override
         {
-            instance->LoadGrid(1477.94f, 643.22f);
-            instance->LoadGrid(1641.45f, 988.08f);
-            if (GameObject* gobj = GetGameObject(DATA_ICEBARRIER))
-                gobj->SendUpdateToPlayer(player);
+            return new instance_sunwell_plateau_InstanceMapScript(map);
         }
-
-        void OnCreatureCreate(Creature* creature) override
-        {
-            if (creature->GetSpawnId() > 0 || !creature->GetOwnerGUID().IsPlayer())
-                creature->CastSpell(creature, SPELL_SUNWELL_RADIANCE, true);
-
-            InstanceScript::OnCreatureCreate(creature);
-        }
-    };
-
-    InstanceScript* GetInstanceScript(InstanceMap* map) const override
-    {
-        return new instance_sunwell_plateau_InstanceMapScript(map);
-    }
-};
-
-enum cataclysmBreath
-{
-    SPELL_CORROSIVE_POISON      = 46293,
-    SPELL_FEVERED_FATIGUE       = 46294,
-    SPELL_HEX                   = 46295,
-    SPELL_NECROTIC_POISON       = 46296,
-    SPELL_PIERCING_SHADOW       = 46297,
-    SPELL_SHRINK                = 46298,
-    SPELL_WAVERING_WILL         = 46299,
-    SPELL_WITHERED_TOUCH        = 46300
-};
-
-class spell_cataclysm_breath : public SpellScript
-{
-    PrepareSpellScript(spell_cataclysm_breath);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_CORROSIVE_POISON, SPELL_FEVERED_FATIGUE, SPELL_HEX, SPELL_NECROTIC_POISON, SPELL_PIERCING_SHADOW, SPELL_SHRINK, SPELL_WAVERING_WILL, SPELL_WITHERED_TOUCH });
-    }
-
-    void HandleAfterCast()
-    {
-        if (Unit* target = GetExplTargetUnit())
-            for (uint8 i = 0; i < 4; ++i)
-                GetCaster()->CastSpell(target, RAND(SPELL_CORROSIVE_POISON, SPELL_FEVERED_FATIGUE, SPELL_HEX, SPELL_NECROTIC_POISON, SPELL_PIERCING_SHADOW, SPELL_SHRINK, SPELL_WAVERING_WILL, SPELL_WITHERED_TOUCH), true);
-    }
-
-    void Register() override
-    {
-        AfterCast += SpellCastFn(spell_cataclysm_breath::HandleAfterCast);
-    }
 };
 
 void AddSC_instance_sunwell_plateau()
 {
     new instance_sunwell_plateau();
-    RegisterSpellScript(spell_cataclysm_breath);
 }

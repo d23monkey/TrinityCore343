@@ -1,231 +1,153 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
 #include "ScriptedCreature.h"
-#include "SpellAuras.h"
 #include "SpellScript.h"
-#include "SpellScriptLoader.h"
 #include "vault_of_archavon.h"
 
-enum Archavon
-{
-    SPELL_ROCK_SHARDS                   = 58678,
-    SPELL_ROCK_SHARDS_LEFT_HAND_VISUAL  = 58689,
-    SPELL_ROCK_SHARDS_RIGHT_HAND_VISUAL = 58692,
-    SPELL_ROCK_SHARDS_DAMAGE_10         = 58695,
-    SPELL_ROCK_SHARDS_DAMAGE_25         = 60883,
-    SPELL_CRUSHING_LEAP_10              = 58960,
-    SPELL_CRUSHING_LEAP_25              = 60894, // Instant (10-80yr range) -- Leaps at an enemy, inflicting 8000 Physical damage, knocking all nearby enemies away, and creating a cloud of choking debris.
-    SPELL_STOMP_10                      = 58663,
-    SPELL_STOMP_25                      = 60880,
-    SPELL_IMPALE_10                     = 58666,
-    SPELL_IMPALE_25                     = 60882, // Lifts an enemy off the ground with a spiked fist, inflicting 47125 to 52875 Physical damage and 9425 to 10575 additional damage each second for 8 sec.
-    SPELL_BERSERK                       = 47008
-};
-
-enum
+enum ArchavonTexts
 {
     EMOTE_BERSERK           = 0,
-    EMOTE_LEAP              = 1 // Not in use
+    EMOTE_LEAP              = 1
 };
 
-enum Events
+enum ArchavonSpells
 {
-    EVENT_ROCK_SHARDS       = 1,
-    EVENT_CHOKING_CLOUD     = 2,
-    EVENT_STOMP             = 3,
-    EVENT_IMPALE            = 4,
-    EVENT_BERSERK           = 5
+    SPELL_ROCK_SHARDS           = 58678,
+    SPELL_ROCK_SHARDS_VISUAL_L  = 58689,
+    SPELL_ROCK_SHARDS_VISUAL_R  = 58692,
+    SPELL_ROCK_SHARDS_DAMAGE_L  = 58695,
+    SPELL_ROCK_SHARDS_DAMAGE_R  = 58696,
+    SPELL_CRUSHING_LEAP         = 58960,
+    SPELL_STOMP                 = 58663,
+    SPELL_IMPALE                = 58666,
+    SPELL_BERSERK               = 47008
 };
 
-// 31125 - Archavon the Stone Watcher
-class boss_archavon : public CreatureScript
+enum ArchavonEvents
 {
-    public:
-        boss_archavon() : CreatureScript("boss_archavon") { }
+    EVENT_ROCK_SHARDS = 1,          // 15s cd
+    EVENT_CHOKING_CLOUD,            // 30s cd
+    EVENT_STOMP,                    // 45s cd
+    EVENT_IMPALE,
+    EVENT_BERSERK                   // 300s cd
+};
 
-        struct boss_archavonAI : public ScriptedAI
+struct boss_archavon : public BossAI
+{
+    boss_archavon(Creature* creature) : BossAI(creature, DATA_ARCHAVON) { }
+
+    void JustEngagedWith(Unit* who) override
+    {
+        events.ScheduleEvent(EVENT_ROCK_SHARDS, 15s);
+        events.ScheduleEvent(EVENT_CHOKING_CLOUD, 30s);
+        events.ScheduleEvent(EVENT_STOMP, 45s);
+        events.ScheduleEvent(EVENT_BERSERK, 5min);
+
+        BossAI::JustEngagedWith(who);
+    }
+
+    // Below UpdateAI may need review/debug.
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
         {
-            boss_archavonAI(Creature* creature) : ScriptedAI(creature)
+            switch (eventId)
             {
-                pInstance = me->GetInstanceScript();
-            }
-
-            InstanceScript* pInstance;
-            EventMap events;
-
-            void Reset() override
-            {
-                events.Reset();
-                if (pInstance)
-                {
-                    if (pInstance->GetData(DATA_STONED))
+                case EVENT_ROCK_SHARDS:
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
+                        DoCast(target, SPELL_ROCK_SHARDS);
+                    events.ScheduleEvent(EVENT_ROCK_SHARDS, 15s);
+                    break;
+                case EVENT_CHOKING_CLOUD:
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, -10.0f, true))
                     {
-                        if (Aura* aur = me->AddAura(SPELL_STONED_AURA, me))
-                        {
-                            aur->SetMaxDuration(60 * MINUTE* IN_MILLISECONDS);
-                            aur->SetDuration(60 * MINUTE* IN_MILLISECONDS);
-                        }
+                        DoCast(target, SPELL_CRUSHING_LEAP, true); // 10y~80y, ignore range
+                        Talk(EMOTE_LEAP, target);
                     }
-
-                    pInstance->SetData(EVENT_ARCHAVON, NOT_STARTED);
-                }
+                    events.ScheduleEvent(EVENT_CHOKING_CLOUD, 30s);
+                    break;
+                case EVENT_STOMP:
+                    DoCastVictim(SPELL_STOMP);
+                    events.ScheduleEvent(EVENT_IMPALE, 3s);
+                    events.ScheduleEvent(EVENT_STOMP, 45s);
+                    break;
+                case EVENT_IMPALE:
+                    DoCastVictim(SPELL_IMPALE);
+                    break;
+                case EVENT_BERSERK:
+                    DoCast(me, SPELL_BERSERK);
+                    Talk(EMOTE_BERSERK);
+                    break;
+                default:
+                    break;
             }
 
-            void AttackStart(Unit* who) override
-            {
-                if (me->HasAura(SPELL_STONED_AURA))
-                {
-                    return;
-                }
-
-                ScriptedAI::AttackStart(who);
-            }
-
-            void JustEngagedWith(Unit* /*who*/) override
-            {
-                events.ScheduleEvent(EVENT_ROCK_SHARDS, 15s);
-                events.ScheduleEvent(EVENT_CHOKING_CLOUD, 30s);
-                events.ScheduleEvent(EVENT_STOMP, 45s);
-                events.ScheduleEvent(EVENT_BERSERK, 5min);
-
-                if (pInstance)
-                {
-                    pInstance->SetData(EVENT_ARCHAVON, IN_PROGRESS);
-                }
-            }
-
-            void JustDied(Unit*) override
-            {
-                if (pInstance)
-                {
-                    pInstance->SetData(EVENT_ARCHAVON, DONE);
-                }
-            }
-
-            void UpdateAI(uint32 diff) override
-            {
-                if (!UpdateVictim())
-                {
-                    return;
-                }
-
-                events.Update(diff);
-
-                if (me->HasUnitState(UNIT_STATE_CASTING))
-                {
-                    return;
-                }
-
-                switch (events.ExecuteEvent())
-                {
-                    case EVENT_ROCK_SHARDS:
-                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
-                        {
-                            DoCast(target, SPELL_ROCK_SHARDS);
-                        }
-
-                        events.Repeat(15s);
-                        break;
-                    case EVENT_CHOKING_CLOUD:
-                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1))
-                        {
-                            DoCast(target, RAID_MODE(SPELL_CRUSHING_LEAP_10, SPELL_CRUSHING_LEAP_25), true); //10y ~ 80y, ignore range
-                        }
-
-                        events.Repeat(30s);
-                        break;
-                    case EVENT_STOMP:
-                    {
-                        char buffer[100];
-                        snprintf(buffer, sizeof(buffer), "Archavon the Stone Watcher lunges for %s!", me->GetVictim()->GetName().c_str());
-                        me->TextEmote(buffer);
-
-                        DoCastVictim(RAID_MODE(SPELL_STOMP_10, SPELL_STOMP_25));
-
-                        events.Repeat(45s);
-                        events.ScheduleEvent(EVENT_IMPALE, 3s);
-                        break;
-                    }
-                    case EVENT_IMPALE:
-                        DoCastVictim(RAID_MODE(SPELL_IMPALE_10, SPELL_IMPALE_25));
-                        break;
-                    case EVENT_BERSERK:
-                        DoCast(me, SPELL_BERSERK, true);
-                        Talk(EMOTE_BERSERK);
-                        break;
-                    default:
-                        break;
-                }
-
-                DoMeleeAttackIfReady();
-            }
-        };
-
-        CreatureAI* GetAI(Creature* creature) const override
-        {
-            return GetVaultOfArchavonAI<boss_archavonAI>(creature);
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
         }
+    }
 };
 
 // 58941 - Rock Shards
 class spell_archavon_rock_shards : public SpellScript
 {
-    PrepareSpellScript(spell_archavon_rock_shards);
-
     bool Validate(SpellInfo const* /*spellInfo*/) override
     {
-        return ValidateSpellInfo({ SPELL_ROCK_SHARDS_LEFT_HAND_VISUAL, SPELL_ROCK_SHARDS_RIGHT_HAND_VISUAL });
+        return ValidateSpellInfo(
+        {
+            SPELL_ROCK_SHARDS_VISUAL_L,
+            SPELL_ROCK_SHARDS_VISUAL_R,
+            SPELL_ROCK_SHARDS_DAMAGE_L,
+            SPELL_ROCK_SHARDS_DAMAGE_R
+        });
     }
 
-        void HandleScript(SpellEffIndex effIndex)
+    void HandleScript(SpellEffIndex /*effIndex*/)
+    {
+        Unit* caster = GetCaster();
+
+        for (uint8 i = 0; i < 3; ++i)
         {
-            PreventHitDefaultEffect(effIndex);
-
-            Unit* caster = GetCaster();
-            Unit* target = GetHitUnit();
-
-            if (!caster || !target)
-            {
-                return;
-            }
-
-            Map* map = caster->GetMap();
-            if (!map)
-            {
-                return;
-            }
-
-            caster->CastSpell(target, SPELL_ROCK_SHARDS_LEFT_HAND_VISUAL, true);
-            caster->CastSpell(target, SPELL_ROCK_SHARDS_RIGHT_HAND_VISUAL, true);
-
-            uint32 spellId = map->Is25ManRaid() ? SPELL_ROCK_SHARDS_DAMAGE_25 : SPELL_ROCK_SHARDS_DAMAGE_10;
-            caster->CastSpell(target, spellId, true);
+            caster->CastSpell(nullptr, SPELL_ROCK_SHARDS_VISUAL_L, true);
+            caster->CastSpell(nullptr, SPELL_ROCK_SHARDS_VISUAL_R, true);
         }
+
+        caster->CastSpell(nullptr, SPELL_ROCK_SHARDS_DAMAGE_L, true);
+        caster->CastSpell(nullptr, SPELL_ROCK_SHARDS_DAMAGE_R, true);
+    }
 
     void Register() override
     {
-        OnEffectHitTarget += SpellEffectFn(spell_archavon_rock_shards::HandleScript, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
+        OnEffectHit += SpellEffectFn(spell_archavon_rock_shards::HandleScript, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
     }
 };
 
 void AddSC_boss_archavon()
 {
-    new boss_archavon();
+    RegisterVaultOfArchavonCreatureAI(boss_archavon);
     RegisterSpellScript(spell_archavon_rock_shards);
 }

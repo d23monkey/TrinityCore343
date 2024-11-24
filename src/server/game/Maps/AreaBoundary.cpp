@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -34,21 +34,18 @@ bool RectangleBoundary::IsWithinBoundaryArea(Position const* pos) const
 // ---== CIRCLE ==---
 CircleBoundary::CircleBoundary(Position const& center, double radius, bool isInverted) :
     AreaBoundary(isInverted), _center(center), _radiusSq(radius*radius) { }
-
 CircleBoundary::CircleBoundary(Position const& center, Position const& pointOnCircle, bool isInverted) :
     AreaBoundary(isInverted), _center(center), _radiusSq(_center.GetDoubleExactDist2dSq(pointOnCircle)) { }
-
 bool CircleBoundary::IsWithinBoundaryArea(Position const* pos) const
 {
     double offX = _center.GetDoublePositionX() - pos->GetPositionX();
     double offY = _center.GetDoublePositionY() - pos->GetPositionY();
-    return offX * offX + offY * offY <= _radiusSq;
+    return offX*offX+offY*offY <= _radiusSq;
 }
 
 // ---== ELLIPSE ==---
 EllipseBoundary::EllipseBoundary(Position const& center, double radiusX, double radiusY, bool isInverted) :
     AreaBoundary(isInverted), _center(center), _radiusYSq(radiusY*radiusY), _scaleXSq(_radiusYSq / (radiusX*radiusX)) { }
-
 bool EllipseBoundary::IsWithinBoundaryArea(Position const* pos) const
 {
     double offX = _center.GetDoublePositionX() - pos->GetPositionX();
@@ -99,32 +96,12 @@ BoundaryUnionBoundary::BoundaryUnionBoundary(AreaBoundary const* b1, AreaBoundar
 {
     ASSERT(b1 && b2);
 }
-
 BoundaryUnionBoundary::~BoundaryUnionBoundary()
 {
     delete _b1;
     delete _b2;
 }
-
 bool BoundaryUnionBoundary::IsWithinBoundaryArea(Position const* pos) const
 {
     return (_b1->IsWithinBoundary(pos) || _b2->IsWithinBoundary(pos));
-}
-
-// ---== INTERSECT OF 2 BOUNDARIES ==---
-BoundaryIntersectBoundary::BoundaryIntersectBoundary(AreaBoundary const* b1, AreaBoundary const* b2, bool isInverted) :
-    AreaBoundary(isInverted), _b1(b1), _b2(b2)
-{
-    ASSERT(b1 && b2);
-}
-
-BoundaryIntersectBoundary::~BoundaryIntersectBoundary()
-{
-    delete _b1;
-    delete _b2;
-}
-
-bool BoundaryIntersectBoundary::IsWithinBoundaryArea(Position const* pos) const
-{
-    return (_b1->IsWithinBoundary(pos) && _b2->IsWithinBoundary(pos));
 }

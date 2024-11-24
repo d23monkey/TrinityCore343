@@ -1,4 +1,4 @@
-Generator command line args
+R"(Generator command line args
 
 --threads           [#]             Max number of threads used by the generator
                                     Default: 3
@@ -39,7 +39,7 @@ Generator command line args
                                     false: skip battlegrounds (default)
 
 --debugOutput       [true|false]    create debugging files for use with RecastDemo
-                                    if you are only creating mmaps for use with Moongose,
+                                    if you are only creating mmaps for use with MaNGOS,
                                     you don't want debugging files
 
                                     false: don't create debugging files (default)
@@ -52,6 +52,8 @@ Generator command line args
                     [#]             Build only the map specified by #
                                     this command will build the map regardless of --skip* option settings
                                     if you do not specify a map number, builds all maps that pass the filters specified by --skip* options
+
+--help                              This message
 
 examples:
 
@@ -66,3 +68,4 @@ builds all tiles of map 0
 
 movement_extractor 0 --tile 34,46
 builds only tile 34,46 of map 0 (this is the southern face of blackrock mountain)
+)"

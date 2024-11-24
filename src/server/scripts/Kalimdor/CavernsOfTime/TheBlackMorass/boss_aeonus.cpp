@@ -1,102 +1,80 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+/*
+Name: Boss_Aeonus
+%Complete: 80
+Comment: Some spells not implemented
+Category: Caverns of Time, The Dark Portal
+*/
+
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
 #include "ScriptedCreature.h"
 #include "the_black_morass.h"
 
-enum Text
+enum Enums
 {
-    SAY_AGGRO                   = 1,
-    SAY_BANISH                  = 2,
-    SAY_SLAY                    = 3,
-    SAY_DEATH                   = 4,
-    EMOTE_FRENZY                = 5
+    SAY_ENTER           = 0,
+    SAY_AGGRO           = 1,
+    SAY_BANISH          = 2,
+    SAY_SLAY            = 3,
+    SAY_DEATH           = 4,
+    EMOTE_FRENZY        = 5,
+
+    SPELL_CLEAVE        = 40504,
+    SPELL_TIME_STOP     = 31422,
+    SPELL_ENRAGE        = 37605,
+    SPELL_SAND_BREATH   = 31473,
+    H_SPELL_SAND_BREATH = 39049
 };
 
-enum Spells
+enum Events
 {
-    SPELL_CLEAVE                = 40504,
-    SPELL_TIME_STOP             = 31422,
-    SPELL_ENRAGE                = 37605,
-    SPELL_SAND_BREATH           = 31473,
-    SPELL_CORRUPT_MEDIVH        = 37853,
-    SPELL_BANISH_DRAGON_HELPER  = 31550
+    EVENT_SANDBREATH    = 1,
+    EVENT_TIMESTOP      = 2,
+    EVENT_FRENZY        = 3
 };
 
 struct boss_aeonus : public BossAI
 {
-    boss_aeonus(Creature* creature) : BossAI(creature, DATA_AEONUS) { }
+    boss_aeonus(Creature* creature) : BossAI(creature, TYPE_AEONUS) { }
 
-    void JustReachedHome() override
-    {
-        if (Creature* medivh = instance->GetCreature(DATA_MEDIVH))
-        {
-            if (me->GetDistance2d(medivh) < 20.0f)
-            {
-                DoCastAOE(SPELL_CORRUPT_MEDIVH);
-            }
-        }
-    }
-
-    void IsSummonedBy(WorldObject* /*summoner*/) override
-    {
-        me->SetReactState(REACT_DEFENSIVE);
-
-        if (Creature* medivh = instance->GetCreature(DATA_MEDIVH))
-        {
-            me->SetHomePosition(medivh->GetPositionX() + 14.0f * cos(medivh->GetAngle(me)), medivh->GetPositionY() + 14.0f * std::sin(medivh->GetAngle(me)), medivh->GetPositionZ(), me->GetAngle(medivh));
-            me->GetMotionMaster()->MoveTargetedHome();
-        }
-    }
+    void Reset() override { }
 
     void JustEngagedWith(Unit* /*who*/) override
     {
-        Talk(SAY_AGGRO);
+        events.ScheduleEvent(EVENT_SANDBREATH, 15s, 30s);
+        events.ScheduleEvent(EVENT_TIMESTOP, 10s, 15s);
+        events.ScheduleEvent(EVENT_FRENZY, 30s, 45s);
 
-        scheduler.Schedule(5s, [this](TaskContext context)
-        {
-            DoCastVictim(SPELL_CLEAVE);
-            context.Repeat(10s);
-        }).Schedule(20s, [this](TaskContext context)
-        {
-            DoCastVictim(SPELL_SAND_BREATH);
-            context.Repeat(20s);
-        }).Schedule(15s, [this](TaskContext context)
-        {
-            DoCastAOE(SPELL_TIME_STOP);
-            context.Repeat(25s);
-        }).Schedule(30s, [this](TaskContext context)
-        {
-            Talk(EMOTE_FRENZY);
-            DoCastSelf(SPELL_ENRAGE);
-            context.Repeat(30s);
-        });
+        Talk(SAY_AGGRO);
     }
 
     void MoveInLineOfSight(Unit* who) override
+
     {
-        if (who->IsCreature() && who->GetEntry() == NPC_TIME_KEEPER)
+        //Despawn Time Keeper
+        if (who->GetTypeId() == TYPEID_UNIT && who->GetEntry() == NPC_TIME_KEEPER)
         {
             if (me->IsWithinDistInMap(who, 20.0f))
             {
                 Talk(SAY_BANISH);
-                DoCastAOE(SPELL_BANISH_DRAGON_HELPER, true);
-                return;
+                Unit::DealDamage(me, who, who->GetHealth(), nullptr, DIRECT_DAMAGE, SPELL_SCHOOL_MASK_NORMAL, nullptr, false);
             }
         }
 
@@ -106,19 +84,56 @@ struct boss_aeonus : public BossAI
     void JustDied(Unit* /*killer*/) override
     {
         Talk(SAY_DEATH);
-        _JustDied();
+
+        instance->SetData(TYPE_RIFT, DONE);
+        instance->SetData(TYPE_MEDIVH, DONE); // FIXME: later should be removed
     }
 
-    void KilledUnit(Unit* victim) override
+    void KilledUnit(Unit* who) override
     {
-        if (victim->IsPlayer())
-        {
+        if (who->GetTypeId() == TYPEID_PLAYER)
             Talk(SAY_SLAY);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        //Return since we have no target
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_SANDBREATH:
+                    DoCastVictim(SPELL_SAND_BREATH);
+                    events.ScheduleEvent(EVENT_SANDBREATH, 15s, 25s);
+                    break;
+                case EVENT_TIMESTOP:
+                    DoCastVictim(SPELL_TIME_STOP);
+                    events.ScheduleEvent(EVENT_TIMESTOP, 20s, 35s);
+                    break;
+                case EVENT_FRENZY:
+                     Talk(EMOTE_FRENZY);
+                     DoCast(me, SPELL_ENRAGE);
+                    events.ScheduleEvent(EVENT_FRENZY, 20s, 35s);
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
         }
     }
 };
 
 void AddSC_boss_aeonus()
 {
-    RegisterTheBlackMorassCreatureAI(boss_aeonus);
+    RegisterBlackMorassCreatureAI(boss_aeonus);
 }

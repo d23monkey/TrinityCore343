@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,14 +20,14 @@
 #include "SmartEnum.h"
 #include <stdexcept>
 
-namespace Acore::Impl::EnumUtilsImpl
+namespace Trinity::Impl::EnumUtilsImpl
 {
 
 /********************************************************************\
 |* data for enum 'ColorTypes' in 'AppenderConsole.h' auto-generated *|
 \********************************************************************/
 template <>
-AC_API_EXPORT EnumText EnumUtils<ColorTypes>::ToString(ColorTypes value)
+TC_API_EXPORT EnumText EnumUtils<ColorTypes>::ToString(ColorTypes value)
 {
     switch (value)
     {
@@ -51,10 +51,10 @@ AC_API_EXPORT EnumText EnumUtils<ColorTypes>::ToString(ColorTypes value)
 }
 
 template <>
-AC_API_EXPORT std::size_t EnumUtils<ColorTypes>::Count() { return 15; }
+TC_API_EXPORT size_t EnumUtils<ColorTypes>::Count() { return 15; }
 
 template <>
-AC_API_EXPORT ColorTypes EnumUtils<ColorTypes>::FromIndex(std::size_t index)
+TC_API_EXPORT ColorTypes EnumUtils<ColorTypes>::FromIndex(size_t index)
 {
     switch (index)
     {
@@ -78,7 +78,7 @@ AC_API_EXPORT ColorTypes EnumUtils<ColorTypes>::FromIndex(std::size_t index)
 }
 
 template <>
-AC_API_EXPORT std::size_t EnumUtils<ColorTypes>::ToIndex(ColorTypes value)
+TC_API_EXPORT size_t EnumUtils<ColorTypes>::ToIndex(ColorTypes value)
 {
     switch (value)
     {

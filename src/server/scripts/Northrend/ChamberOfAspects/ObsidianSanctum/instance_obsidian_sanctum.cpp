@@ -1,193 +1,130 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "ScriptMgr.h"
 #include "AreaBoundary.h"
-#include "CreatureAIImpl.h"
-#include "InstanceMapScript.h"
-#include "Player.h"
-#include "ScriptedCreature.h"
+#include "Creature.h"
+#include "InstanceScript.h"
 #include "obsidian_sanctum.h"
+
+/* Obsidian Sanctum encounters:
+0 - Sartharion
+*/
 
 BossBoundaryData const boundaries =
 {
     { DATA_SARTHARION, new RectangleBoundary(3218.86f, 3275.69f, 484.68f, 572.4f) }
 };
 
+DungeonEncounterData const encounters[] =
+{
+    { DATA_SARTHARION, {{ 1090 }} },
+    { DATA_TENEBRON, {{ 1092 }} },
+    { DATA_SHADRON, {{ 1091 }} },
+    { DATA_VESPERON, {{ 1093 }} }
+};
+
 class instance_obsidian_sanctum : public InstanceMapScript
 {
 public:
-    instance_obsidian_sanctum() : InstanceMapScript("instance_obsidian_sanctum", 615) { }
-
-    InstanceScript* GetInstanceScript(InstanceMap* pMap) const override
-    {
-        return new instance_obsidian_sanctum_InstanceMapScript(pMap);
-    }
+    instance_obsidian_sanctum() : InstanceMapScript(OSScriptName, 615) { }
 
     struct instance_obsidian_sanctum_InstanceMapScript : public InstanceScript
     {
-        instance_obsidian_sanctum_InstanceMapScript(Map* pMap) : InstanceScript(pMap), portalCount(0)
+        instance_obsidian_sanctum_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
         {
             SetHeaders(DataHeader);
-            SetBossNumber(MAX_ENCOUNTERS);
+            SetBossNumber(EncounterCount);
             LoadBossBoundaries(boundaries);
+            LoadDungeonEncounterData(encounters);
         }
 
-        void OnCreatureCreate(Creature* pCreature) override
+        void OnCreatureCreate(Creature* creature) override
         {
-            switch (pCreature->GetEntry())
+            switch (creature->GetEntry())
             {
                 case NPC_SARTHARION:
-                    m_uiSartharionGUID = pCreature->GetGUID();
+                    sartharionGUID = creature->GetGUID();
                     break;
+                // Three dragons below set to active state once created.
+                // We must expect bigger raid to encounter main boss, and then three dragons must be active due to grid differences
                 case NPC_TENEBRON:
-                    m_uiTenebronGUID = pCreature->GetGUID();
+                    tenebronGUID = creature->GetGUID();
+                    creature->setActive(true);
+                    creature->SetFarVisible(true);
                     break;
                 case NPC_SHADRON:
-                    m_uiShadronGUID = pCreature->GetGUID();
+                    shadronGUID = creature->GetGUID();
+                    creature->setActive(true);
+                    creature->SetFarVisible(true);
                     break;
                 case NPC_VESPERON:
-                    m_uiVesperonGUID = pCreature->GetGUID();
+                    vesperonGUID = creature->GetGUID();
+                    creature->setActive(true);
+                    creature->SetFarVisible(true);
                     break;
             }
         }
 
-        ObjectGuid GetGuidData(uint32 uiData) const override
+        bool SetBossState(uint32 type, EncounterState state) override
         {
-            switch (uiData)
+            if (!InstanceScript::SetBossState(type, state))
+                 return false;
+
+            switch (type)
             {
                 case DATA_SARTHARION:
-                    return m_uiSartharionGUID;
                 case DATA_TENEBRON:
-                    return m_uiTenebronGUID;
                 case DATA_SHADRON:
-                    return m_uiShadronGUID;
                 case DATA_VESPERON:
-                    return m_uiVesperonGUID;
+                    break;
+                default:
+                    break;
             }
+            return true;
+        }
 
+        ObjectGuid GetGuidData(uint32 Data) const override
+        {
+            switch (Data)
+            {
+                case DATA_SARTHARION:
+                    return sartharionGUID;
+                case DATA_TENEBRON:
+                    return tenebronGUID;
+                case DATA_SHADRON:
+                    return shadronGUID;
+                case DATA_VESPERON:
+                    return vesperonGUID;
+            }
             return ObjectGuid::Empty;
         }
 
-        bool CheckAchievementCriteriaMeet(uint32 criteria_id, Player const* source, Unit const*  /*target*/, uint32  /*miscvalue1*/) override
-        {
-            switch (criteria_id)
-            {
-                // Gonna Go When the Volcano Blows (10 player) (2047)
-                case 7326:
-                // Gonna Go When the Volcano Blows (25 player) (2048)
-                case 7327:
-                {
-                    Creature const* sartharion = instance->GetCreature(m_uiSartharionGUID);
-                    return sartharion && !sartharion->AI()->GetData(source->GetGUID().GetCounter());
-                }
-                // Less Is More (10 player) (624)
-                case 7189:
-                case 7190:
-                case 7191:
-                case 522:
-                {
-                    return instance->GetPlayersCountExceptGMs() < 9;
-                }
-                // Less Is More (25 player) (1877)
-                case 7185:
-                case 7186:
-                case 7187:
-                case 7188:
-                {
-                    return instance->GetPlayersCountExceptGMs() < 21;
-                }
-                // Twilight Assist (10 player) (2049)
-                case 7328:
-                // Twilight Assist (25 player) (2052)
-                case 7331:
-                {
-                    Creature const* sartharion = instance->GetCreature(m_uiSartharionGUID);
-                    return sartharion && sartharion->AI()->GetData(DATA_ACHIEVEMENT_DRAGONS_COUNT) >= 1;
-                }
-                // Twilight Duo (10 player) (2050)
-                case 7329:
-                // Twilight Duo (25 player) (2053)
-                case 7332:
-                {
-                    Creature const* sartharion = instance->GetCreature(m_uiSartharionGUID);
-                    return sartharion && sartharion->AI()->GetData(DATA_ACHIEVEMENT_DRAGONS_COUNT) >= 2;
-                }
-                // Twilight Zone (10 player) (2051)
-                case 7330:
-                // Twilight Zone (25 player) (2054)
-                case 7333:
-                {
-                    Creature const* sartharion = instance->GetCreature(m_uiSartharionGUID);
-                    return sartharion && sartharion->AI()->GetData(DATA_ACHIEVEMENT_DRAGONS_COUNT) >= 3;
-                }
-            }
-
-            return false;
-        }
-
-        void DoAction(int32 action) override
-        {
-            switch (action)
-            {
-                case ACTION_ADD_PORTAL:
-                {
-                    if (!m_uiPortalGUID)
-                    {
-                        if (Creature* sartharion = instance->GetCreature(m_uiSartharionGUID))
-                        {
-                            if (GameObject* portal = sartharion->SummonGameObject(GO_TWILIGHT_PORTAL, 3247.29f, 529.804f, 58.9595f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0))
-                            {
-                                sartharion->RemoveGameObject(portal, false);
-                                m_uiPortalGUID = portal->GetGUID();
-                            }
-                        }
-
-                        portalCount = 0;
-                    }
-
-                    ++portalCount;
-                    break;
-                }
-                case ACTION_CLEAR_PORTAL:
-                {
-                    --portalCount;
-                    if (!portalCount)
-                    {
-                        if (GameObject* go = instance->GetGameObject(m_uiPortalGUID))
-                        {
-                            go->Delete();
-                        }
-
-                        DoRemoveAurasDueToSpellOnPlayers(SPELL_TWILIGHT_SHIFT);
-                        m_uiPortalGUID.Clear();
-                    }
-                    break;
-                }
-            }
-        }
-
-    private:
-        ObjectGuid m_uiSartharionGUID;
-        ObjectGuid m_uiTenebronGUID;
-        ObjectGuid m_uiShadronGUID;
-        ObjectGuid m_uiVesperonGUID;
-        ObjectGuid m_uiPortalGUID;
-        uint8 portalCount;
+    protected:
+        ObjectGuid sartharionGUID;
+        ObjectGuid tenebronGUID;
+        ObjectGuid shadronGUID;
+        ObjectGuid vesperonGUID;
     };
+
+    InstanceScript* GetInstanceScript(InstanceMap* map) const override
+    {
+        return new instance_obsidian_sanctum_InstanceMapScript(map);
+    }
 };
 
 void AddSC_instance_obsidian_sanctum()

@@ -1,200 +1,183 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
+/*
+ * He should call trash(from the room with Embalming Slime up to frogger(not sure
+  if trash before Embalming Slime too or not)) after aggro
+ */
+
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
 #include "naxxramas.h"
+#include "ScriptedCreature.h"
 
-enum Yells
+enum PatchwerkTexts
 {
-    SAY_AGGRO                       = 0,
-    SAY_SLAY                        = 1,
-    SAY_DEATH                       = 2,
-    EMOTE_BERSERK                   = 3,
-    EMOTE_ENRAGE                    = 4
+    SAY_AGGRO                   = 0,
+    SAY_SLAY                    = 1,
+    SAY_DEATH                   = 2,
+    EMOTE_BERSERK               = 3,
+    EMOTE_FRENZY                = 4
 };
 
-enum Spells
+enum PatchwerkSpells
 {
-    SPELL_HATEFUL_STRIKE_10         = 41926,
-    SPELL_HATEFUL_STRIKE_25         = 59192,
-    SPELL_FRENZY                    = 28131,
-    SPELL_BERSERK                   = 26662,
-    SPELL_SLIME_BOLT                = 32309
+    SPELL_HATEFUL_STRIKE_PRIMER = 28307,
+    SPELL_FRENZY                = 28131,
+    SPELL_BERSERK               = 26662,
+    SPELL_SLIME_BOLT            = 32309
 };
 
-enum Events
+#define SPELL_HATEFUL_STRIKE RAID_MODE(28308,59192)
+
+enum PatchwerkEvents
 {
-    EVENT_HEALTH_CHECK              = 1,
-    EVENT_HATEFUL_STRIKE            = 2,
-    EVENT_SLIME_BOLT                = 3,
-    EVENT_BERSERK                   = 4
+    EVENT_BERSERK = 1,
+    EVENT_HATEFUL,
+    EVENT_SLIME
 };
 
 enum Misc
 {
-    ACHIEV_TIMED_START_EVENT        = 10286
+    ACHIEV_MAKE_QUICK_WERK_OF_HIM_STARTING_EVENT  = 10286
 };
 
-class boss_patchwerk : public CreatureScript
+enum HatefulThreatAmounts
 {
-public:
-    boss_patchwerk() : CreatureScript("boss_patchwerk") { }
+    HATEFUL_THREAT_AMT  = 1000,
+};
 
-    CreatureAI* GetAI(Creature* pCreature) const override
+struct boss_patchwerk : public BossAI
+{
+    boss_patchwerk(Creature* creature) : BossAI(creature, BOSS_PATCHWERK), _enraged(false) { }
+
+    void Reset() override
     {
-        return GetNaxxramasAI<boss_patchwerkAI>(pCreature);
+        _Reset();
+        _enraged = false;
     }
 
-    struct boss_patchwerkAI : public BossAI
+    void KilledUnit(Unit* /*Victim*/) override
     {
-        explicit boss_patchwerkAI(Creature* c) : BossAI(c, BOSS_PATCHWERK)
+        // 20s cd, not random
+        if (!(rand32() % 5))
+            Talk(SAY_SLAY);
+    }
+
+    void JustDied(Unit* /*killer*/) override
+    {
+        _JustDied();
+        Talk(SAY_DEATH);
+    }
+
+    void JustEngagedWith(Unit* who) override
+    {
+        BossAI::JustEngagedWith(who);
+        Talk(SAY_AGGRO);
+        events.ScheduleEvent(EVENT_HATEFUL, 3600ms);
+        events.ScheduleEvent(EVENT_BERSERK, 6min);
+
+        instance->TriggerGameEvent(ACHIEV_MAKE_QUICK_WERK_OF_HIM_STARTING_EVENT);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        while (uint32 eventId = events.ExecuteEvent())
         {
-            pInstance = me->GetInstanceScript();
-        }
-
-        EventMap events;
-        InstanceScript* pInstance;
-
-        void Reset() override
-        {
-            BossAI::Reset();
-            events.Reset();
-        }
-
-        void KilledUnit(Unit* who) override
-        {
-            if (!who->IsPlayer())
-                return;
-
-            if (!urand(0, 3))
+            switch (eventId)
             {
-                Talk(SAY_SLAY);
-            }
-            if (pInstance)
-            {
-                pInstance->SetData(DATA_IMMORTAL_FAIL, 0);
-            }
-        }
+                // Move everything to SPELL_HATEFUL_STRIKE_PRIMER spell script
+                case EVENT_HATEFUL:
+                {
+                    // Hateful Strike targets the highest non-MT threat in melee range on 10man
+                    // and the higher HP target out of the two highest non-MT threats in melee range on 25man
+                    ThreatReference* secondThreat = nullptr;
+                    ThreatReference* thirdThreat = nullptr;
 
-        void JustDied(Unit*  killer) override
-        {
-            BossAI::JustDied(killer);
-            Talk(SAY_DEATH);
-        }
-
-        void JustEngagedWith(Unit* who) override
-        {
-            BossAI::JustEngagedWith(who);
-            Talk(SAY_AGGRO);
-            me->SetInCombatWithZone();
-            events.ScheduleEvent(EVENT_HATEFUL_STRIKE, 1500ms);
-            events.ScheduleEvent(EVENT_BERSERK, 6min);
-            events.ScheduleEvent(EVENT_HEALTH_CHECK, 1s);
-            if (pInstance)
-            {
-                pInstance->DoStartTimedAchievement(ACHIEVEMENT_TIMED_TYPE_EVENT, ACHIEV_TIMED_START_EVENT);
-            }
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
-            {
-                case EVENT_HATEFUL_STRIKE:
+                    ThreatManager& mgr = me->GetThreatManager();
+                    Unit* currentVictim = mgr.GetCurrentVictim();
+                    auto list = mgr.GetModifiableThreatList();
+                    auto it = list.begin(), end = list.end();
+                    if (it == end)
                     {
-                        // Cast Hateful strike on the player with the highest amount of HP within melee distance, and second threat amount
-                        std::list<Unit*> meleeRangeTargets;
-                        Unit* finalTarget = nullptr;
-                        uint8 counter = 0;
-                        auto i = me->GetThreatMgr().GetThreatList().begin();
-                        for (; i != me->GetThreatMgr().GetThreatList().end(); ++i, ++counter)
-                        {
-                            // Gather all units with melee range
-                            Unit* target = (*i)->getTarget();
-                            if (me->IsWithinMeleeRange(target))
-                            {
-                                meleeRangeTargets.push_back(target);
-                            }
-                            // and add threat to most hated
-                            if (counter < RAID_MODE(2, 3))
-                            {
-                                me->AddThreat(target, 500.0f);
-                            }
-                        }
-                        counter = 0;
-                        std::list<Unit*, std::allocator<Unit*>>::iterator itr;
-                        for (itr = meleeRangeTargets.begin(); itr != meleeRangeTargets.end(); ++itr, ++counter)
-                        {
-                            // if there is only one target available
-                            if (meleeRangeTargets.size() == 1)
-                            {
-                                finalTarget = (*itr);
-                            }
-                            else if (counter > 0) // skip first target
-                            {
-                                if (!finalTarget || (*itr)->GetHealth() > finalTarget->GetHealth())
-                                {
-                                    finalTarget = (*itr);
-                                }
-                                // third loop
-                                if (counter >= 2)
-                                    break;
-                            }
-                        }
-                        if (finalTarget)
-                        {
-                            me->CastSpell(finalTarget, RAID_MODE(SPELL_HATEFUL_STRIKE_10, SPELL_HATEFUL_STRIKE_25), false);
-                        }
-                        events.Repeat(1s);
-                        break;
+                        EnterEvadeMode(EvadeReason::NoHostiles);
+                        return;
                     }
+
+                    if ((*it)->GetVictim() != currentVictim)
+                        secondThreat = *it;
+                    if ((!secondThreat || Is25ManRaid()) && (++it != end && (*it)->IsAvailable()))
+                    {
+                        if ((*it)->GetVictim() != currentVictim)
+                            (secondThreat ? thirdThreat : secondThreat) = *it;
+                        if (!thirdThreat && Is25ManRaid() && (++it != end && (*it)->IsAvailable()))
+                            thirdThreat = *it;
+                    }
+
+                    Unit* pHatefulTarget = nullptr;
+                    if (!secondThreat)
+                        pHatefulTarget = currentVictim;
+                    else if (!thirdThreat)
+                        pHatefulTarget = secondThreat->GetVictim();
+                    else
+                        pHatefulTarget = (secondThreat->GetVictim()->GetHealth() < thirdThreat->GetVictim()->GetHealth()) ? thirdThreat->GetVictim() : secondThreat->GetVictim();
+
+                    // add threat to highest threat targets
+                    AddThreat(currentVictim, HATEFUL_THREAT_AMT);
+                    if (secondThreat)
+                        secondThreat->AddThreat(HATEFUL_THREAT_AMT);
+                    if (thirdThreat)
+                        thirdThreat->AddThreat(HATEFUL_THREAT_AMT);
+
+                    DoCast(pHatefulTarget, SPELL_HATEFUL_STRIKE, true);
+
+                    events.Repeat(1200ms);
+                    break;
+                }
                 case EVENT_BERSERK:
+                    DoCastSelf(SPELL_BERSERK, true);
                     Talk(EMOTE_BERSERK);
-                    me->CastSpell(me, SPELL_BERSERK, true);
-                    events.ScheduleEvent(EVENT_SLIME_BOLT, 3s);
+                    events.ScheduleEvent(EVENT_SLIME, 2s);
                     break;
-                case EVENT_SLIME_BOLT:
-                    me->CastSpell(me, SPELL_SLIME_BOLT, false);
-                    events.Repeat(3s);
-                    break;
-                case EVENT_HEALTH_CHECK:
-                    if (me->GetHealthPct() <= 5)
-                    {
-                        Talk(EMOTE_ENRAGE);
-                        me->CastSpell(me, SPELL_FRENZY, true);
-                        break;
-                    }
-                    events.Repeat(1s);
+                case EVENT_SLIME:
+                    DoCastAOE(SPELL_SLIME_BOLT, true);
+                    events.Repeat(Seconds(2));
                     break;
             }
-            DoMeleeAttackIfReady();
         }
-    };
+
+        if (!_enraged && !HealthAbovePct(5))
+        {
+            DoCastSelf(SPELL_FRENZY, true);
+            Talk(EMOTE_FRENZY);
+            _enraged = true;
+        }
+    }
+
+private:
+    bool _enraged;
 };
 
 void AddSC_boss_patchwerk()
 {
-    new boss_patchwerk();
+    RegisterNaxxramasCreatureAI(boss_patchwerk);
 }

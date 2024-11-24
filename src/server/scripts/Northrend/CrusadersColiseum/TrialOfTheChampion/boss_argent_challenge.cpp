@@ -1,89 +1,154 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "ScriptedCreature.h"
+/* ScriptData
+SDName: Argent Challenge Encounter.
+SD%Complete: 50 %
+SDComment: AI for Argent Soldiers are not implemented. AI from bosses need more improvements.
+SDCategory: Trial of the Champion
+EndScriptData */
+
+#include "ScriptMgr.h"
+#include "Containers.h"
+#include "InstanceScript.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
 #include "ScriptedEscortAI.h"
 #include "SpellScript.h"
-#include "SpellScriptLoader.h"
+#include "TemporarySummon.h"
 #include "trial_of_the_champion.h"
-
-enum EadricSpells
+/*
+enum Yells
 {
-    //Eadric
-    SPELL_EADRIC_ACHIEVEMENT            = 68197,
-    ACHIEV_FACEROLLER                   = 3803,
+    // Eadric the Pure
+    SAY_INTRO                   = 0,
+    SAY_AGGRO                   = 1,
+    EMOTE_RADIANCE              = 2,
+    EMOTE_HAMMER_RIGHTEOUS      = 3,
+    SAY_HAMMER_RIGHTEOUS        = 4,
+    SAY_KILL_PLAYER             = 5,
+    SAY_DEFEATED                = 6,
 
-    SPELL_RADIANCE                      = 66935,
-    SPELL_VENGEANCE                     = 66865,
-    SPELL_HAMMER_JUSTICE                = 66863,
-    SPELL_HAMMER_RIGHTEOUS              = 66867,
-    SPELL_HAMMER_RIGHTEOUS_DAMAGE       = 66903,
-    SPELL_HAMMER_RIGHTEOUS_ACTION_BAR   = 66904,
-    SPELL_HAMMER_RIGHTEOUS_THROW_BACK   = 66905,
+    // Argent Confessor Paletress
+    SAY_INTRO_1                 = 0,
+    SAY_INTRO_2                 = 1,
+    SAY_AGGRO                   = 2,
+    SAY_MEMORY_SUMMON           = 3,
+    SAY_MEMORY_DEATH            = 4,
+    SAY_KILL_PLAYER             = 5,
+    SAY_DEFEATED                = 6,
+
+    // Memory of X
+    EMOTE_WAKING_NIGHTMARE      = 0
+};
+*/
+enum Spells
+{
+    // Eadric the Pure
+    SPELL_EADRIC_ACHIEVEMENT    = 68197,
+    SPELL_HAMMER_JUSTICE        = 66863,
+    SPELL_HAMMER_RIGHTEOUS      = 66867,
+    SPELL_RADIANCE              = 66935,
+    SPELL_VENGEANCE             = 66865,
+
+    // Paletress
+    SPELL_SMITE                 = 66536,
+    SPELL_SMITE_H               = 67674,
+    SPELL_HOLY_FIRE             = 66538,
+    SPELL_HOLY_FIRE_H           = 67676,
+    SPELL_RENEW                 = 66537,
+    SPELL_RENEW_H               = 67675,
+    SPELL_HOLY_NOVA             = 66546,
+    SPELL_SHIELD                = 66515,
+    SPELL_CONFESS               = 66680,
+    SPELL_SUMMON_MEMORY         = 66545,
+
+    // Memory of X (Summon)
+    SPELL_MEMORY_ALGALON        = 66715,
+    SPELL_MEMORY_ARCHIMONDE     = 66704,
+    SPELL_MEMORY_CHROMAGGUS     = 66697,
+    SPELL_MEMORY_CYANIGOSA      = 66709,
+    SPELL_MEMORY_DELRISSA       = 66706,
+    SPELL_MEMORY_ECK            = 66710,
+    SPELL_MEMORY_ENTROPIUS      = 66707,
+    SPELL_MEMORY_GRUUL          = 66702,
+    SPELL_MEMORY_HAKKAR         = 66698,
+    SPELL_MEMORY_HEIGAN         = 66712,
+    SPELL_MEMORY_HEROD          = 66694,
+    SPELL_MEMORY_HOGGER         = 66543,
+    SPELL_MEMORY_IGNIS          = 66713,
+    SPELL_MEMORY_ILLIDAN        = 66705,
+    SPELL_MEMORY_INGVAR         = 66708,
+    SPELL_MEMORY_KALITHRESH     = 66700,
+    SPELL_MEMORY_LUCIFRON       = 66695,
+    SPELL_MEMORY_MALCHEZAAR     = 66701,
+    SPELL_MEMORY_MUTANUS        = 66692,
+    SPELL_MEMORY_ONYXIA         = 66711,
+    SPELL_MEMORY_THUNDERAAN     = 66696,
+    SPELL_MEMORY_VANCLEEF       = 66691,
+    SPELL_MEMORY_VASHJ          = 66703,
+    SPELL_MEMORY_VEKNILASH      = 66699,
+    SPELL_MEMORY_VEZAX          = 66714,
+
+    // Memory
+    SPELL_OLD_WOUNDS            = 66620,
+    SPELL_OLD_WOUNDS_H          = 67679,
+    SPELL_SHADOWS_PAST          = 66619,
+    SPELL_SHADOWS_PAST_H        = 67678,
+    SPELL_WAKING_NIGHTMARE      = 66552,
+    SPELL_WAKING_NIGHTMARE_H    = 67677
 };
 
-enum EadricEvents
+class OrientationCheck
 {
-    EVENT_SPELL_RADIANCE = 1,
-    EVENT_SPELL_HAMMER_RIGHTEOUS,
+    public:
+        explicit OrientationCheck(Unit* _caster) : caster(_caster) { }
+        bool operator()(WorldObject* object)
+        {
+            return !object->isInFront(caster, 2.5f) || !object->IsWithinDist(caster, 40.0f);
+        }
+
+    private:
+        Unit* caster;
 };
 
-enum PaletressSpells
+// 66862, 67681 - Radiance
+class spell_eadric_radiance : public SpellScriptLoader
 {
-    SPELL_SMITE_N                       = 66536,
-    SPELL_SMITE_H                       = 67674,
-    SPELL_HOLY_FIRE_N                   = 66538,
-    SPELL_HOLY_FIRE_H                   = 67676,
-    SPELL_RENEW_N                       = 66537,
-    SPELL_RENEW_H                       = 67675,
+    public:
+        spell_eadric_radiance() : SpellScriptLoader("spell_eadric_radiance") { }
+        class spell_eadric_radiance_SpellScript : public SpellScript
+        {
+            void FilterTargets(std::list<WorldObject*>& unitList)
+            {
+                unitList.remove_if(OrientationCheck(GetCaster()));
+            }
 
-    SPELL_HOLY_NOVA                     = 66546,
-    SPELL_SHIELD                        = 66515,
-    SPELL_CONFESS                       = 66680,
-    SPELL_SUMMON_MEMORY                 = 66545,
+            void Register() override
+            {
+                OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_eadric_radiance_SpellScript::FilterTargets, EFFECT_0, TARGET_UNIT_SRC_AREA_ENEMY);
+                OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_eadric_radiance_SpellScript::FilterTargets, EFFECT_1, TARGET_UNIT_SRC_AREA_ENEMY);
+            }
+        };
 
-    //Memory
-    SPELL_OLD_WOUNDS_N                  = 66620,
-    SPELL_OLD_WOUNDS_H                  = 67679,
-    SPELL_SHADOWS_PAST_N                = 66619,
-    SPELL_SHADOWS_PAST_H                = 67678,
-    SPELL_WAKING_NIGHTMARE_N            = 66552,
-    SPELL_WAKING_NIGHTMARE_H            = 67677,
-};
-
-#define SPELL_SMITE                     DUNGEON_MODE(SPELL_SMITE_N, SPELL_SMITE_H)
-#define SPELL_HOLY_FIRE                 DUNGEON_MODE(SPELL_HOLY_FIRE_N, SPELL_HOLY_FIRE_H)
-#define SPELL_RENEW                     DUNGEON_MODE(SPELL_RENEW_N, SPELL_RENEW_H)
-#define SPELL_OLD_WOUNDS                DUNGEON_MODE(SPELL_OLD_WOUNDS_N, SPELL_OLD_WOUNDS_H)
-#define SPELL_SHADOWS_PAST              DUNGEON_MODE(SPELL_SHADOWS_PAST_N, SPELL_SHADOWS_PAST_H)
-#define SPELL_WAKING_NIGHTMARE          DUNGEON_MODE(SPELL_WAKING_NIGHTMARE_N, SPELL_WAKING_NIGHTMARE_H)
-
-enum PaletressEvents
-{
-    EVENT_SPELL_SMITE = 1,
-    EVENT_SPELL_HOLY_FIRE,
-    EVENT_SPELL_RENEW,
-
-    EVENT_MEMORY_SCALE,
-    EVENT_MEMORY_START_ATTACK,
-    EVENT_SPELL_OLD_WOUNDS,
-    EVENT_SPELL_SHADOWS_PAST,
-    EVENT_SPELL_WAKING_NIGHTMARE,
+        SpellScript* GetSpellScript() const override
+        {
+            return new spell_eadric_radiance_SpellScript();
+        }
 };
 
 class boss_eadric : public CreatureScript
@@ -92,114 +157,104 @@ public:
     boss_eadric() : CreatureScript("boss_eadric") { }
     struct boss_eadricAI : public ScriptedAI
     {
-        boss_eadricAI(Creature* pCreature) : ScriptedAI(pCreature)
+        boss_eadricAI(Creature* creature) : ScriptedAI(creature)
         {
-            pInstance = pCreature->GetInstanceScript();
+            Initialize();
+            instance = creature->GetInstanceScript();
+            creature->SetReactState(REACT_PASSIVE);
+            creature->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
         }
 
-        InstanceScript* pInstance;
-        EventMap events;
+        void Initialize()
+        {
+            uiVenganceTimer = 10000;
+            uiRadianceTimer = 16000;
+            uiHammerJusticeTimer = 25000;
+            uiResetTimer = 5000;
+
+            bDone = false;
+        }
+
+        InstanceScript* instance;
+
+        uint32 uiVenganceTimer;
+        uint32 uiRadianceTimer;
+        uint32 uiHammerJusticeTimer;
+        uint32 uiResetTimer;
+
+        bool bDone;
 
         void Reset() override
         {
-            events.Reset();
-            me->SetReactState(REACT_PASSIVE);
-            if (pInstance)
-                pInstance->SetData(BOSS_ARGENT_CHALLENGE, NOT_STARTED);
+            Initialize();
         }
 
-        void MovementInform(uint32 type, uint32 id) override
-        {
-            if (type == POINT_MOTION_TYPE && id == 1)
-                me->SetFacingTo(3 * M_PI / 2);
-        }
-
-        void KilledUnit(Unit* who) override
-        {
-            if (who->IsPlayer())
-            {
-                Talk(SAY_EADRIC_KILL_PLAYER);
-            }
-        }
-
-        void JustEngagedWith(Unit*  /*who*/) override
-        {
-            events.Reset();
-            events.ScheduleEvent(EVENT_SPELL_RADIANCE, 16000);
-            events.ScheduleEvent(EVENT_SPELL_HAMMER_RIGHTEOUS, 25000);
-            Talk(SAY_EADRIC_AGGRO);
-            me->CastSpell(me, SPELL_VENGEANCE, false);
-            if (pInstance)
-                pInstance->SetData(BOSS_ARGENT_CHALLENGE, IN_PROGRESS);
-        }
-
-        void SpellHit(Unit*  /*caster*/, SpellInfo const* spell) override
-        {
-            if (spell->Id == 66905 && me->GetHealth() == 1) // hammer throw back damage (15k)
-                me->CastSpell(me, 68197, true);
-        }
-
-        void DamageTaken(Unit*, uint32& damage, DamageEffectType, SpellSchoolMask) override
+        void DamageTaken(Unit* /*done_by*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
         {
             if (damage >= me->GetHealth())
             {
-                damage = me->GetHealth() - 1;
-                if (me->GetFaction() != FACTION_FRIENDLY)
-                {
-                    me->CastSpell((Unit*)nullptr, 68575, true); // achievements
-                    me->GetMap()->UpdateEncounterState(ENCOUNTER_CREDIT_CAST_SPELL, 68574, me); // paletress' spell credits encounter, but shouldn't credit achievements
-                    me->SetFaction(FACTION_FRIENDLY);
-                    events.Reset();
-                    Talk(SAY_EADRIC_DEFEATED);
-                    me->GetThreatMgr().clearReferences();
-                    me->SetRegeneratingHealth(false);
-                    _EnterEvadeMode();
-                    me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                    me->SetImmuneToAll(true);
-                    if (pInstance)
-                        pInstance->SetData(BOSS_ARGENT_CHALLENGE, DONE);
-                }
+                damage = 0;
+                EnterEvadeMode();
+                me->SetFaction(FACTION_FRIENDLY);
+                bDone = true;
             }
         }
 
-        void UpdateAI(uint32 diff) override
+        void MovementInform(uint32 MovementType, uint32 /*Data*/) override
         {
+            if (MovementType != POINT_MOTION_TYPE)
+                return;
+
+            instance->SetBossState(BOSS_ARGENT_CHALLENGE_E, DONE);
+
+            me->DisappearAndDie();
+        }
+
+        void UpdateAI(uint32 uiDiff) override
+        {
+            if (bDone && uiResetTimer <= uiDiff)
+            {
+                me->GetMotionMaster()->MovePoint(0, 746.87f, 665.87f, 411.75f);
+                bDone = false;
+            } else uiResetTimer -= uiDiff;
+
             if (!UpdateVictim())
                 return;
 
-            events.Update(diff);
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
+            if (uiHammerJusticeTimer <= uiDiff)
             {
-                case 0:
-                    break;
-                case EVENT_SPELL_RADIANCE:
-                    me->CastSpell((Unit*)nullptr, SPELL_RADIANCE, false);
-                    Talk(SAY_EADRIC_EMOTE_RADIANCE);
-                    events.Repeat(16s);
-                    break;
-                case EVENT_SPELL_HAMMER_RIGHTEOUS:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 55.0f, true))
-                    {
-                        Talk(SAY_EADRIC_EMOTE_HAMMER_RIGHTEOUS, target);
-                        Talk(SAY_EADRIC_HAMMER_RIGHTEOUS);
-                        me->CastSpell(target, SPELL_HAMMER_JUSTICE, true);
-                        me->CastSpell(target, SPELL_HAMMER_RIGHTEOUS, false);
-                    }
-                    events.Repeat(25s);
-                    break;
-            }
+                me->InterruptNonMeleeSpells(true);
 
-            DoMeleeAttackIfReady();
+                if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 250, true))
+                {
+                    if (target->IsAlive())
+                    {
+                        DoCast(target, SPELL_HAMMER_JUSTICE);
+                        DoCast(target, SPELL_HAMMER_RIGHTEOUS);
+                    }
+                }
+                uiHammerJusticeTimer = 25000;
+            } else uiHammerJusticeTimer -= uiDiff;
+
+            if (uiVenganceTimer <= uiDiff)
+            {
+                DoCast(me, SPELL_VENGEANCE);
+
+                uiVenganceTimer = 10000;
+            } else uiVenganceTimer -= uiDiff;
+
+            if (uiRadianceTimer <= uiDiff)
+            {
+                DoCastAOE(SPELL_RADIANCE);
+
+                uiRadianceTimer = 16000;
+            } else uiRadianceTimer -= uiDiff;
         }
     };
 
-    CreatureAI* GetAI(Creature* pCreature) const override
+    CreatureAI* GetAI(Creature* creature) const override
     {
-        return GetTrialOfTheChampionAI<boss_eadricAI>(pCreature);
+        return GetTrialOfTheChampionAI<boss_eadricAI>(creature);
     }
 };
 
@@ -210,177 +265,156 @@ public:
 
     struct boss_paletressAI : public ScriptedAI
     {
-        boss_paletressAI(Creature* pCreature) : ScriptedAI(pCreature)
+        boss_paletressAI(Creature* creature) : ScriptedAI(creature)
         {
-            pInstance = pCreature->GetInstanceScript();
+            Initialize();
+            instance = creature->GetInstanceScript();
+
+            creature->SetReactState(REACT_PASSIVE);
+            creature->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
+            creature->RestoreFaction();
         }
 
-        InstanceScript* pInstance;
-        EventMap events;
-        bool summoned;
+        void Initialize()
+        {
+            uiHolyFireTimer = urand(9000, 12000);
+            uiHolySmiteTimer = urand(5000, 7000);
+            uiRenewTimer = urand(2000, 5000);
+
+            uiResetTimer = 7000;
+
+            bHealth = false;
+            bDone = false;
+        }
+
+        InstanceScript* instance;
         ObjectGuid MemoryGUID;
+
+        bool bHealth;
+        bool bDone;
+
+        uint32 uiHolyFireTimer;
+        uint32 uiHolySmiteTimer;
+        uint32 uiRenewTimer;
+        uint32 uiResetTimer;
 
         void Reset() override
         {
-            events.Reset();
-            summoned = false;
-            if (MemoryGUID)
-            {
-                if (Creature* memory = ObjectAccessor::GetCreature(*me, MemoryGUID))
-                    memory->DespawnOrUnsummon();
-                MemoryGUID.Clear();
-            }
-            me->SetReactState(REACT_PASSIVE);
-            if (pInstance)
-                pInstance->SetData(BOSS_ARGENT_CHALLENGE, NOT_STARTED);
+            me->RemoveAllAuras();
+
+            Initialize();
+
+            if (Creature* pMemory = ObjectAccessor::GetCreature(*me, MemoryGUID))
+                if (pMemory->IsAlive())
+                    pMemory->RemoveFromWorld();
         }
 
-        void MovementInform(uint32 type, uint32 id) override
+        void SetData(uint32 uiId, uint32 /*uiValue*/) override
         {
-            if (type == POINT_MOTION_TYPE && id == 1)
-                me->SetFacingTo(3 * M_PI / 2);
-        }
-
-        void KilledUnit(Unit* who) override
-        {
-            if (who->IsPlayer())
-            {
-                Talk(SAY_PALETRESS_KILL_PLAYER);
-            }
-        }
-
-        void JustEngagedWith(Unit*  /*who*/) override
-        {
-            events.Reset();
-            events.ScheduleEvent(EVENT_SPELL_HOLY_FIRE, 9s, 12s);
-            events.ScheduleEvent(EVENT_SPELL_SMITE, 2s, 3s);
-            me->RemoveUnitMovementFlag(MOVEMENTFLAG_WALKING);
-            Talk(SAY_PALETRESS_AGGRO);
-            if (pInstance)
-                pInstance->SetData(BOSS_ARGENT_CHALLENGE, IN_PROGRESS);
-        }
-
-        void DoAction(int32 param) override
-        {
-            if (param == 1)
-            {
-                MemoryGUID.Clear();
+            if (uiId == 1)
                 me->RemoveAura(SPELL_SHIELD);
-                Talk(SAY_PALETRESS_MEMORY_DEATH);
-            }
-            else if (param == (-1))
-            {
-                if (MemoryGUID)
-                    if (Creature* memory = ObjectAccessor::GetCreature(*me, MemoryGUID))
-                    {
-                        memory->DespawnOrUnsummon();
-                        MemoryGUID.Clear();
-                    }
-            }
         }
 
-        void DamageTaken(Unit*, uint32& damage, DamageEffectType, SpellSchoolMask) override
+        void DamageTaken(Unit* /*done_by*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
         {
-            //if (me->HasAura(SPELL_SHIELD))
-            //  return;
-
             if (damage >= me->GetHealth())
             {
-                damage = me->GetHealth() - 1;
+                damage = 0;
+                EnterEvadeMode();
+                me->SetFaction(FACTION_FRIENDLY);
+                bDone = true;
+            }
+        }
 
-                if (me->GetFaction() != FACTION_FRIENDLY)
+        void MovementInform(uint32 MovementType, uint32 Point) override
+        {
+            if (MovementType != POINT_MOTION_TYPE || Point != 0)
+                return;
+
+            instance->SetBossState(BOSS_ARGENT_CHALLENGE_P, DONE);
+
+            me->DisappearAndDie();
+        }
+
+        void UpdateAI(uint32 uiDiff) override
+        {
+            if (bDone && uiResetTimer <= uiDiff)
+            {
+                me->GetMotionMaster()->MovePoint(0, 746.87f, 665.87f, 411.75f);
+                bDone = false;
+            } else uiResetTimer -= uiDiff;
+
+            if (!UpdateVictim())
+                return;
+
+            if (uiHolyFireTimer <= uiDiff)
+            {
+                if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 250, true))
                 {
-                    me->CastSpell((Unit*)nullptr, 68574, true); // achievements
-                    me->SetFaction(FACTION_FRIENDLY);
-                    events.Reset();
-                    Talk(SAY_PALETRESS_DEFEATED);
-                    me->GetThreatMgr().clearReferences();
-                    me->SetRegeneratingHealth(false);
-                    _EnterEvadeMode();
-                    me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                    me->SetImmuneToAll(true);
-                    if (pInstance)
-                    {
-                        pInstance->SetData(BOSS_ARGENT_CHALLENGE, DONE);
-                        pInstance->DoUpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_BE_SPELL_TARGET, 68206);
-                    }
+                    if (target->IsAlive())
+                        DoCast(target, SPELL_HOLY_FIRE);
                 }
+                 if (me->HasAura(SPELL_SHIELD))
+                    uiHolyFireTimer = 13000;
+                else
+                    uiHolyFireTimer = urand(9000, 12000);
+            } else uiHolyFireTimer -= uiDiff;
+
+            if (uiHolySmiteTimer <= uiDiff)
+            {
+                if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 250, true))
+                {
+                    if (target->IsAlive())
+                        DoCast(target, SPELL_SMITE);
+                }
+                if (me->HasAura(SPELL_SHIELD))
+                    uiHolySmiteTimer = 9000;
+                else
+                    uiHolySmiteTimer = urand(5000, 7000);
+            } else uiHolySmiteTimer -= uiDiff;
+
+            if (me->HasAura(SPELL_SHIELD))
+            {
+                if (uiRenewTimer <= uiDiff)
+                {
+                    me->InterruptNonMeleeSpells(true);
+                    uint8 uiTarget = urand(0, 1);
+                    switch (uiTarget)
+                    {
+                        case 0:
+                            DoCast(me, SPELL_RENEW);
+                            break;
+                        case 1:
+                            if (Creature* pMemory = ObjectAccessor::GetCreature(*me, MemoryGUID))
+                                if (pMemory->IsAlive())
+                                    DoCast(pMemory, SPELL_RENEW);
+                            break;
+                    }
+                    uiRenewTimer = urand(15000, 17000);
+                } else uiRenewTimer -= uiDiff;
+            }
+
+            if (!bHealth && !HealthAbovePct(25))
+            {
+                me->InterruptNonMeleeSpells(true);
+                DoCastAOE(SPELL_HOLY_NOVA, false);
+                DoCast(me, SPELL_SHIELD);
+                DoCastAOE(SPELL_SUMMON_MEMORY, false);
+                DoCastAOE(SPELL_CONFESS, false);
+
+                bHealth = true;
             }
         }
 
         void JustSummoned(Creature* summon) override
         {
-            if (pInstance)
-                pInstance->SetData(DATA_MEMORY_ENTRY, summon->GetEntry());
             MemoryGUID = summon->GetGUID();
-        }
-
-        void SummonMemory()
-        {
-            uint8 uiRandom = urand(0, 25);
-            uint32 uiSpells[26] = {66704, 66705, 66706, 66707, 66709, 66710, 66711, 66712, 66713, 66714, 66715, 66708, 66708, 66691, 66692, 66694, 66695, 66696, 66697, 66698, 66699, 66700, 66701, 66702, 66703, 66543};
-            me->CastSpell(me, uiSpells[uiRandom], true);
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
-
-            if (!summoned && HealthBelowPct(25))
-            {
-                me->InterruptNonMeleeSpells(true);
-                Talk(SAY_PALETRESS_MEMORY_SUMMON);
-                me->CastSpell((Unit*)nullptr, SPELL_HOLY_NOVA, false);
-                me->CastSpell(me, SPELL_SHIELD, false);
-                me->CastSpell((Unit*)nullptr, SPELL_SUMMON_MEMORY, false);
-                SummonMemory();
-                me->CastSpell((Unit*)nullptr, SPELL_CONFESS, false);
-                events.ScheduleEvent(EVENT_SPELL_RENEW, 6s, 8s);
-                summoned = true;
-                return;
-            }
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
-            {
-                case 0:
-                    break;
-                case EVENT_SPELL_SMITE:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 50.0f, true))
-                        me->CastSpell(target, SPELL_SMITE, false);
-                    events.Repeat(3s, 4s);
-                    break;
-                case EVENT_SPELL_HOLY_FIRE:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 30.0f, true))
-                        me->CastSpell(target, SPELL_HOLY_FIRE, false);
-                    events.Repeat(9s, 12s);
-                    break;
-                case EVENT_SPELL_RENEW:
-                    if (!MemoryGUID)
-                    {
-                        break;
-                    }
-                    if (urand(0, 1))
-                        me->CastSpell(me, SPELL_RENEW, false);
-                    else if (Creature* memory = ObjectAccessor::GetCreature(*me, MemoryGUID))
-                        if (memory->IsAlive())
-                            me->CastSpell(memory, SPELL_RENEW, false);
-                    events.Repeat(15s, 17s);
-                    break;
-            }
-
-            DoMeleeAttackIfReady();
         }
     };
 
-    CreatureAI* GetAI(Creature* pCreature) const override
+    CreatureAI* GetAI(Creature* creature) const override
     {
-        return GetTrialOfTheChampionAI<boss_paletressAI>(pCreature);
+        return GetTrialOfTheChampionAI<boss_paletressAI>(creature);
     }
 };
 
@@ -391,126 +425,72 @@ public:
 
     struct npc_memoryAI : public ScriptedAI
     {
-        npc_memoryAI(Creature* pCreature) : ScriptedAI(pCreature)
+        npc_memoryAI(Creature* creature) : ScriptedAI(creature)
         {
-            pInstance = pCreature->GetInstanceScript();
-            events.Reset();
-            me->SetReactState(REACT_PASSIVE);
-            me->SetObjectScale(0.01f);
-            me->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE);
-            me->SetImmuneToAll(true);
-            events.ScheduleEvent(EVENT_MEMORY_SCALE, 500ms);
+            Initialize();
         }
 
-        InstanceScript* pInstance;
-        EventMap events;
+        void Initialize()
+        {
+            uiOldWoundsTimer = 12000;
+            uiShadowPastTimer = 5000;
+            uiWakingNightmare = 7000;
+        }
 
-        void Reset() override {}
+        uint32 uiOldWoundsTimer;
+        uint32 uiShadowPastTimer;
+        uint32 uiWakingNightmare;
+
+        void Reset() override
+        {
+            Initialize();
+        }
+
+        void UpdateAI(uint32 uiDiff) override
+        {
+            if (!UpdateVictim())
+                return;
+
+            if (uiOldWoundsTimer <= uiDiff)
+            {
+                if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0))
+                {
+                    if (target->IsAlive())
+                        DoCast(target, SPELL_OLD_WOUNDS);
+                }
+                uiOldWoundsTimer = 12000;
+            }else uiOldWoundsTimer -= uiDiff;
+
+            if (uiWakingNightmare <= uiDiff)
+            {
+                DoCast(me, SPELL_WAKING_NIGHTMARE);
+                uiWakingNightmare = 7000;
+            }else uiWakingNightmare -= uiDiff;
+
+            if (uiShadowPastTimer <= uiDiff)
+            {
+                if (Unit* target = SelectTarget(SelectTargetMethod::Random, 1))
+                {
+                    if (target->IsAlive())
+                        DoCast(target, SPELL_SHADOWS_PAST);
+                }
+                uiShadowPastTimer = 5000;
+            }else uiShadowPastTimer -= uiDiff;
+        }
 
         void JustDied(Unit* /*killer*/) override
         {
-            me->DespawnOrUnsummon(20000);
-            if (pInstance)
-                if (Creature* paletress = ObjectAccessor::GetCreature(*me, pInstance->GetGuidData(DATA_PALETRESS)))
-                    paletress->AI()->DoAction(1);
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            UpdateVictim();
-
-            events.Update(diff);
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
-            {
-                case 0:
-                    break;
-                case EVENT_MEMORY_SCALE:
-                    me->SetObjectScale(1.0f);
-                    events.ScheduleEvent(EVENT_MEMORY_START_ATTACK, 5s);
-
-                    break;
-                case EVENT_MEMORY_START_ATTACK:
-                    me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                    me->SetImmuneToAll(false);
-                    if (Unit* target = me->SelectNearestTarget(200.0f))
-                    {
-                        AttackStart(target);
-                        DoZoneInCombat();
-                    }
-                    me->SetReactState(REACT_AGGRESSIVE);
-                    events.ScheduleEvent(EVENT_SPELL_OLD_WOUNDS, 8s);
-                    events.ScheduleEvent(EVENT_SPELL_SHADOWS_PAST, 4s);
-                    events.ScheduleEvent(EVENT_SPELL_WAKING_NIGHTMARE, 20s, 30s);
-                    break;
-                case EVENT_SPELL_OLD_WOUNDS:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 10.0f, true))
-                        me->CastSpell(target, SPELL_OLD_WOUNDS, true);
-                    events.Repeat(12s);
-                    break;
-                case EVENT_SPELL_SHADOWS_PAST:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 40.0f, true))
-                        me->CastSpell(target, SPELL_SHADOWS_PAST, false);
-                    events.Repeat(15s, 20s);
-                    break;
-                case EVENT_SPELL_WAKING_NIGHTMARE:
-                    me->CastSpell(me, SPELL_WAKING_NIGHTMARE, false);
-                    events.Repeat(35s);
-                    break;
-            }
-
-            DoMeleeAttackIfReady();
+            if (TempSummon* summ = me->ToTempSummon())
+                if (Unit* summoner = summ->GetSummonerUnit())
+                    if (summoner->IsAlive())
+                        summoner->GetAI()->SetData(1, 0);
         }
     };
 
-    CreatureAI* GetAI(Creature* pCreature) const override
+    CreatureAI* GetAI(Creature* creature) const override
     {
-        return GetTrialOfTheChampionAI<npc_memoryAI>(pCreature);
+        return GetTrialOfTheChampionAI<npc_memoryAI>(creature);
     }
-};
-
-enum ArgentSoldierSpells
-{
-    // monk
-    SPELL_FLURRY_OF_BLOWS               = 67233,
-    SPELL_PUMMEL                        = 67235,
-    SPELL_DIVINE_SHIELD_H               = 67251,
-    SPELL_FINAL_MEDITATION_H            = 67255,
-
-    // priestess
-    SPELL_HOLY_SMITE_N                  = 36176,
-    SPELL_HOLY_SMITE_H                  = 67289,
-    SPELL_FOUNTAIN_OF_LIGHT             = 67194,
-    NPC_FOUNTAIN_OF_LIGHT               = 35311,
-    SPELL_SHADOW_WORD_PAIN_N            = 34941,
-    SPELL_SHADOW_WORD_PAIN_H            = 34942,
-    SPELL_MIND_CONTROL_H                = 67229,
-
-    // lightwielder
-    SPELL_BLAZING_LIGHT_N               = 67247,
-    SPELL_BLAZING_LIGHT_H               = 67290,
-    SPELL_CLEAVE                        = 15284,
-    SPELL_UNBALANCING_STRIKE_H          = 67237,
-};
-
-#define SPELL_HOLY_SMITE                DUNGEON_MODE(SPELL_HOLY_SMITE_N, SPELL_HOLY_SMITE_H)
-#define SPELL_SHADOW_WORD_PAIN          DUNGEON_MODE(SPELL_SHADOW_WORD_PAIN_N, SPELL_SHADOW_WORD_PAIN_H)
-#define SPELL_BLAZING_LIGHT             DUNGEON_MODE(SPELL_BLAZING_LIGHT_N, SPELL_BLAZING_LIGHT_H)
-
-enum ArgentSoldierEvents
-{
-    EVENT_MONK_SPELL_FLURRY_OF_BLOWS = 1,
-    EVENT_MONK_SPELL_PUMMEL,
-    EVENT_PRIESTESS_SPELL_HOLY_SMITE,
-    EVENT_PRIESTESS_SPELL_SHADOW_WORD_PAIN,
-    EVENT_PRIESTESS_SPELL_FOUNTAIN_OF_LIGHT,
-    EVENT_PRIESTESS_SPELL_MIND_CONTROL_H,
-    EVENT_LIGHTWIELDER_SPELL_BLAZING_LIGHT,
-    EVENT_LIGHTWIELDER_SPELL_CLEAVE,
-    EVENT_LIGHTWIELDER_SPELL_UNBALANCING_STRIKE_H,
 };
 
 class npc_argent_soldier : public CreatureScript
@@ -518,41 +498,35 @@ class npc_argent_soldier : public CreatureScript
 public:
     npc_argent_soldier() : CreatureScript("npc_argent_soldier") { }
 
-    struct npc_argent_soldierAI : public npc_escortAI
+    // THIS AI NEEDS MORE IMPROVEMENTS
+    struct npc_argent_soldierAI : public EscortAI
     {
-        npc_argent_soldierAI(Creature* pCreature) : npc_escortAI(pCreature)
+        npc_argent_soldierAI(Creature* creature) : EscortAI(creature)
         {
-            pInstance = pCreature->GetInstanceScript();
-            me->SetReactState(REACT_PASSIVE);
+            instance = creature->GetInstanceScript();
+            me->SetReactState(REACT_DEFENSIVE);
             SetDespawnAtEnd(false);
             uiWaypoint = 0;
         }
 
-        InstanceScript* pInstance;
-        EventMap events;
+        InstanceScript* instance;
+
         uint8 uiWaypoint;
-        bool bCheck;
 
-        void Reset() override
+        void WaypointReached(uint32 waypointId, uint32 /*pathId*/) override
         {
-            events.Reset();
-            bCheck = false;
-        }
-
-        void WaypointReached(uint32 uiPoint) override
-        {
-            if (uiPoint == 1)
+            if (waypointId == 0)
             {
                 switch (uiWaypoint)
                 {
                     case 0:
-                        me->SetFacingTo(5.4f);
+                        me->SetFacingTo(5.81f);
                         break;
                     case 1:
-                        me->SetFacingTo(4.6f);
+                        me->SetFacingTo(4.60f);
                         break;
                     case 2:
-                        me->SetFacingTo(4.0f);
+                        me->SetFacingTo(2.79f);
                         break;
                 }
             }
@@ -560,20 +534,19 @@ public:
 
         void SetData(uint32 uiType, uint32 /*uiData*/) override
         {
-            AddWaypoint(0, me->GetPositionX(), 660.0f, 411.80f);
             switch (me->GetEntry())
             {
-                case NPC_ARGENT_LIGHTWIELDER:
+                case NPC_ARGENT_LIGHWIELDER:
                     switch (uiType)
                     {
                         case 0:
-                            AddWaypoint(1, 716.321f, 647.047f, 411.93f);
+                            AddWaypoint(0, 712.14f, 628.42f, 411.88f, true);
                             break;
                         case 1:
-                            AddWaypoint(1, 742.44f, 650.29f, 411.79f);
+                            AddWaypoint(0, 742.44f, 650.29f, 411.79f, true);
                             break;
                         case 2:
-                            AddWaypoint(1, 772.6314f, 651.7f, 411.93f);
+                            AddWaypoint(0, 783.33f, 615.29f, 411.84f, true);
                             break;
                     }
                     break;
@@ -581,13 +554,13 @@ public:
                     switch (uiType)
                     {
                         case 0:
-                            AddWaypoint(1, 717.86f, 649.0f, 411.923f);
+                            AddWaypoint(0, 713.12f, 632.97f, 411.90f, true);
                             break;
                         case 1:
-                            AddWaypoint(1, 746.73f, 650.24f, 411.56f);
+                            AddWaypoint(0, 746.73f, 650.24f, 411.56f, true);
                             break;
                         case 2:
-                            AddWaypoint(1, 775.567f, 648.26f, 411.93f);
+                            AddWaypoint(0, 781.32f, 610.54f, 411.82f, true);
                             break;
                     }
                     break;
@@ -595,230 +568,111 @@ public:
                     switch (uiType)
                     {
                         case 0:
-                            AddWaypoint(1, 719.872f, 650.94f, 411.93f);
+                            AddWaypoint(0, 715.06f, 637.07f, 411.91f, true);
                             break;
                         case 1:
-                            AddWaypoint(1, 750.72f, 650.20f, 411.77f);
+                            AddWaypoint(0, 750.72f, 650.20f, 411.77f, true);
                             break;
                         case 2:
-                            AddWaypoint(1, 777.78f, 645.70f, 411.93f);
+                            AddWaypoint(0, 779.77f, 607.03f, 411.81f, true);
                             break;
                     }
                     break;
             }
 
-            Start(false, true);
+            Start(false);
             uiWaypoint = uiType;
         }
 
-        void DamageTaken(Unit*, uint32& damage, DamageEffectType, SpellSchoolMask) override
+        void JustDied(Unit* /*killer*/) override
         {
-            if (bCheck && damage >= me->GetHealth())
-            {
-                bCheck = false;
-                damage = me->GetHealth() - 1;
-                events.DelayEvents(10s);
-                me->CastSpell(me, SPELL_DIVINE_SHIELD_H, true);
-                me->CastSpell((Unit*)nullptr, SPELL_FINAL_MEDITATION_H, true);
-            }
-        }
-
-        void JustEngagedWith(Unit* /*who*/) override
-        {
-            switch (me->GetEntry())
-            {
-                case NPC_ARGENT_MONK:
-                    events.RescheduleEvent(EVENT_MONK_SPELL_FLURRY_OF_BLOWS, 5s);
-                    events.RescheduleEvent(EVENT_MONK_SPELL_PUMMEL, 7s);
-                    if (IsHeroic())
-                        bCheck = true;
-                    break;
-                case NPC_PRIESTESS:
-                    events.RescheduleEvent(EVENT_PRIESTESS_SPELL_HOLY_SMITE, 5s, 8s);
-                    events.RescheduleEvent(EVENT_PRIESTESS_SPELL_SHADOW_WORD_PAIN, 3s, 6s);
-                    events.RescheduleEvent(EVENT_PRIESTESS_SPELL_FOUNTAIN_OF_LIGHT, 8s, 15s);
-                    if (IsHeroic())
-                        events.RescheduleEvent(EVENT_PRIESTESS_SPELL_MIND_CONTROL_H, 12s);
-                    break;
-                case NPC_ARGENT_LIGHTWIELDER:
-                    events.RescheduleEvent(EVENT_LIGHTWIELDER_SPELL_BLAZING_LIGHT, 12s, 15s);
-                    events.RescheduleEvent(EVENT_LIGHTWIELDER_SPELL_CLEAVE, 3s, 5s);
-                    if (IsHeroic())
-                        events.RescheduleEvent(EVENT_LIGHTWIELDER_SPELL_UNBALANCING_STRIKE_H, 8s, 12s);
-                    break;
-            }
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            npc_escortAI::UpdateAI(diff);
-
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
-            {
-                case 0:
-                    break;
-
-                case EVENT_MONK_SPELL_FLURRY_OF_BLOWS:
-                    me->CastSpell(me, SPELL_FLURRY_OF_BLOWS, false);
-                    events.Repeat(12s, 18s);
-                    break;
-                case EVENT_MONK_SPELL_PUMMEL:
-                    if (me->GetVictim())
-                        me->CastSpell(me->GetVictim(), SPELL_PUMMEL, false);
-                    events.Repeat(8s, 11s);
-                    break;
-
-                case EVENT_PRIESTESS_SPELL_HOLY_SMITE:
-                    if (me->GetVictim())
-                        me->CastSpell(me->GetVictim(), SPELL_HOLY_SMITE, false);
-                    events.Repeat(6s, 8s);
-                    break;
-                case EVENT_PRIESTESS_SPELL_SHADOW_WORD_PAIN:
-                    if (me->GetVictim())
-                        me->CastSpell(me->GetVictim(), SPELL_SHADOW_WORD_PAIN, false);
-                    events.Repeat(12s, 15s);
-                    break;
-                case EVENT_PRIESTESS_SPELL_FOUNTAIN_OF_LIGHT:
-                    me->CastSpell((Unit*)nullptr, SPELL_FOUNTAIN_OF_LIGHT, false);
-                    events.Repeat(35s, 45s);
-                    break;
-                case EVENT_PRIESTESS_SPELL_MIND_CONTROL_H:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 30.0f, true))
-                        me->CastSpell(target, SPELL_MIND_CONTROL_H, false);
-                    events.Repeat(22s, 30s);
-                    break;
-
-                case EVENT_LIGHTWIELDER_SPELL_BLAZING_LIGHT:
-                    {
-                        Unit* target = DoSelectLowestHpFriendly(40.0f);
-                        if (!target)
-                            target = me;
-                        me->CastSpell(target, SPELL_BLAZING_LIGHT, false);
-                        events.Repeat(8s, 12s);
-                    }
-                    break;
-                case EVENT_LIGHTWIELDER_SPELL_CLEAVE:
-                    if (me->GetVictim())
-                        me->CastSpell(me->GetVictim(), SPELL_CLEAVE, false);
-                    events.Repeat(6s, 8s);
-                    break;
-                case EVENT_LIGHTWIELDER_SPELL_UNBALANCING_STRIKE_H:
-                    if (me->GetVictim())
-                        me->CastSpell(me->GetVictim(), SPELL_UNBALANCING_STRIKE_H, false);
-                    events.Repeat(12s, 15s);
-                    break;
-            }
-
-            DoMeleeAttackIfReady();
-        }
-
-        void JustDied(Unit* /*pKiller*/) override
-        {
-            me->DespawnOrUnsummon(10000);
-            if (pInstance)
-                pInstance->SetData(DATA_ARGENT_SOLDIER_DEFEATED, 0);
+            instance->SetData(DATA_ARGENT_SOLDIER_DEFEATED, instance->GetData(DATA_ARGENT_SOLDIER_DEFEATED) + 1);
         }
     };
 
-    CreatureAI* GetAI(Creature* pCreature) const override
+    CreatureAI* GetAI(Creature* creature) const override
     {
-        return GetTrialOfTheChampionAI<npc_argent_soldierAI>(pCreature);
+        return GetTrialOfTheChampionAI<npc_argent_soldierAI>(creature);
     }
 };
 
-class spell_eadric_radiance : public SpellScript
+uint32 constexpr memorySpellId[25] =
 {
-    PrepareSpellScript(spell_eadric_radiance);
-
-    void FilterTargets(std::list<WorldObject*>& targets)
-    {
-        std::list<WorldObject*> tmplist;
-        for( std::list<WorldObject*>::const_iterator itr = targets.begin(); itr != targets.end(); ++itr)
-            if ((*itr)->ToUnit()->HasInArc(M_PI, GetCaster()))
-                tmplist.push_back(*itr);
-
-        targets.clear();
-        for( std::list<WorldObject*>::iterator itr = tmplist.begin(); itr != tmplist.end(); ++itr )
-            targets.push_back(*itr);
-    }
-
-    void Register() override
-    {
-        OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_eadric_radiance::FilterTargets, EFFECT_0, TARGET_UNIT_SRC_AREA_ENEMY);
-        OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_eadric_radiance::FilterTargets, EFFECT_1, TARGET_UNIT_SRC_AREA_ENEMY);
-    }
+    SPELL_MEMORY_ALGALON,
+    SPELL_MEMORY_ARCHIMONDE,
+    SPELL_MEMORY_CHROMAGGUS,
+    SPELL_MEMORY_CYANIGOSA,
+    SPELL_MEMORY_DELRISSA,
+    SPELL_MEMORY_ECK,
+    SPELL_MEMORY_ENTROPIUS,
+    SPELL_MEMORY_GRUUL,
+    SPELL_MEMORY_HAKKAR,
+    SPELL_MEMORY_HEIGAN,
+    SPELL_MEMORY_HEROD,
+    SPELL_MEMORY_HOGGER,
+    SPELL_MEMORY_IGNIS,
+    SPELL_MEMORY_ILLIDAN,
+    SPELL_MEMORY_INGVAR,
+    SPELL_MEMORY_KALITHRESH,
+    SPELL_MEMORY_LUCIFRON,
+    SPELL_MEMORY_MALCHEZAAR,
+    SPELL_MEMORY_MUTANUS,
+    SPELL_MEMORY_ONYXIA,
+    SPELL_MEMORY_THUNDERAAN,
+    SPELL_MEMORY_VANCLEEF,
+    SPELL_MEMORY_VASHJ,
+    SPELL_MEMORY_VEKNILASH,
+    SPELL_MEMORY_VEZAX
 };
 
-class spell_toc5_light_rain : public SpellScript
+// 66545 - Summon Memory
+class spell_paletress_summon_memory : public SpellScriptLoader
 {
-    PrepareSpellScript(spell_toc5_light_rain);
+    public:
+        spell_paletress_summon_memory() : SpellScriptLoader("spell_paletress_summon_memory") { }
 
-    void FilterTargets(std::list<WorldObject*>& targets)
-    {
-        for( std::list<WorldObject*>::iterator itr = targets.begin(); itr != targets.end(); )
+        class spell_paletress_summon_memory_SpellScript : public SpellScript
         {
-            if ((*itr)->IsCreature())
-                if ((*itr)->ToCreature()->GetEntry() == NPC_FOUNTAIN_OF_LIGHT)
-                {
-                    targets.erase(itr);
-                    itr = targets.begin();
-                    continue;
-                }
-            ++itr;
-        }
-    }
-
-    void Register() override
-    {
-        OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_toc5_light_rain::FilterTargets, EFFECT_0, TARGET_UNIT_SRC_AREA_ALLY);
-    }
-};
-
-enum ReflectiveShield
-{
-    SPELL_REFLECTIVE_SHIELD_DAMAGE = 33619
-};
-
-class spell_reflective_shield_aura : public AuraScript
-{
-    PrepareAuraScript(spell_reflective_shield_aura);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_REFLECTIVE_SHIELD_DAMAGE });
-    }
-
-    void HandleAfterEffectAbsorb(AuraEffect*   /*aurEff*/, DamageInfo& dmgInfo, uint32& absorbAmount)
-    {
-        if (Unit* attacker = dmgInfo.GetAttacker())
-            if (GetOwner() && attacker->GetGUID() != GetOwner()->GetGUID())
+            bool Validate(SpellInfo const* /*spellInfo*/) override
             {
-                int32 damage = (int32)(absorbAmount * 0.25f);
-                GetOwner()->ToUnit()->CastCustomSpell(attacker, SPELL_REFLECTIVE_SHIELD_DAMAGE, &damage, nullptr, nullptr, true);
+                return ValidateSpellInfo(memorySpellId);
             }
-    }
 
-    void Register() override
-    {
-        AfterEffectAbsorb += AuraEffectAbsorbFn(spell_reflective_shield_aura::HandleAfterEffectAbsorb, EFFECT_0);
-    }
+            void FilterTargets(std::list<WorldObject*>& targets)
+            {
+                if (targets.empty())
+                    return;
+
+                WorldObject* target = Trinity::Containers::SelectRandomContainerElement(targets);
+                targets.clear();
+                targets.push_back(target);
+            }
+
+            void HandleScript(SpellEffIndex /*effIndex*/)
+            {
+                GetHitUnit()->CastSpell(GetHitUnit(), memorySpellId[urand(0, 24)], CastSpellExtraArgs(TRIGGERED_FULL_MASK)
+                    .SetOriginalCaster(GetCaster()->GetGUID()));
+            }
+
+            void Register() override
+            {
+                OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_paletress_summon_memory_SpellScript::FilterTargets, EFFECT_0, TARGET_UNIT_SRC_AREA_ENEMY);
+                OnEffectHitTarget += SpellEffectFn(spell_paletress_summon_memory_SpellScript::HandleScript, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
+            }
+        };
+
+        SpellScript* GetSpellScript() const override
+        {
+            return new spell_paletress_summon_memory_SpellScript();
+        }
 };
 
 void AddSC_boss_argent_challenge()
 {
     new boss_eadric();
+    new spell_eadric_radiance();
     new boss_paletress();
     new npc_memory();
     new npc_argent_soldier();
-    RegisterSpellScript(spell_eadric_radiance);
-    RegisterSpellScript(spell_toc5_light_rain);
-    RegisterSpellScript(spell_reflective_shield_aura);
+    new spell_paletress_summon_memory();
 }

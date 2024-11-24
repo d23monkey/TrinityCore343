@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -21,27 +21,38 @@
 #include "Define.h"
 #include "Duration.h"
 
+class WowTime;
+
 namespace GameTime
 {
     // Server start time
-    AC_GAME_API Seconds GetStartTime();
+    TC_GAME_API time_t GetStartTime();
 
-    // Current server time (unix)
-    AC_GAME_API Seconds GetGameTime();
+    // Current server time (unix) in seconds
+    TC_GAME_API time_t GetGameTime();
 
     // Milliseconds since server start
-    AC_GAME_API Milliseconds GetGameTimeMS();
+    TC_GAME_API uint32 GetGameTimeMS();
 
     /// Current chrono system_clock time point
-    AC_GAME_API SystemTimePoint GetSystemTime();
+    TC_GAME_API SystemTimePoint GetSystemTime();
 
     /// Current chrono steady_clock time point
-    AC_GAME_API TimePoint Now();
+    TC_GAME_API TimePoint Now();
 
-    /// Uptime
-    AC_GAME_API Seconds GetUptime();
+    /// Current chrono Clock time point
+    template<typename Clock>
+    typename Clock::time_point GetTime();
 
-    /// Update all timers
+    /// Uptime (in secs)
+    TC_GAME_API uint32 GetUptime();
+
+    TC_GAME_API tm const* GetDateAndTime();
+
+    TC_GAME_API WowTime const* GetUtcWowTime();
+
+    TC_GAME_API WowTime const* GetWowTime();
+
     void UpdateGameTimers();
 }
 

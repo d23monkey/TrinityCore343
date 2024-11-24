@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,14 +20,14 @@
 #include "SmartEnum.h"
 #include <stdexcept>
 
-namespace Acore::Impl::EnumUtilsImpl
+namespace Trinity::Impl::EnumUtilsImpl
 {
 
 /************************************************************\
 |* data for enum 'ChatNotify' in 'Channel.h' auto-generated *|
 \************************************************************/
 template <>
-AC_API_EXPORT EnumText EnumUtils<ChatNotify>::ToString(ChatNotify value)
+TC_API_EXPORT EnumText EnumUtils<ChatNotify>::ToString(ChatNotify value)
 {
     switch (value)
     {
@@ -50,10 +50,10 @@ AC_API_EXPORT EnumText EnumUtils<ChatNotify>::ToString(ChatNotify value)
         case CHAT_MODERATION_OFF_NOTICE: return { "CHAT_MODERATION_OFF_NOTICE", "CHAT_MODERATION_OFF_NOTICE", "+ \042[%s] Channel moderation disabled by %s.\042;" };
         case CHAT_MUTED_NOTICE: return { "CHAT_MUTED_NOTICE", "CHAT_MUTED_NOTICE", "+ \042[%s] You do not have permission to speak.\042;" };
         case CHAT_PLAYER_KICKED_NOTICE: return { "CHAT_PLAYER_KICKED_NOTICE", "CHAT_PLAYER_KICKED_NOTICE", "? \042[%s] Player %s kicked by %s.\042;" };
-        case CHAT_BANNED_NOTICE: return { "CHAT_BANNED_NOTICE", "CHAT_BANNED_NOTICE", "+ \042[%s] You are bannedStore from that channel.\042;" };
-        case CHAT_PLAYER_BANNED_NOTICE: return { "CHAT_PLAYER_BANNED_NOTICE", "CHAT_PLAYER_BANNED_NOTICE", "? \042[%s] Player %s bannedStore by %s.\042;" };
+        case CHAT_BANNED_NOTICE: return { "CHAT_BANNED_NOTICE", "CHAT_BANNED_NOTICE", "+ \042[%s] You are banned from that channel.\042;" };
+        case CHAT_PLAYER_BANNED_NOTICE: return { "CHAT_PLAYER_BANNED_NOTICE", "CHAT_PLAYER_BANNED_NOTICE", "? \042[%s] Player %s banned by %s.\042;" };
         case CHAT_PLAYER_UNBANNED_NOTICE: return { "CHAT_PLAYER_UNBANNED_NOTICE", "CHAT_PLAYER_UNBANNED_NOTICE", "? \042[%s] Player %s unbanned by %s.\042;" };
-        case CHAT_PLAYER_NOT_BANNED_NOTICE: return { "CHAT_PLAYER_NOT_BANNED_NOTICE", "CHAT_PLAYER_NOT_BANNED_NOTICE", "+ \042[%s] Player %s is not bannedStore.\042;" };
+        case CHAT_PLAYER_NOT_BANNED_NOTICE: return { "CHAT_PLAYER_NOT_BANNED_NOTICE", "CHAT_PLAYER_NOT_BANNED_NOTICE", "+ \042[%s] Player %s is not banned.\042;" };
         case CHAT_PLAYER_ALREADY_MEMBER_NOTICE: return { "CHAT_PLAYER_ALREADY_MEMBER_NOTICE", "CHAT_PLAYER_ALREADY_MEMBER_NOTICE", "+ \042[%s] Player %s is already on the channel.\042;" };
         case CHAT_INVITE_NOTICE: return { "CHAT_INVITE_NOTICE", "CHAT_INVITE_NOTICE", "+ \042%2$s has invited you to join the channel '%1$s'.\042;" };
         case CHAT_INVITE_WRONG_FACTION_NOTICE: return { "CHAT_INVITE_WRONG_FACTION_NOTICE", "CHAT_INVITE_WRONG_FACTION_NOTICE", "+ \042Target is in the wrong alliance for %s.\042;" };
@@ -61,21 +61,23 @@ AC_API_EXPORT EnumText EnumUtils<ChatNotify>::ToString(ChatNotify value)
         case CHAT_INVALID_NAME_NOTICE: return { "CHAT_INVALID_NAME_NOTICE", "CHAT_INVALID_NAME_NOTICE", "+ \042Invalid channel name\042;" };
         case CHAT_NOT_MODERATED_NOTICE: return { "CHAT_NOT_MODERATED_NOTICE", "CHAT_NOT_MODERATED_NOTICE", "+ \042%s is not moderated\042;" };
         case CHAT_PLAYER_INVITED_NOTICE: return { "CHAT_PLAYER_INVITED_NOTICE", "CHAT_PLAYER_INVITED_NOTICE", "+ \042[%s] You invited %s to join the channel\042;" };
-        case CHAT_PLAYER_INVITE_BANNED_NOTICE: return { "CHAT_PLAYER_INVITE_BANNED_NOTICE", "CHAT_PLAYER_INVITE_BANNED_NOTICE", "+ \042[%s] %s has been bannedStore.\042;" };
+        case CHAT_PLAYER_INVITE_BANNED_NOTICE: return { "CHAT_PLAYER_INVITE_BANNED_NOTICE", "CHAT_PLAYER_INVITE_BANNED_NOTICE", "+ \042[%s] %s has been banned.\042;" };
         case CHAT_THROTTLED_NOTICE: return { "CHAT_THROTTLED_NOTICE", "CHAT_THROTTLED_NOTICE", "+ \042[%s] The number of messages that can be sent to this channel is limited, please wait to send another message.\042;" };
         case CHAT_NOT_IN_AREA_NOTICE: return { "CHAT_NOT_IN_AREA_NOTICE", "CHAT_NOT_IN_AREA_NOTICE", "+ \042[%s] You are not in the correct area for this channel.\042; -- The user is trying to send a chat to a zone specific channel, and they're not physically in that zone." };
         case CHAT_NOT_IN_LFG_NOTICE: return { "CHAT_NOT_IN_LFG_NOTICE", "CHAT_NOT_IN_LFG_NOTICE", "+ \042[%s] You must be queued in looking for group before joining this channel.\042; -- The user must be in the looking for group system to join LFG chat channels." };
         case CHAT_VOICE_ON_NOTICE: return { "CHAT_VOICE_ON_NOTICE", "CHAT_VOICE_ON_NOTICE", "+ \042[%s] Channel voice enabled by %s.\042;" };
         case CHAT_VOICE_OFF_NOTICE: return { "CHAT_VOICE_OFF_NOTICE", "CHAT_VOICE_OFF_NOTICE", "+ \042[%s] Channel voice disabled by %s.\042;" };
+        case CHAT_TRIAL_RESTRICTED: return { "CHAT_TRIAL_RESTRICTED", "CHAT_TRIAL_RESTRICTED", "+ \042[%s] Free Trial accounts cannot send messages to this channel. |cffffd000|Hstorecategory:gametime|h[Click To Upgrade]|h|r\042" };
+        case CHAT_NOT_ALLOWED_IN_CHANNEL: return { "CHAT_NOT_ALLOWED_IN_CHANNEL", "CHAT_NOT_ALLOWED_IN_CHANNEL", "+ \042That operation is not permitted in this channel.\042" };
         default: throw std::out_of_range("value");
     }
 }
 
 template <>
-AC_API_EXPORT std::size_t EnumUtils<ChatNotify>::Count() { return 36; }
+TC_API_EXPORT size_t EnumUtils<ChatNotify>::Count() { return 38; }
 
 template <>
-AC_API_EXPORT ChatNotify EnumUtils<ChatNotify>::FromIndex(std::size_t index)
+TC_API_EXPORT ChatNotify EnumUtils<ChatNotify>::FromIndex(size_t index)
 {
     switch (index)
     {
@@ -115,12 +117,14 @@ AC_API_EXPORT ChatNotify EnumUtils<ChatNotify>::FromIndex(std::size_t index)
         case 33: return CHAT_NOT_IN_LFG_NOTICE;
         case 34: return CHAT_VOICE_ON_NOTICE;
         case 35: return CHAT_VOICE_OFF_NOTICE;
+        case 36: return CHAT_TRIAL_RESTRICTED;
+        case 37: return CHAT_NOT_ALLOWED_IN_CHANNEL;
         default: throw std::out_of_range("index");
     }
 }
 
 template <>
-AC_API_EXPORT std::size_t EnumUtils<ChatNotify>::ToIndex(ChatNotify value)
+TC_API_EXPORT size_t EnumUtils<ChatNotify>::ToIndex(ChatNotify value)
 {
     switch (value)
     {
@@ -160,6 +164,8 @@ AC_API_EXPORT std::size_t EnumUtils<ChatNotify>::ToIndex(ChatNotify value)
         case CHAT_NOT_IN_LFG_NOTICE: return 33;
         case CHAT_VOICE_ON_NOTICE: return 34;
         case CHAT_VOICE_OFF_NOTICE: return 35;
+        case CHAT_TRIAL_RESTRICTED: return 36;
+        case CHAT_NOT_ALLOWED_IN_CHANNEL: return 37;
         default: throw std::out_of_range("value");
     }
 }

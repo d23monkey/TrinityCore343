@@ -1,22 +1,21 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "BattlegroundAV.h"
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
 #include "ScriptedCreature.h"
 
 enum Spells
@@ -31,172 +30,108 @@ enum Spells
     SPELL_STORMPIKE                               = 51876  // not sure
 };
 
-enum Yells
+enum Texts
 {
-    YELL_AGGRO                                    = 0,
-    YELL_EVADE                                    = 1,
-    YELL_RESPAWN                                  = 2,
-    YELL_RANDOM                                   = 3
+    SAY_AGGRO                                    = 0,
+    SAY_EVADE                                    = 1,
+    SAY_RESPAWN                                  = 2,
+    SAY_RANDOM                                   = 3
 };
 
-class boss_drekthar : public CreatureScript
+enum Events
 {
-public:
-    boss_drekthar() : CreatureScript("boss_drekthar") { }
+    EVENT_WHIRLWIND = 1,
+    EVENT_WHIRLWIND2,
+    EVENT_KNOCKDOWN,
+    EVENT_FRENZY,
+    EVENT_RANDOM_YELL
+};
 
-    struct boss_drektharAI : public ScriptedAI
+struct boss_drekthar : public ScriptedAI
+{
+    boss_drekthar(Creature* creature) : ScriptedAI(creature) { }
+
+    void Reset() override
     {
-        boss_drektharAI(Creature* creature) : ScriptedAI(creature) { }
-
-        uint32 WhirlwindTimer;
-        uint32 Whirlwind2Timer;
-        uint32 KnockdownTimer;
-        uint32 FrenzyTimer;
-        uint32 YellTimer;
-        uint32 ResetTimer;
-        bool Attacked;
-
-        void Reset() override
-        {
-            WhirlwindTimer = urand(1 * IN_MILLISECONDS, 20 * IN_MILLISECONDS);
-            Whirlwind2Timer = urand(1 * IN_MILLISECONDS, 20 * IN_MILLISECONDS);
-            KnockdownTimer = 12 * IN_MILLISECONDS;
-            FrenzyTimer = 6 * IN_MILLISECONDS;
-            ResetTimer = 5 * IN_MILLISECONDS;
-            YellTimer = urand(20 * IN_MILLISECONDS, 30 * IN_MILLISECONDS); //20 to 30 seconds
-            Attacked = false;
-        }
-
-        void JustEngagedWith(Unit* /*who*/) override
-        {
-            Talk(YELL_AGGRO);
-        }
-
-        void JustRespawned() override
-        {
-            Reset();
-            Talk(YELL_RESPAWN);
-        }
-
-        void AttackStart(Unit* victim) override
-        {
-            ScriptedAI::AttackStart(victim);
-
-            if (!Attacked)
-            {
-                Attacked = true;
-
-                // Mini bosses should attack as well
-                if (BattlegroundMap* bgMap = me->GetMap()->ToBattlegroundMap())
-                {
-                    if (Battleground* bg = bgMap->GetBG())
-                    {
-                        for (uint8 i = AV_CPLACE_H_MARSHAL_ICE; i <= AV_CPLACE_H_MARSHAL_WTOWER; ++i)
-                        {
-                            if (Creature* marshall = bg->GetBGCreature(i))
-                            {
-                                if (marshall->IsAIEnabled && !marshall->GetVictim())
-                                {
-                                    marshall->AI()->AttackStart(victim);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        void EnterEvadeMode(EvadeReason why) override
-        {
-            ScriptedAI::EnterEvadeMode(why);
-
-            if (Attacked)
-            {
-                Attacked = false;
-
-                // Evade mini bosses
-                if (BattlegroundMap* bgMap = me->GetMap()->ToBattlegroundMap())
-                {
-                    if (Battleground* bg = bgMap->GetBG())
-                    {
-                        for (uint8 i = AV_CPLACE_H_MARSHAL_ICE; i <= AV_CPLACE_H_MARSHAL_WTOWER; ++i)
-                        {
-                            if (Creature* marshall = bg->GetBGCreature(i))
-                            {
-                                if (marshall->IsAIEnabled && !marshall->IsInEvadeMode())
-                                {
-                                    marshall->AI()->EnterEvadeMode();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (!UpdateVictim())
-                return;
-
-            if (WhirlwindTimer <= diff)
-            {
-                DoCastVictim(SPELL_WHIRLWIND);
-                WhirlwindTimer =  urand(8 * IN_MILLISECONDS, 18 * IN_MILLISECONDS);
-            }
-            else WhirlwindTimer -= diff;
-
-            if (Whirlwind2Timer <= diff)
-            {
-                DoCastVictim(SPELL_WHIRLWIND2);
-                Whirlwind2Timer = urand(7 * IN_MILLISECONDS, 25 * IN_MILLISECONDS);
-            }
-            else Whirlwind2Timer -= diff;
-
-            if (KnockdownTimer <= diff)
-            {
-                DoCastVictim(SPELL_KNOCKDOWN);
-                KnockdownTimer = urand(10 * IN_MILLISECONDS, 15 * IN_MILLISECONDS);
-            }
-            else KnockdownTimer -= diff;
-
-            if (FrenzyTimer <= diff)
-            {
-                DoCastVictim(SPELL_FRENZY);
-                FrenzyTimer = urand(20 * IN_MILLISECONDS, 30 * IN_MILLISECONDS);
-            }
-            else FrenzyTimer -= diff;
-
-            if (YellTimer <= diff)
-            {
-                Talk(YELL_RANDOM);
-                YellTimer = urand(20 * IN_MILLISECONDS, 30 * IN_MILLISECONDS); //20 to 30 seconds
-            }
-            else YellTimer -= diff;
-
-            // check if creature is not outside of building
-            if (ResetTimer <= diff)
-            {
-                if (me->GetDistance2d(me->GetHomePosition().GetPositionX(), me->GetHomePosition().GetPositionY()) > 50)
-                {
-                    ScriptedAI::EnterEvadeMode();
-                    Talk(YELL_EVADE);
-                }
-                ResetTimer = 5 * IN_MILLISECONDS;
-            }
-            else ResetTimer -= diff;
-
-            DoMeleeAttackIfReady();
-        }
-    };
-
-    CreatureAI* GetAI(Creature* creature) const override
-    {
-        return new boss_drektharAI(creature);
+        events.Reset();
     }
+
+    void JustEngagedWith(Unit* /*who*/) override
+    {
+        Talk(SAY_AGGRO);
+        events.ScheduleEvent(EVENT_WHIRLWIND, 1s, 20s);
+        events.ScheduleEvent(EVENT_WHIRLWIND2, 1s, 20s);
+        events.ScheduleEvent(EVENT_KNOCKDOWN, 12s);
+        events.ScheduleEvent(EVENT_FRENZY, 6s);
+        events.ScheduleEvent(EVENT_RANDOM_YELL, 20s, 30s);
+    }
+
+    void JustAppeared() override
+    {
+        Reset();
+        Talk(SAY_RESPAWN);
+    }
+
+    bool CheckInRoom() override
+    {
+        if (me->GetDistance2d(me->GetHomePosition().GetPositionX(), me->GetHomePosition().GetPositionY()) > 50)
+        {
+            EnterEvadeMode();
+            Talk(SAY_EVADE);
+            return false;
+        }
+
+        return true;
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim() || !CheckInRoom())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_WHIRLWIND:
+                    DoCastVictim(SPELL_WHIRLWIND);
+                    events.ScheduleEvent(EVENT_WHIRLWIND, 8s, 18s);
+                    break;
+                case EVENT_WHIRLWIND2:
+                    DoCastVictim(SPELL_WHIRLWIND2);
+                    events.ScheduleEvent(EVENT_WHIRLWIND2, 7s, 25s);
+                    break;
+                case EVENT_KNOCKDOWN:
+                    DoCastVictim(SPELL_KNOCKDOWN);
+                    events.ScheduleEvent(EVENT_KNOCKDOWN, 10s, 15s);
+                    break;
+                case EVENT_FRENZY:
+                    DoCastVictim(SPELL_FRENZY);
+                    events.ScheduleEvent(EVENT_FRENZY, 20s, 30s);
+                    break;
+                case EVENT_RANDOM_YELL:
+                    Talk(SAY_RANDOM);
+                    events.ScheduleEvent(EVENT_RANDOM_YELL, 20s, 30s);
+                    break;
+                default:
+                    break;
+            }
+
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
+        }
+    }
+
+    private:
+        EventMap events;
 };
 
 void AddSC_boss_drekthar()
 {
-    new boss_drekthar;
+    RegisterCreatureAI(boss_drekthar);
 }

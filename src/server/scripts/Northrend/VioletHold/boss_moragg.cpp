@@ -1,157 +1,169 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
 #include "ScriptedCreature.h"
 #include "SpellAuraEffects.h"
 #include "SpellScript.h"
-#include "SpellScriptLoader.h"
 #include "violet_hold.h"
 
-enum eSpells
+enum Spells
 {
-    SPELL_RAY_OF_SUFFERING_N                = 54442,
-    SPELL_RAY_OF_SUFFERING_H                = 59524,
-    //SPELL_RAY_OF_SUFFERING_TRIGGERED      = 54417,
+    SPELL_CORROSIVE_SALIVA                     = 54527,
+    SPELL_OPTIC_LINK                           = 54396,
 
-    SPELL_RAY_OF_PAIN_N                     = 54438,
-    SPELL_RAY_OF_PAIN_H                     = 59523,
-    //SPELL_RAY_OF_PAIN_TRIGGERED_N         = 54416,
-    //SPELL_RAY_OF_PAIN_TRIGGERED_H         = 59525,
-
-    SPELL_CORROSIVE_SALIVA                  = 54527,
-    SPELL_OPTIC_LINK                        = 54396,
+    // Visual
+    SPELL_OPTIC_LINK_LEVEL_1                   = 54393,
+    SPELL_OPTIC_LINK_LEVEL_2                   = 54394,
+    SPELL_OPTIC_LINK_LEVEL_3                   = 54395
 };
 
-#define SPELL_RAY_OF_SUFFERING              DUNGEON_MODE(SPELL_RAY_OF_SUFFERING_N, SPELL_RAY_OF_SUFFERING_H)
-#define SPELL_RAY_OF_PAIN                   DUNGEON_MODE(SPELL_RAY_OF_PAIN_N, SPELL_RAY_OF_PAIN_H)
+#define SPELL_RAY_OF_PAIN DUNGEON_MODE(54438,59523)
+#define SPELL_RAY_OF_SUFFERING DUNGEON_MODE(54442,59524)
 
-enum eEvents
+struct boss_moragg : public BossAI
 {
-    EVENT_SPELL_CORROSIVE_SALIVA = 1,
-    EVENT_SPELL_OPTIC_LINK,
-};
+    boss_moragg(Creature* creature) : BossAI(creature, DATA_MORAGG) { }
 
-class boss_moragg : public CreatureScript
-{
-public:
-    boss_moragg() : CreatureScript("boss_moragg") { }
-
-    CreatureAI* GetAI(Creature* pCreature) const override
+    void Reset() override
     {
-        return GetVioletHoldAI<boss_moraggAI>(pCreature);
+        BossAI::Reset();
     }
 
-    struct boss_moraggAI : public ScriptedAI
+    void JustEngagedWith(Unit* who) override
     {
-        boss_moraggAI(Creature* c) : ScriptedAI(c)
+        BossAI::JustEngagedWith(who);
+    }
+
+    void JustReachedHome() override
+    {
+        BossAI::JustReachedHome();
+        instance->SetData(DATA_HANDLE_CELLS, DATA_MORAGG);
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        scheduler.Update(diff);
+    }
+
+    void ScheduleTasks() override
+    {
+        scheduler.Async([this]
         {
-            pInstance = c->GetInstanceScript();
-        }
+            DoCast(me, SPELL_RAY_OF_PAIN);
+            DoCast(me, SPELL_RAY_OF_SUFFERING);
+        });
 
-        InstanceScript* pInstance;
-        EventMap events;
-
-        void Reset() override
+        scheduler.Schedule(Seconds(15), [this](TaskContext task)
         {
-            events.Reset();
-        }
+            if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 50.0f, true))
+                DoCast(target, SPELL_OPTIC_LINK);
+            task.Repeat(Seconds(25));
+        });
 
-        void JustEngagedWith(Unit* /*who*/) override
+        scheduler.Schedule(Seconds(5), [this](TaskContext task)
         {
-            DoZoneInCombat();
-            me->CastSpell(me, SPELL_RAY_OF_SUFFERING, true);
-            me->CastSpell(me, SPELL_RAY_OF_PAIN, true);
-            events.Reset();
-            events.RescheduleEvent(EVENT_SPELL_CORROSIVE_SALIVA, 4s, 6s);
-            events.RescheduleEvent(EVENT_SPELL_OPTIC_LINK, 10s, 11s);
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
-            {
-                case 0:
-                    break;
-                case EVENT_SPELL_CORROSIVE_SALIVA:
-                    me->CastSpell(me->GetVictim(), SPELL_CORROSIVE_SALIVA, false);
-                    events.Repeat(8s, 10s);
-                    break;
-                case EVENT_SPELL_OPTIC_LINK:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::MinDistance, 0, 40.0f, true))
-                    {
-                        me->CastSpell(target, SPELL_OPTIC_LINK, false);
-                        events.Repeat(18s, 21s);
-                    }
-                    else
-                        events.Repeat(5s);
-                    break;
-            }
-
-            DoMeleeAttackIfReady();
-        }
-
-        void JustDied(Unit* /*killer*/) override
-        {
-            if (pInstance)
-                pInstance->SetData(DATA_BOSS_DIED, 0);
-        }
-
-        void MoveInLineOfSight(Unit* /*who*/) override {}
-
-        void EnterEvadeMode(EvadeReason why) override
-        {
-            ScriptedAI::EnterEvadeMode(why);
-            events.Reset();
-            me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-            if (pInstance)
-                pInstance->SetData(DATA_FAILED, 1);
-        }
-    };
+            DoCastVictim(SPELL_CORROSIVE_SALIVA);
+            task.Repeat(Seconds(10));
+        });
+    }
 };
 
-class spell_optic_link_aura : public AuraScript
+// 54438, 59523 - Ray of Pain
+// 54442, 59524 - Ray of Suffering
+class spell_moragg_ray : public AuraScript
 {
-    PrepareAuraScript(spell_optic_link_aura);
-
-    void HandleEffectPeriodic(AuraEffect const* aurEff)
+    void OnPeriodic(AuraEffect const* aurEff)
     {
-        if (Unit* target = GetTarget())
-            if (Unit* caster = GetCaster())
-                if (GetAura() && GetAura()->GetEffect(0))
-                    GetAura()->GetEffect(0)->SetAmount(aurEff->GetSpellInfo()->Effects[EFFECT_0].BasePoints + (((int32)target->GetExactDist(caster)) * 25) + (aurEff->GetTickNumber() * 100));
+        PreventDefaultAction();
+
+        if (UnitAI* AI = GetTarget()->GetAI())
+            if (Unit* target = AI->SelectTarget(SelectTargetMethod::Random, 0, 45.0f, true))
+            {
+                uint32 triggerSpell = aurEff->GetSpellEffectInfo().TriggerSpell;
+                GetTarget()->CastSpell(target, triggerSpell, aurEff);
+            }
     }
 
     void Register() override
     {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_optic_link_aura::HandleEffectPeriodic, EFFECT_0, SPELL_AURA_PERIODIC_DAMAGE);
+        OnEffectPeriodic += AuraEffectPeriodicFn(spell_moragg_ray::OnPeriodic, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
+    }
+};
+
+// 54396 - Optic Link
+class spell_moragg_optic_link : public AuraScript
+{
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo(
+        {
+            SPELL_OPTIC_LINK_LEVEL_3,
+            SPELL_OPTIC_LINK_LEVEL_2,
+            SPELL_OPTIC_LINK_LEVEL_1
+        });
+    }
+
+    void OnPeriodic(AuraEffect const* aurEff)
+    {
+        if (Unit* caster = GetCaster())
+        {
+            if (aurEff->GetTickNumber() >= 8)
+                caster->CastSpell(GetTarget(), SPELL_OPTIC_LINK_LEVEL_3, aurEff);
+
+            if (aurEff->GetTickNumber() >= 4)
+                caster->CastSpell(GetTarget(), SPELL_OPTIC_LINK_LEVEL_2, aurEff);
+
+            caster->CastSpell(GetTarget(), SPELL_OPTIC_LINK_LEVEL_1, aurEff);
+        }
+    }
+
+    void OnUpdate(AuraEffect* aurEff)
+    {
+        switch (aurEff->GetTickNumber())
+        {
+            case 1:
+                aurEff->SetAmount(aurEff->GetAmount() + 250); // base amount is 500
+                break;
+            case 4:
+                aurEff->SetAmount(aurEff->GetAmount() * 2); // goes to 1500
+                break;
+            case 8:
+                aurEff->SetAmount(aurEff->GetAmount() * 2); // goes to 3000
+                break;
+            default:
+                break;
+        }
+    }
+
+    void Register() override
+    {
+        OnEffectPeriodic += AuraEffectPeriodicFn(spell_moragg_optic_link::OnPeriodic, EFFECT_0, SPELL_AURA_PERIODIC_DAMAGE);
+        OnEffectUpdatePeriodic += AuraEffectUpdatePeriodicFn(spell_moragg_optic_link::OnUpdate, EFFECT_0, SPELL_AURA_PERIODIC_DAMAGE);
     }
 };
 
 void AddSC_boss_moragg()
 {
-    new boss_moragg();
-    RegisterSpellScript(spell_optic_link_aura);
+    RegisterVioletHoldCreatureAI(boss_moragg);
+    RegisterSpellScript(spell_moragg_ray);
+    RegisterSpellScript(spell_moragg_optic_link);
 }

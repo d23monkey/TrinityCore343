@@ -1,22 +1,22 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef ACORE_CELLIMPL_H
-#define ACORE_CELLIMPL_H
+#ifndef TRINITY_CELLIMPL_H
+#define TRINITY_CELLIMPL_H
 
 #include "Cell.h"
 #include "Map.h"
@@ -34,7 +34,7 @@ inline Cell::Cell(CellCoord const& p)
 
 inline Cell::Cell(float x, float y)
 {
-    CellCoord p = Acore::ComputeCellCoord(x, y);
+    CellCoord p = Trinity::ComputeCellCoord(x, y);
     data.Part.grid_x = p.x_coord / MAX_NUMBER_OF_CELLS;
     data.Part.grid_y = p.y_coord / MAX_NUMBER_OF_CELLS;
     data.Part.cell_x = p.x_coord % MAX_NUMBER_OF_CELLS;
@@ -47,12 +47,12 @@ inline CellArea Cell::CalculateCellArea(float x, float y, float radius)
 {
     if (radius <= 0.0f)
     {
-        CellCoord center = Acore::ComputeCellCoord(x, y).normalize();
+        CellCoord center = Trinity::ComputeCellCoord(x, y).normalize();
         return CellArea(center, center);
     }
 
-    CellCoord centerX = Acore::ComputeCellCoord(x - radius, y - radius).normalize();
-    CellCoord centerY = Acore::ComputeCellCoord(x + radius, y + radius).normalize();
+    CellCoord centerX = Trinity::ComputeCellCoord(x - radius, y - radius).normalize();
+    CellCoord centerY = Trinity::ComputeCellCoord(x + radius, y + radius).normalize();
 
     return CellArea(centerX, centerY);
 }
@@ -66,13 +66,14 @@ inline void Cell::Visit(CellCoord const& standing_cell, TypeContainerVisitor<T, 
 }
 
 template<class T, class CONTAINER>
-inline void Cell::Visit(CellCoord const& standing_cell, TypeContainerVisitor<T, CONTAINER>& visitor, Map& map, float x_off, float y_off, float radius) const{
+inline void Cell::Visit(CellCoord const& standing_cell, TypeContainerVisitor<T, CONTAINER>& visitor, Map& map, float x_off, float y_off, float radius) const
+{
     if (!standing_cell.IsCoordValid())
         return;
 
-    // no jokes here... Actually placing ASSERT() here was good idea, but
-    // we had some problems with DynamicObjects, which pass radius = 0.0f (DB issue?)
-    // maybe it is better to just return when radius <= 0.0f?
+    //no jokes here... Actually placing ASSERT() here was good idea, but
+    //we had some problems with DynamicObjects, which pass radius = 0.0f (DB issue?)
+    //maybe it is better to just return when radius <= 0.0f?
     if (radius <= 0.0f)
     {
         map.Visit(*this, visitor);
@@ -175,42 +176,36 @@ inline void Cell::VisitCircle(TypeContainerVisitor<T, CONTAINER>& visitor, Map& 
 }
 
 template<class T>
-inline void Cell::VisitGridObjects(WorldObject const* center_obj, T& visitor, float radius, bool dont_load /*= true*/)
+inline void Cell::VisitGridObjects(WorldObject const* center_obj, T& visitor, float radius, bool dont_load)
 {
-    CellCoord p(Acore::ComputeCellCoord(center_obj->GetPositionX(), center_obj->GetPositionY()));
+    CellCoord p(Trinity::ComputeCellCoord(center_obj->GetPositionX(), center_obj->GetPositionY()));
     Cell cell(p);
     if (dont_load)
-    {
         cell.SetNoCreate();
-    }
 
     TypeContainerVisitor<T, GridTypeMapContainer> gnotifier(visitor);
     cell.Visit(p, gnotifier, *center_obj->GetMap(), *center_obj, radius);
 }
 
 template<class T>
-inline void Cell::VisitWorldObjects(WorldObject const* center_obj, T& visitor, float radius, bool dont_load /*= true*/)
+inline void Cell::VisitWorldObjects(WorldObject const* center_obj, T& visitor, float radius, bool dont_load)
 {
-    CellCoord p(Acore::ComputeCellCoord(center_obj->GetPositionX(), center_obj->GetPositionY()));
+    CellCoord p(Trinity::ComputeCellCoord(center_obj->GetPositionX(), center_obj->GetPositionY()));
     Cell cell(p);
     if (dont_load)
-    {
         cell.SetNoCreate();
-    }
 
-    TypeContainerVisitor<T, WorldTypeMapContainer> wnotifier(visitor);
-    cell.Visit(p, wnotifier, *center_obj->GetMap(), *center_obj, radius);
+    TypeContainerVisitor<T, WorldTypeMapContainer> gnotifier(visitor);
+    cell.Visit(p, gnotifier, *center_obj->GetMap(), *center_obj, radius);
 }
 
 template<class T>
-inline void Cell::VisitAllObjects(WorldObject const* center_obj, T& visitor, float radius, bool dont_load /*= true*/)
+inline void Cell::VisitAllObjects(WorldObject const* center_obj, T& visitor, float radius, bool dont_load)
 {
-    CellCoord p(Acore::ComputeCellCoord(center_obj->GetPositionX(), center_obj->GetPositionY()));
+    CellCoord p(Trinity::ComputeCellCoord(center_obj->GetPositionX(), center_obj->GetPositionY()));
     Cell cell(p);
     if (dont_load)
-    {
         cell.SetNoCreate();
-    }
 
     TypeContainerVisitor<T, WorldTypeMapContainer> wnotifier(visitor);
     cell.Visit(p, wnotifier, *center_obj->GetMap(), *center_obj, radius);
@@ -219,42 +214,36 @@ inline void Cell::VisitAllObjects(WorldObject const* center_obj, T& visitor, flo
 }
 
 template<class T>
-inline void Cell::VisitGridObjects(float x, float y, Map* map, T& visitor, float radius, bool dont_load /*= true*/)
+inline void Cell::VisitGridObjects(float x, float y, Map* map, T& visitor, float radius, bool dont_load)
 {
-    CellCoord p(Acore::ComputeCellCoord(x, y));
+    CellCoord p(Trinity::ComputeCellCoord(x, y));
     Cell cell(p);
     if (dont_load)
-    {
         cell.SetNoCreate();
-    }
 
     TypeContainerVisitor<T, GridTypeMapContainer> gnotifier(visitor);
     cell.Visit(p, gnotifier, *map, x, y, radius);
 }
 
 template<class T>
-inline void Cell::VisitWorldObjects(float x, float y, Map* map, T& visitor, float radius, bool dont_load /*= true*/)
+inline void Cell::VisitWorldObjects(float x, float y, Map* map, T& visitor, float radius, bool dont_load)
 {
-    CellCoord p(Acore::ComputeCellCoord(x, y));
+    CellCoord p(Trinity::ComputeCellCoord(x, y));
     Cell cell(p);
     if (dont_load)
-    {
         cell.SetNoCreate();
-    }
 
-    TypeContainerVisitor<T, WorldTypeMapContainer> wnotifier(visitor);
-    cell.Visit(p, wnotifier, *map, x, y, radius);
+    TypeContainerVisitor<T, WorldTypeMapContainer> gnotifier(visitor);
+    cell.Visit(p, gnotifier, *map, x, y, radius);
 }
 
 template<class T>
-inline void Cell::VisitAllObjects(float x, float y, Map* map, T& visitor, float radius, bool dont_load /*= true*/)
+inline void Cell::VisitAllObjects(float x, float y, Map* map, T& visitor, float radius, bool dont_load)
 {
-    CellCoord p(Acore::ComputeCellCoord(x, y));
+    CellCoord p(Trinity::ComputeCellCoord(x, y));
     Cell cell(p);
     if (dont_load)
-    {
         cell.SetNoCreate();
-    }
 
     TypeContainerVisitor<T, WorldTypeMapContainer> wnotifier(visitor);
     cell.Visit(p, wnotifier, *map, x, y, radius);

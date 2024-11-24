@@ -1,44 +1,47 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _CHATCOMMANDTAGS_H
-#define _CHATCOMMANDTAGS_H
+#ifndef TRINITY_CHATCOMMANDTAGS_H
+#define TRINITY_CHATCOMMANDTAGS_H
 
 #include "ChatCommandHelpers.h"
 #include "Hyperlinks.h"
 #include "ObjectGuid.h"
 #include "Optional.h"
 #include "Util.h"
-#include <boost/preprocessor/punctuation/comma_if.hpp>
 #include <boost/preprocessor/repetition/repeat.hpp>
-#include <iostream>
+#include <boost/preprocessor/punctuation/comma_if.hpp>
+#include <fmt/ostream.h>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 #include <variant>
 
 class ChatHandler;
 class Player;
+class WorldSession;
 
-namespace Acore::Impl::ChatCommands
+namespace Trinity::Impl::ChatCommands
 {
     struct ContainerTag
     {
-        using ChatCommandResult = Acore::Impl::ChatCommands::ChatCommandResult;
+        using ChatCommandResult = Trinity::Impl::ChatCommands::ChatCommandResult;
     };
 
     template <typename T>
@@ -47,15 +50,15 @@ namespace Acore::Impl::ChatCommands
         using type = typename T::value_type;
     };
 
-    template <std::size_t N>
-    inline constexpr char GetChar(char const (&s)[N], std::size_t i)
+    template <size_t N>
+    inline constexpr char GetChar(char const (&s)[N], size_t i)
     {
         static_assert(N <= 25, "The EXACT_SEQUENCE macro can only be used with up to 25 character long literals. Specify them char-by-char (null terminated) as parameters to ExactSequence<> instead.");
         return i >= N ? '\0' : s[i];
     }
 
 #define CHATCOMMANDS_IMPL_SPLIT_LITERAL_EXTRACT_CHAR(z, i, strliteral) \
-        BOOST_PP_COMMA_IF(i) Acore::Impl::ChatCommands::GetChar(strliteral, i)
+        BOOST_PP_COMMA_IF(i) Trinity::Impl::ChatCommands::GetChar(strliteral, i)
 
 #define CHATCOMMANDS_IMPL_SPLIT_LITERAL_CONSTRAINED(maxlen, strliteral)  \
         BOOST_PP_REPEAT(maxlen, CHATCOMMANDS_IMPL_SPLIT_LITERAL_EXTRACT_CHAR, strliteral)
@@ -64,11 +67,11 @@ namespace Acore::Impl::ChatCommands
 #define CHATCOMMANDS_IMPL_SPLIT_LITERAL(strliteral) CHATCOMMANDS_IMPL_SPLIT_LITERAL_CONSTRAINED(25, strliteral)
 }
 
-namespace Acore::ChatCommands
+namespace Trinity::ChatCommands
 {
     /************************** CONTAINER TAGS **********************************************\
     |* Simple holder classes to differentiate between extraction methods                    *|
-    |* Must inherit from Acore::Impl::ChatCommands::ContainerTag                          *|
+    |* Must inherit from Trinity::Impl::ChatCommands::ContainerTag                          *|
     |* Must implement the following:                                                        *|
     |* - TryConsume: ChatHandler const*, std::string_view -> ChatCommandResult              *|
     |*   - on match, returns tail of the provided argument string (as std::string_view)     *|
@@ -81,7 +84,7 @@ namespace Acore::ChatCommands
     \****************************************************************************************/
 
     template <char... chars>
-    struct ExactSequence : Acore::Impl::ChatCommands::ContainerTag
+    struct ExactSequence : Trinity::Impl::ChatCommands::ContainerTag
     {
         using value_type = void;
 
@@ -92,12 +95,12 @@ namespace Acore::ChatCommands
             std::string_view start = args.substr(0, _string.length());
             if (StringEqualI(start, _string))
             {
-                auto [remainingToken, tail] = Acore::Impl::ChatCommands::tokenize(args.substr(_string.length()));
+                auto [remainingToken, tail] = Trinity::Impl::ChatCommands::tokenize(args.substr(_string.length()));
                 if (remainingToken.empty()) // if this is not empty, then we did not consume the full token
                     return tail;
                 start = args.substr(0, _string.length() + remainingToken.length());
             }
-            return Acore::Impl::ChatCommands::FormatAcoreString(handler, LANG_CMDPARSER_EXACT_SEQ_MISMATCH, _string, start);
+            return Trinity::Impl::ChatCommands::FormatTrinityString(handler, LANG_CMDPARSER_EXACT_SEQ_MISMATCH, STRING_VIEW_FMT_ARG(_string), STRING_VIEW_FMT_ARG(start));
         }
 
         private:
@@ -106,22 +109,22 @@ namespace Acore::ChatCommands
             static constexpr std::string_view _string = { _storage.data(), std::string_view::traits_type::length(_storage.data()) };
     };
 
-#define EXACT_SEQUENCE(str) Acore::ChatCommands::ExactSequence<CHATCOMMANDS_IMPL_SPLIT_LITERAL(str)>
+#define EXACT_SEQUENCE(str) Trinity::ChatCommands::ExactSequence<CHATCOMMANDS_IMPL_SPLIT_LITERAL(str)>
 
-    struct Tail : std::string_view, Acore::Impl::ChatCommands::ContainerTag
+    struct Tail : std::string_view, Trinity::Impl::ChatCommands::ContainerTag
     {
         using value_type = std::string_view;
 
         using std::string_view::operator=;
 
-        ChatCommandResult TryConsume(ChatHandler const*, std::string_view args)
+        ChatCommandResult TryConsume(ChatHandler const*,std::string_view args)
         {
             std::string_view::operator=(args);
             return std::string_view();
         }
     };
 
-    struct WTail : std::wstring, Acore::Impl::ChatCommands::ContainerTag
+    struct WTail : std::wstring, Trinity::Impl::ChatCommands::ContainerTag
     {
         using value_type = std::wstring;
 
@@ -132,36 +135,44 @@ namespace Acore::ChatCommands
             if (Utf8toWStr(args, *this))
                 return std::string_view();
             else
-                return Acore::Impl::ChatCommands::GetAcoreString(handler, LANG_CMDPARSER_INVALID_UTF8);
+                return Trinity::Impl::ChatCommands::GetTrinityString(handler, LANG_CMDPARSER_INVALID_UTF8);
         }
     };
 
-    struct QuotedString : std::string, Acore::Impl::ChatCommands::ContainerTag
+    struct QuotedString : std::string, Trinity::Impl::ChatCommands::ContainerTag
     {
         using value_type = std::string;
 
-        AC_GAME_API ChatCommandResult TryConsume(ChatHandler const* handler, std::string_view args);
+        TC_GAME_API ChatCommandResult TryConsume(ChatHandler const* handler, std::string_view args);
     };
 
-    struct AC_GAME_API AccountIdentifier : Acore::Impl::ChatCommands::ContainerTag
+    struct TC_GAME_API AccountIdentifier : Trinity::Impl::ChatCommands::ContainerTag
     {
         using value_type = uint32;
 
+        AccountIdentifier() : _id(), _name(), _session(nullptr) {}
+        AccountIdentifier(WorldSession& session);
+
         operator uint32() const { return _id; }
         operator std::string const& () const { return _name; }
-        operator std::string_view() const { return { _name }; }
+        operator std::string_view() const { return _name; }
 
         uint32 GetID() const { return _id; }
         std::string const& GetName() const { return _name; }
+        bool IsConnected() { return _session != nullptr; }
+        WorldSession* GetConnectedSession() { return _session; }
 
         ChatCommandResult TryConsume(ChatHandler const* handler, std::string_view args);
+
+        static Optional<AccountIdentifier> FromTarget(ChatHandler* handler);
 
         private:
             uint32 _id;
             std::string _name;
+            WorldSession* _session;
     };
 
-    struct AC_GAME_API PlayerIdentifier : Acore::Impl::ChatCommands::ContainerTag
+    struct TC_GAME_API PlayerIdentifier : Trinity::Impl::ChatCommands::ContainerTag
     {
         using value_type = Player*;
 
@@ -196,7 +207,7 @@ namespace Acore::ChatCommands
     };
 
     template <typename linktag>
-    struct Hyperlink : Acore::Impl::ChatCommands::ContainerTag
+    struct Hyperlink : Trinity::Impl::ChatCommands::ContainerTag
     {
         using value_type = typename linktag::value_type;
         using storage_type = std::remove_cvref_t<value_type>;
@@ -207,7 +218,7 @@ namespace Acore::ChatCommands
 
         ChatCommandResult TryConsume(ChatHandler const* handler, std::string_view args)
         {
-            Acore::Hyperlinks::HyperlinkInfo info = Acore::Hyperlinks::ParseSingleHyperlink(args);
+            Trinity::Hyperlinks::HyperlinkInfo info = Trinity::Hyperlinks::ParseSingleHyperlink(args);
             // invalid hyperlinks cannot be consumed
             if (!info)
                 return std::nullopt;
@@ -218,10 +229,10 @@ namespace Acore::ChatCommands
 
             // store value
             if (!linktag::StoreTo(val, info.data))
-                return Acore::Impl::ChatCommands::GetAcoreString(handler, LANG_CMDPARSER_LINKDATA_INVALID);
+                return Trinity::Impl::ChatCommands::GetTrinityString(handler, LANG_CMDPARSER_LINKDATA_INVALID);
 
             // finally, skip any potential delimiters
-            auto [token, next] = Acore::Impl::ChatCommands::tokenize(info.tail);
+            auto [token, next] = Trinity::Impl::ChatCommands::tokenize(info.tail);
             if (token.empty()) /* empty token = first character is delimiter, skip past it */
                 return next;
             else
@@ -233,10 +244,10 @@ namespace Acore::ChatCommands
     };
 
     // pull in link tags for user convenience
-    using namespace ::Acore::Hyperlinks::LinkTags;
+    using namespace ::Trinity::Hyperlinks::LinkTags;
 }
 
-namespace Acore::Impl
+namespace Trinity::Impl
 {
     template <typename T>
     struct CastToVisitor
@@ -246,30 +257,24 @@ namespace Acore::Impl
     };
 }
 
-namespace Acore::ChatCommands
+namespace Trinity::ChatCommands
 {
     template <typename T1, typename... Ts>
     struct Variant : public std::variant<T1, Ts...>
     {
         using base = std::variant<T1, Ts...>;
 
-        using first_type = Acore::Impl::ChatCommands::tag_base_t<T1>;
-        static constexpr bool have_operators = Acore::Impl::ChatCommands::are_all_assignable<first_type, Acore::Impl::ChatCommands::tag_base_t<Ts>...>::value;
+        using first_type = Trinity::Impl::ChatCommands::tag_base_t<T1>;
+        static constexpr bool have_operators = Trinity::Impl::ChatCommands::are_all_assignable<first_type, Trinity::Impl::ChatCommands::tag_base_t<Ts>...>::value;
 
         template <bool C = have_operators>
         std::enable_if_t<C, first_type> operator*() const
         {
-            return visit(Acore::Impl::CastToVisitor<first_type>());
+            return visit(Trinity::Impl::CastToVisitor<first_type>());
         }
 
         template <bool C = have_operators>
         operator std::enable_if_t<C, first_type>() const
-        {
-            return operator*();
-        }
-
-        template<bool C = have_operators>
-        operator std::enable_if_t<C && !std::is_same_v<first_type, std::size_t> && std::is_convertible_v<first_type, std::size_t>, std::size_t>() const
         {
             return operator*();
         }
@@ -280,9 +285,9 @@ namespace Acore::ChatCommands
         template <typename T>
         Variant& operator=(T&& arg) { base::operator=(std::forward<T>(arg)); return *this; }
 
-        template <std::size_t index>
+        template <size_t index>
         constexpr decltype(auto) get() { return std::get<index>(static_cast<base&>(*this)); }
-        template <std::size_t index>
+        template <size_t index>
         constexpr decltype(auto) get() const { return std::get<index>(static_cast<base const&>(*this)); }
         template <typename type>
         constexpr decltype(auto) get() { return std::get<type>(static_cast<base&>(*this)); }
@@ -298,11 +303,24 @@ namespace Acore::ChatCommands
         constexpr bool holds_alternative() const { return std::holds_alternative<T>(static_cast<base const&>(*this)); }
 
         template <bool C = have_operators>
-        friend std::enable_if_t<C, std::ostream&> operator<<(std::ostream& os, Acore::ChatCommands::Variant<T1, Ts...> const& v)
+        friend std::enable_if_t<C, std::ostream&> operator<<(std::ostream& os, Trinity::ChatCommands::Variant<T1, Ts...> const& v)
         {
             return (os << *v);
         }
     };
 }
+
+template <typename T1, typename... Ts>
+struct fmt::formatter<Trinity::ChatCommands::Variant<T1, Ts...>> : ostream_formatter {};
+
+template <typename T1, typename... Ts>
+struct fmt::printf_formatter<Trinity::ChatCommands::Variant<T1, Ts...>> : formatter<T1>
+{
+    template <typename T, typename OutputIt>
+    auto format(T const& value, basic_format_context<OutputIt, char>& ctx) const -> OutputIt
+    {
+        return formatter<T1>::format(*value, ctx);
+    }
+};
 
 #endif

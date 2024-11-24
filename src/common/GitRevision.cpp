@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -16,7 +16,7 @@
  */
 
 #include "GitRevision.h"
-#include "revision.h"
+#include "revision_data.h"
 
 char const* GitRevision::GetHash()
 {
@@ -63,25 +63,40 @@ char const* GitRevision::GetMySQLExecutable()
     return _MYSQL_EXECUTABLE;
 }
 
-#if AC_PLATFORM == AC_PLATFORM_WINDOWS
+char const* GitRevision::GetFullDatabase()
+{
+    return _FULL_DATABASE;
+}
+
+char const* GitRevision::GetHotfixesDatabase()
+{
+    return _HOTFIXES_DATABASE;
+}
+
+#if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
 #  ifdef _WIN64
-#    define AZEROTH_PLATFORM_STR "Win64"
+#    define TRINITY_PLATFORM_STR "Win64"
 #  else
-#    define AZEROTH_PLATFORM_STR "Win32"
+#    define TRINITY_PLATFORM_STR "Win32"
 #  endif
-#else // AC_PLATFORM
-#  define AZEROTH_PLATFORM_STR "Unix"
+#elif TRINITY_PLATFORM == TRINITY_PLATFORM_APPLE
+#  define TRINITY_PLATFORM_STR "MacOSX"
+#elif TRINITY_PLATFORM == TRINITY_PLATFORM_INTEL
+#  define TRINITY_PLATFORM_STR "Intel"
+#else // TRINITY_PLATFORM_UNIX
+#  define TRINITY_PLATFORM_STR "Unix"
 #endif
 
-#ifndef ACORE_API_USE_DYNAMIC_LINKING
-#  define ACORE_LINKAGE_TYPE_STR "Static"
+#ifndef TRINITY_API_USE_DYNAMIC_LINKING
+#  define TRINITY_LINKAGE_TYPE_STR "Static"
 #else
-#  define ACORE_LINKAGE_TYPE_STR "Dynamic"
+#  define TRINITY_LINKAGE_TYPE_STR "Dynamic"
 #endif
 
 char const* GitRevision::GetFullVersion()
 {
-    return VER_COMPANYNAME_STR " rev. " VER_PRODUCTVERSION_STR " (" AZEROTH_PLATFORM_STR ", " _BUILD_DIRECTIVE ", " ACORE_LINKAGE_TYPE_STR ")";
+  return "TrinityCore rev. " VER_PRODUCTVERSION_STR
+    " (" TRINITY_PLATFORM_STR ", " _BUILD_DIRECTIVE ", " TRINITY_LINKAGE_TYPE_STR ")";
 }
 
 char const* GitRevision::GetCompanyNameStr()

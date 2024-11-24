@@ -1,22 +1,21 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "BattlegroundAV.h"
-#include "CreatureScript.h"
+#include "ScriptMgr.h"
 #include "ScriptedCreature.h"
 
 enum Spells
@@ -78,163 +77,103 @@ SpellPair const _auraPairs[MAX_SPELL_PAIRS] =
     { NPC_ICEBLOOD_WARMASTER,       SPELL_ICEBLOOD_WARMASTER }
 };
 
-enum Factions
+struct npc_av_marshal_or_warmaster : public ScriptedAI
 {
-    FACTION_AV_ALLIANCE = 1534
-};
-
-class npc_av_marshal_or_warmaster : public CreatureScript
-{
-public:
-    npc_av_marshal_or_warmaster() : CreatureScript("npc_av_marshal_or_warmaster") { }
-
-    struct npc_av_marshal_or_warmasterAI : public ScriptedAI
+    npc_av_marshal_or_warmaster(Creature* creature) : ScriptedAI(creature)
     {
-        npc_av_marshal_or_warmasterAI(Creature* creature) : ScriptedAI(creature) { }
+        Initialize();
+    }
 
-        void Reset() override
+    void Initialize()
+    {
+        _hasAura = false;
+    }
+
+    void Reset() override
+    {
+        Initialize();
+
+        events.Reset();
+        events.ScheduleEvent(EVENT_CHARGE_TARGET, 2s, 12s);
+        events.ScheduleEvent(EVENT_CLEAVE, 1s, 11s);
+        events.ScheduleEvent(EVENT_DEMORALIZING_SHOUT, 2s);
+        events.ScheduleEvent(EVENT_WHIRLWIND, 5s, 20s);
+        events.ScheduleEvent(EVENT_ENRAGE, 5s, 20s);
+        events.ScheduleEvent(EVENT_CHECK_RESET, 5s);
+    }
+
+    void JustAppeared() override
+    {
+        Reset();
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        // I have a feeling this isn't blizzlike, but owell, I'm only passing by and cleaning up.
+        if (!_hasAura)
         {
-            events.Reset();
-            events.ScheduleEvent(EVENT_CHARGE_TARGET, 2s, 12s);
-            events.ScheduleEvent(EVENT_CLEAVE, 1s, 11s);
-            events.ScheduleEvent(EVENT_DEMORALIZING_SHOUT, 2s);
-            events.ScheduleEvent(EVENT_WHIRLWIND, 5s, 20s);
-            events.ScheduleEvent(EVENT_ENRAGE, 5s, 20s);
-            events.ScheduleEvent(EVENT_CHECK_RESET, 5s);
+            for (uint8 i = 0; i < MAX_SPELL_PAIRS; ++i)
+                if (_auraPairs[i].npcEntry == me->GetEntry())
+                    DoCast(me, _auraPairs[i].spellId);
 
-            _hasAura = false;
-            _attacked = false;
+            _hasAura = true;
         }
 
-        void JustRespawned() override
-        {
-            Reset();
-        }
+        if (!UpdateVictim())
+            return;
 
-        void AttackStart(Unit* victim) override
-        {
-            ScriptedAI::AttackStart(victim);
+        events.Update(diff);
 
-            if (!_attacked)
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
             {
-                _attacked = true;
-
-                // Boss should attack as well
-                if (BattlegroundMap* bgMap = me->GetMap()->ToBattlegroundMap())
+                case EVENT_CHARGE_TARGET:
+                    DoCastVictim(SPELL_CHARGE);
+                    events.ScheduleEvent(EVENT_CHARGE, 10s, 25s);
+                    break;
+                case EVENT_CLEAVE:
+                    DoCastVictim(SPELL_CLEAVE);
+                    events.ScheduleEvent(EVENT_CLEAVE, 10s, 16s);
+                    break;
+                case EVENT_DEMORALIZING_SHOUT:
+                    DoCast(me, SPELL_DEMORALIZING_SHOUT);
+                    events.ScheduleEvent(EVENT_DEMORALIZING_SHOUT, 10s, 15s);
+                    break;
+                case EVENT_WHIRLWIND:
+                    DoCast(me, SPELL_WHIRLWIND);
+                    events.ScheduleEvent(EVENT_WHIRLWIND, 10s, 25s);
+                    break;
+                case EVENT_ENRAGE:
+                    DoCast(me, SPELL_ENRAGE);
+                    events.ScheduleEvent(EVENT_ENRAGE, 10s, 30s);
+                    break;
+                case EVENT_CHECK_RESET:
                 {
-                    if (Battleground* bg = bgMap->GetBG())
+                    Position const& _homePosition = me->GetHomePosition();
+                    if (me->GetDistance2d(_homePosition.GetPositionX(), _homePosition.GetPositionY()) > 50.0f)
                     {
-                        if (Creature* mainBoss = bg->GetBGCreature((me->GetFaction() == FACTION_AV_ALLIANCE ? AV_CPLACE_A_BOSS : AV_CPLACE_H_BOSS)))
-                        {
-                            if (mainBoss->IsAIEnabled && !mainBoss->GetVictim())
-                            {
-                                mainBoss->AI()->AttackStart(victim);
-                            }
-                        }
+                        EnterEvadeMode();
+                        return;
                     }
+                    events.ScheduleEvent(EVENT_CHECK_RESET, 5s);
+                    break;
                 }
             }
-        }
-
-        void EnterEvadeMode(EvadeReason why) override
-        {
-            ScriptedAI::EnterEvadeMode(why);
-
-            if (_attacked)
-            {
-                _attacked = false;
-
-                // Evade boss
-                if (BattlegroundMap* bgMap = me->GetMap()->ToBattlegroundMap())
-                {
-                    if (Battleground* bg = bgMap->GetBG())
-                    {
-                        if (Creature* mainBoss = bg->GetBGCreature((me->GetFaction() == FACTION_AV_ALLIANCE ? AV_CPLACE_A_BOSS : AV_CPLACE_H_BOSS)))
-                        {
-                            if (mainBoss->IsAIEnabled && !mainBoss->IsInEvadeMode())
-                            {
-                                mainBoss->AI()->EnterEvadeMode();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            // I have a feeling this isn't blizzlike, but owell, I'm only passing by and cleaning up.
-            if (!_hasAura)
-            {
-                for (uint8 i = 0; i < MAX_SPELL_PAIRS; ++i)
-                    if (_auraPairs[i].npcEntry == me->GetEntry())
-                        DoCast(me, _auraPairs[i].spellId);
-
-                _hasAura = true;
-            }
-
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
-
             if (me->HasUnitState(UNIT_STATE_CASTING))
                 return;
-
-            while (uint32 eventId = events.ExecuteEvent())
-            {
-                switch (eventId)
-                {
-                    case EVENT_CHARGE_TARGET:
-                        DoCastVictim(SPELL_CHARGE);
-                        events.ScheduleEvent(EVENT_CHARGE, 10s, 25s);
-                        break;
-                    case EVENT_CLEAVE:
-                        DoCastVictim(SPELL_CLEAVE);
-                        events.ScheduleEvent(EVENT_CLEAVE, 10s, 16s);
-                        break;
-                    case EVENT_DEMORALIZING_SHOUT:
-                        DoCast(me, SPELL_DEMORALIZING_SHOUT);
-                        events.ScheduleEvent(EVENT_DEMORALIZING_SHOUT, 10s, 15s);
-                        break;
-                    case EVENT_WHIRLWIND:
-                        DoCast(me, SPELL_WHIRLWIND);
-                        events.ScheduleEvent(EVENT_WHIRLWIND, 10s, 25s);
-                        break;
-                    case EVENT_ENRAGE:
-                        DoCast(me, SPELL_ENRAGE);
-                        events.ScheduleEvent(EVENT_ENRAGE, 10s, 30s);
-                        break;
-                    case EVENT_CHECK_RESET:
-                        {
-                            Position const& _homePosition = me->GetHomePosition();
-                            if (me->GetDistance2d(_homePosition.GetPositionX(), _homePosition.GetPositionY()) > 50.0f)
-                            {
-                                ScriptedAI::EnterEvadeMode();
-                                return;
-                            }
-                            events.ScheduleEvent(EVENT_CHECK_RESET, 5000);
-                            break;
-                        }
-                }
-            }
-
-            DoMeleeAttackIfReady();
         }
-
-    private:
-        EventMap events;
-        bool _hasAura;
-        bool _attacked;
-    };
-
-    CreatureAI* GetAI(Creature* creature) const override
-    {
-        return new npc_av_marshal_or_warmasterAI(creature);
     }
+
+private:
+    EventMap events;
+    bool _hasAura;
 };
 
 void AddSC_alterac_valley()
 {
-    new npc_av_marshal_or_warmaster();
+    RegisterCreatureAI(npc_av_marshal_or_warmaster);
 }

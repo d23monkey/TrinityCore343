@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -27,9 +27,7 @@ static RandomEngine engine;
 static SFMTRand* GetRng()
 {
     if (!sfmtRand)
-    {
         sfmtRand = std::make_unique<SFMTRand>();
-    }
 
     return sfmtRand.get();
 }
@@ -65,8 +63,8 @@ Milliseconds randtime(Milliseconds min, Milliseconds max)
 {
     long long diff = max.count() - min.count();
     ASSERT(diff >= 0);
-    ASSERT(diff <= (uint32) - 1);
-    return min + Milliseconds(urand(0, diff));
+    ASSERT(diff <= 0xFFFFFFFF);
+    return min + Milliseconds(urand(0, uint32(diff)));
 }
 
 uint32 rand32()
@@ -74,19 +72,19 @@ uint32 rand32()
     return GetRng()->RandomUInt32();
 }
 
-double rand_norm()
+float rand_norm()
 {
-    std::uniform_real_distribution<double> urd;
+    std::uniform_real_distribution<float> urd;
     return urd(engine);
 }
 
-double rand_chance()
+float rand_chance()
 {
-    std::uniform_real_distribution<double> urd(0.0, 100.0);
+    std::uniform_real_distribution<float> urd(0.0f, 100.0f);
     return urd(engine);
 }
 
-uint32 urandweighted(std::size_t count, double const* chances)
+uint32 urandweighted(size_t count, double const* chances)
 {
     std::discrete_distribution<uint32> dd(chances, chances + count);
     return dd(engine);

@@ -1,82 +1,90 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __TRADE_DATA_H__
-#define __TRADE_DATA_H__
+#ifndef TradeData_h__
+#define TradeData_h__
 
-#include "Define.h"
-
-class Item;
-class ObjectGuid;
-class Player;
+#include "ObjectGuid.h"
 
 enum TradeSlots
 {
-    TRADE_SLOT_COUNT            = 7,
-    TRADE_SLOT_TRADED_COUNT     = 6,
-    TRADE_SLOT_NONTRADED        = 6,
-    TRADE_SLOT_INVALID          = -1,
+    TRADE_SLOT_COUNT          = 7,
+    TRADE_SLOT_TRADED_COUNT   = 6,
+    TRADE_SLOT_NONTRADED      = 6,
+    TRADE_SLOT_INVALID        = -1
 };
 
-class AC_GAME_API TradeData
+class Item;
+class Player;
+
+class TC_GAME_API TradeData
 {
-public:                                                 // constructors
+public:
     TradeData(Player* player, Player* trader) :
-        m_player(player),  m_trader(trader), m_accepted(false), m_acceptProccess(false), m_money(0), m_spell(0) { }
+        _player(player), _trader(trader), _accepted(false), _acceptProccess(false),
+        _money(0), _spell(0), _spellCastItem(), _clientStateIndex(1), _serverStateIndex(1) { }
 
-    [[nodiscard]] Player* GetTrader() const { return m_trader; }
-    [[nodiscard]] TradeData* GetTraderData() const;
+    Player* GetTrader() const { return _trader; }
+    TradeData* GetTraderData() const;
 
-    [[nodiscard]] Item* GetItem(TradeSlots slot) const;
-    [[nodiscard]] bool HasItem(ObjectGuid itemGuid) const;
-    [[nodiscard]] TradeSlots GetTradeSlotForItem(ObjectGuid itemGuid) const;
-    void SetItem(TradeSlots slot, Item* item);
+    Item* GetItem(TradeSlots slot) const;
+    bool HasItem(ObjectGuid itemGuid) const;
+    TradeSlots GetTradeSlotForItem(ObjectGuid itemGuid) const;
+    void SetItem(TradeSlots slot, Item* item, bool update = false);
 
-    [[nodiscard]] uint32 GetSpell() const { return m_spell; }
+    uint32 GetSpell() const { return _spell; }
     void SetSpell(uint32 spell_id, Item* castItem = nullptr);
 
-    [[nodiscard]] Item*  GetSpellCastItem() const;
-    [[nodiscard]] bool HasSpellCastItem() const { return m_spellCastItem; }
+    Item*  GetSpellCastItem() const;
+    bool HasSpellCastItem() const { return !_spellCastItem.IsEmpty(); }
 
-    [[nodiscard]] uint32 GetMoney() const { return m_money; }
-    void SetMoney(uint32 money);
+    uint64 GetMoney() const { return _money; }
+    void SetMoney(uint64 money);
 
-    [[nodiscard]] bool IsAccepted() const { return m_accepted; }
-    void SetAccepted(bool state, bool crosssend = false);
+    bool IsAccepted() const { return _accepted; }
+    void SetAccepted(bool state, bool forTrader = false);
 
-    [[nodiscard]] bool IsInAcceptProcess() const { return m_acceptProccess; }
-    void SetInAcceptProcess(bool state) { m_acceptProccess = state; }
+    bool IsInAcceptProcess() const { return _acceptProccess; }
+    void SetInAcceptProcess(bool state) { _acceptProccess = state; }
 
-private:                                                // internal functions
-    void Update(bool for_trader = true);
+    uint32 GetClientStateIndex() const { return _clientStateIndex; }
+    void UpdateClientStateIndex() { ++_clientStateIndex; }
 
-private:                                                // fields
-    Player*    m_player;                                // Player who own of this TradeData
-    Player*    m_trader;                                // Player who trade with m_player
+    uint32 GetServerStateIndex() const { return _serverStateIndex; }
+    void UpdateServerStateIndex();
 
-    bool       m_accepted;                              // m_player press accept for trade list
-    bool       m_acceptProccess;                        // one from player/trader press accept and this processed
+private:
+    void Update(bool for_trader = true) const;
 
-    uint32     m_money;                                 // m_player place money to trade
+    Player*    _player;                                // Player who own of this TradeData
+    Player*    _trader;                                // Player who trade with _player
 
-    uint32     m_spell;                                 // m_player apply spell to non-traded slot item
-    ObjectGuid m_spellCastItem;                         // applied spell casted by item use
+    bool       _accepted;                              // _player press accept for trade list
+    bool       _acceptProccess;                        // one from player/trader press accept and this processed
 
-    ObjectGuid m_items[TRADE_SLOT_COUNT];               // traded itmes from m_player side including non-traded slot
+    uint64     _money;                                 // _player place money to trade
+
+    uint32     _spell;                                 // _player apply spell to non-traded slot item
+    ObjectGuid _spellCastItem;                         // applied spell cast by item use
+
+    ObjectGuid _items[TRADE_SLOT_COUNT];               // traded items from _player side including non-traded slot
+
+    uint32     _clientStateIndex;
+    uint32     _serverStateIndex;
 };
 
-#endif
+#endif // TradeData_h__

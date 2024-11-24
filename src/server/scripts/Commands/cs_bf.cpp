@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -22,11 +22,14 @@ Comment: All bf related commands
 Category: commandscripts
 EndScriptData */
 
+#include "ScriptMgr.h"
 #include "BattlefieldMgr.h"
 #include "Chat.h"
-#include "CommandScript.h"
+#include "ChatCommand.h"
+#include "Player.h"
+#include "RBAC.h"
 
-using namespace Acore::ChatCommands;
+using namespace Trinity::ChatCommands;
 
 class bf_commandscript : public CommandScript
 {
@@ -37,22 +40,22 @@ public:
     {
         static ChatCommandTable battlefieldcommandTable =
         {
-            { "start",  HandleBattlefieldStart,  SEC_ADMINISTRATOR, Console::No },
-            { "stop",   HandleBattlefieldEnd,    SEC_ADMINISTRATOR, Console::No },
-            { "switch", HandleBattlefieldSwitch, SEC_ADMINISTRATOR, Console::No },
-            { "timer",  HandleBattlefieldTimer,  SEC_ADMINISTRATOR, Console::No },
-            { "enable", HandleBattlefieldEnable, SEC_ADMINISTRATOR, Console::No }
+            { "start",      HandleBattlefieldStart,  rbac::RBAC_PERM_COMMAND_BF_START,  Console::No },
+            { "stop",       HandleBattlefieldEnd,    rbac::RBAC_PERM_COMMAND_BF_STOP,   Console::No },
+            { "switch",     HandleBattlefieldSwitch, rbac::RBAC_PERM_COMMAND_BF_SWITCH, Console::No },
+            { "timer",      HandleBattlefieldTimer,  rbac::RBAC_PERM_COMMAND_BF_TIMER,  Console::No },
+            { "enable",     HandleBattlefieldEnable, rbac::RBAC_PERM_COMMAND_BF_ENABLE, Console::No },
         };
         static ChatCommandTable commandTable =
         {
-            { "bf", battlefieldcommandTable }
+            { "bf", battlefieldcommandTable },
         };
         return commandTable;
     }
 
     static bool HandleBattlefieldStart(ChatHandler* handler, uint32 battleId)
     {
-        Battlefield* bf = sBattlefieldMgr->GetBattlefieldByBattleId(battleId);
+        Battlefield* bf = sBattlefieldMgr->GetBattlefieldByBattleId(handler->GetPlayer()->GetMap(), battleId);
 
         if (!bf)
             return false;
@@ -67,7 +70,7 @@ public:
 
     static bool HandleBattlefieldEnd(ChatHandler* handler, uint32 battleId)
     {
-        Battlefield* bf = sBattlefieldMgr->GetBattlefieldByBattleId(battleId);
+        Battlefield* bf = sBattlefieldMgr->GetBattlefieldByBattleId(handler->GetPlayer()->GetMap(), battleId);
 
         if (!bf)
             return false;
@@ -82,7 +85,7 @@ public:
 
     static bool HandleBattlefieldEnable(ChatHandler* handler, uint32 battleId)
     {
-        Battlefield* bf = sBattlefieldMgr->GetBattlefieldByBattleId(battleId);
+        Battlefield* bf = sBattlefieldMgr->GetBattlefieldByBattleId(handler->GetPlayer()->GetMap(), battleId);
 
         if (!bf)
             return false;
@@ -105,7 +108,7 @@ public:
 
     static bool HandleBattlefieldSwitch(ChatHandler* handler, uint32 battleId)
     {
-        Battlefield* bf = sBattlefieldMgr->GetBattlefieldByBattleId(battleId);
+        Battlefield* bf = sBattlefieldMgr->GetBattlefieldByBattleId(handler->GetPlayer()->GetMap(), battleId);
 
         if (!bf)
             return false;
@@ -117,38 +120,14 @@ public:
         return true;
     }
 
-    static bool HandleBattlefieldTimer(ChatHandler* handler, uint32 battleId, std::string timeStr)
+    static bool HandleBattlefieldTimer(ChatHandler* handler, uint32 battleId, uint32 time)
     {
-        if (timeStr.empty())
-        {
-            return false;
-        }
-
-        if (Acore::StringTo<int32>(timeStr).value_or(0) < 0)
-        {
-            handler->SendErrorMessage(LANG_BAD_VALUE);
-            return false;
-        }
-
-        int32 time = TimeStringToSecs(timeStr);
-        if (time <= 0)
-        {
-            time = Acore::StringTo<int32>(timeStr).value_or(0);
-        }
-
-        if (time <= 0)
-        {
-            handler->SendErrorMessage(LANG_BAD_VALUE);
-            return false;
-        }
-
-        Battlefield* bf = sBattlefieldMgr->GetBattlefieldByBattleId(battleId);
+        Battlefield* bf = sBattlefieldMgr->GetBattlefieldByBattleId(handler->GetPlayer()->GetMap(), battleId);
 
         if (!bf)
             return false;
 
         bf->SetTimer(time * IN_MILLISECONDS);
-        bf->SendInitWorldStatesToAll();
         if (battleId == 1)
             handler->SendGlobalGMSysMessage("Wintergrasp (Command timer used)");
 

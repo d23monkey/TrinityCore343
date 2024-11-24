@@ -1,73 +1,93 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef ACORE_LOOTITEMSTORAGE_H
-#define ACORE_LOOTITEMSTORAGE_H
+#ifndef __LOOTITEMSTORAGE_H
+#define __LOOTITEMSTORAGE_H
 
-#include "Item.h"
-#include "LootMgr.h"
-#include <list>
+#include "Define.h"
+#include "DatabaseEnvFwd.h"
+#include "DBCEnums.h"
+#include "ItemEnchantmentMgr.h"
+
+#include <shared_mutex>
+#include <unordered_map>
+#include <vector>
+
+class Item;
+class Player;
+struct Loot;
+struct LootItem;
 
 struct StoredLootItem
 {
-    StoredLootItem(uint32 i, uint32 idx, uint32 c, int32 ri, uint32 rs, bool follow_loot_rules, bool freeforall,
-        bool is_blocked, bool is_counted, bool is_underthreshold, bool needs_quest, uint32 conditionLootId) : itemid(i), itemIndex(idx),
-        count(c), randomPropertyId(ri), randomSuffix(rs), follow_loot_rules(follow_loot_rules), freeforall(freeforall), is_blocked(is_blocked),
-        is_counted(is_counted), is_underthreshold(is_underthreshold), needs_quest(needs_quest), conditionLootId(conditionLootId) { }
+    explicit StoredLootItem(LootItem const& lootItem);
 
-    // If itemid == 0 - money amount is stored in count value
-    uint32 itemid;
-    uint32 itemIndex;
-    uint32 count;
-    int32 randomPropertyId;
-    uint32 randomSuffix;
-    bool follow_loot_rules;
-    bool freeforall;
-    bool is_blocked;
-    bool is_counted;
-    bool is_underthreshold;
-    bool needs_quest;
-    uint32 conditionLootId;
+    uint32 ItemId;
+    uint32 Count;
+    uint32 ItemIndex;
+    bool FollowRules;
+    bool FFA;
+    bool Blocked;
+    bool Counted;
+    bool UnderThreshold;
+    bool NeedsQuest;
+    ItemRandomProperties RandomProperties;
+    ItemContext Context;
 };
 
-typedef std::list<StoredLootItem> StoredLootItemList;
-typedef std::unordered_map<ObjectGuid, StoredLootItemList> LootItemContainer;
+class StoredLootContainer
+{
+    public:
+        typedef std::unordered_multimap<uint32 /*itemId*/, StoredLootItem> StoredLootItemContainer;
+
+        explicit StoredLootContainer(uint64 containerId) : _containerId(containerId), _money(0) { }
+
+        void AddLootItem(LootItem const& lootItem, CharacterDatabaseTransaction trans);
+        void AddMoney(uint32 money, CharacterDatabaseTransaction trans);
+
+        void RemoveMoney();
+        void RemoveItem(uint32 itemId, uint32 count, uint32 itemIndex);
+
+        uint64 GetContainer() const { return _containerId; }
+        uint32 GetMoney() const { return _money; }
+        StoredLootItemContainer const& GetLootItems() const { return _lootItems; }
+
+    private:
+        StoredLootItemContainer _lootItems;
+        uint64 const _containerId;
+        uint32 _money;
+};
 
 class LootItemStorage
 {
-private:
-    LootItemStorage();
-    ~LootItemStorage();
+    public:
+        static LootItemStorage* instance();
+        static std::shared_mutex* GetLock();
 
-public:
-    static LootItemStorage* instance();
+        void LoadStorageFromDB();
+        bool LoadStoredLoot(Item* item, Player* player);
+        void RemoveStoredMoneyForContainer(uint64 containerId);
+        void RemoveStoredLootForContainer(uint64 containerId);
+        void RemoveStoredLootItemForContainer(uint64 containerId, uint32 itemId, uint32 count, uint32 itemIndex);
+        void AddNewStoredLoot(uint64 containerId, Loot* loot, Player* player);
 
-    void LoadStorageFromDB();
-    void RemoveEntryFromDB(ObjectGuid containerGUID, uint32 itemid, uint32 count, uint32 itemIndex);
-
-    void AddNewStoredLoot(Loot* loot, Player* player);
-    bool LoadStoredLoot(Item* item, Player* player);
-
-    void RemoveStoredLootItem(ObjectGuid containerGUID, uint32 itemid, uint32 count, Loot* loot, uint32 itemIndex);
-    void RemoveStoredLootMoney(ObjectGuid containerGUID, Loot* loot);
-    void RemoveStoredLoot(ObjectGuid containerGUID);
-
-private:
-    LootItemContainer lootItemStore;
+    private:
+        LootItemStorage() { }
+        ~LootItemStorage() { }
 };
 
 #define sLootItemStorage LootItemStorage::instance()

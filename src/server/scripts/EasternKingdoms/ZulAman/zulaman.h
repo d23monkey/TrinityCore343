@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -20,74 +20,70 @@
 
 #include "CreatureAIImpl.h"
 
+uint32 const EncounterCount = 6;
+#define ZulamanScriptName "instance_zulaman"
 #define DataHeader "ZA"
-#define ZulAmanScriptName "instance_zulaman"
 
-enum DataTypes
+enum ZADataTypes
 {
-    DATA_NALORAKK                       = 0,
-    DATA_AKILZON                        = 1,
-    DATA_JANALAI                        = 2,
-    DATA_HALAZZI                        = 3,
-    DATA_HEXLORD                        = 4,
-    DATA_ZULJIN                         = 5,
-    MAX_ENCOUNTER                       = 6,
-    DATA_SPIRIT_LYNX                    = 7,
-    TYPE_RAND_VENDOR_1                  = 8,
-    TYPE_RAND_VENDOR_2                  = 9,
-    DATA_STRANGE_GONG                   = 10,
-    DATA_MASSIVE_GATE                   = 11,
-    DATA_HEXLORD_GATE                   = 12,
-    DATA_HARRISON_JONES                 = 13
+    // BossState
+    DATA_AKILZON                = 0,
+    DATA_NALORAKK               = 1,
+    DATA_JANALAI                = 2,
+    DATA_HALAZZI                = 3,
+    DATA_HEXLORD                = 4,
+    DATA_DAAKARA                = 5,
+
+    // Data64
+    DATA_HEXLORD_TRIGGER,
+
+    DATA_STRANGE_GONG,
+    DATA_MASSIVE_GATE,
+
+    // SetData
+    DATA_ZULAMAN_STATE
 };
 
-enum CreatureIds
+enum ZACreatureIds
 {
-    NPC_HARRISON_JONES                  = 24358,
-    NPC_JANALAI                         = 23578,
-    NPC_ZULJIN                          = 23863,
-    NPC_HEXLORD                         = 24239,
-    NPC_HALAZZI                         = 23577,
-    NPC_NALORAKK                        = 23576,
-    NPC_SPIRIT_LYNX                     = 24143,
-    NPC_AMANISHI_WARBRINGER             = 23580,
-    NPC_AMANISHI_TRIBESMAN              = 23582,
-    NPC_AMANISHI_MEDICINE_MAN           = 23581,
-    NPC_AMANISHI_AXE_THROWER            = 23542,
-    NPC_AMANI_HATCHLING                 = 23598 // 42493
+    NPC_AKILZON                 = 23574,
+    NPC_NALORAKK                = 23576,
+    NPC_JANALAI                 = 23578,
+    NPC_HALAZZI                 = 23577,
+    NPC_HEXLORD                 = 24239,
+    NPC_DAAKARA                 = 23863,
+
+    NPC_VOLJIN                  = 52924,
+    NPC_HEXLORD_TRIGGER         = 24363
 };
 
-enum GameobjectIds
+enum ZAGameObjectIds
 {
-    GO_DOOR_HALAZZI                     = 186303,
-    GO_LYNX_TEMPLE_ENTRANCE             = 186304,
-    GO_GATE_HEXLORD                     = 186305,
-    GO_GATE_ZULJIN                      = 186306,
-    GO_MASSIVE_GATE                     = 186728,
-    GO_DOOR_AKILZON                     = 186858,
-    GO_ZULJIN_FIREWALL                  = 186859,
-    GO_HARKORS_SATCHEL                  = 187021,
-    GO_TANZARS_TRUNK                    = 186648,
-    GO_ASHLIS_BAG                       = 186672,
-    GO_KRAZS_PACKAGE                    = 186667,
-    GO_STRANGE_GONG                     = 187359
+    GO_STRANGE_GONG             = 187359,
+    GO_MASSIVE_GATE             = 186728,
 };
 
-enum MiscIds
+enum ZAEvents
 {
-    DATA_TIMED_RUN                      = 0,
-    ACTION_START_TIMED_RUN              = 0,
-    GROUP_TIMED_RUN                     = 1
+    EVENT_START_ZULAMAN         = 15897,
+    EVENT_UPDATE_ZULAMAN_TIMER  = 1,
 };
 
-uint32 constexpr PersistentDataCount = 1;
+enum ZAAction
+{
+    ACTION_START_ZULAMAN        = 1
+};
+
+enum ZAWorldStates
+{
+    WORLD_STATE_ZULAMAN_TIMER_ENABLED   = 3104,
+    WORLD_STATE_ZULAMAN_TIMER           = 3106,
+};
 
 template <class AI, class T>
 inline AI* GetZulAmanAI(T* obj)
 {
-    return GetInstanceAI<AI>(obj, ZulAmanScriptName);
+    return GetInstanceAI<AI>(obj, ZulamanScriptName);
 }
-
-#define RegisterZulAmanCreatureAI(ai_name) RegisterCreatureAIWithFactory(ai_name, GetZulAmanAI)
 
 #endif

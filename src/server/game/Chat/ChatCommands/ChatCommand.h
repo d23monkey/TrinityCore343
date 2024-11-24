@@ -1,22 +1,22 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _CHATCOMMAND_H
-#define _CHATCOMMAND_H
+#ifndef TRINITY_CHATCOMMAND_H
+#define TRINITY_CHATCOMMAND_H
 
 #include "ChatCommandArgs.h"
 #include "ChatCommandTags.h"
@@ -24,17 +24,20 @@
 #include "Errors.h"
 #include "Language.h"
 #include "Optional.h"
+#include "RBAC.h"
 #include "StringFormat.h"
 #include "Util.h"
 #include <cstddef>
 #include <map>
+#include <utility>
 #include <tuple>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
 class ChatHandler;
 
-namespace Acore::ChatCommands
+namespace Trinity::ChatCommands
 {
     enum class Console : bool
     {
@@ -46,16 +49,16 @@ namespace Acore::ChatCommands
     using ChatCommandTable = std::vector<ChatCommandBuilder>;
 }
 
-namespace Acore::Impl::ChatCommands
+namespace Trinity::Impl::ChatCommands
 {
     // forward declaration
     // ConsumeFromOffset contains the bounds check for offset, then hands off to MultiConsumer
     // the call stack is MultiConsumer -> ConsumeFromOffset -> MultiConsumer -> ConsumeFromOffset etc
     // MultiConsumer goes into ArgInfo for parsing on each iteration
-    template <typename Tuple, std::size_t offset>
+    template <typename Tuple, size_t offset>
     ChatCommandResult ConsumeFromOffset(Tuple&, ChatHandler const* handler, std::string_view args);
 
-    template <typename Tuple, typename NextType, std::size_t offset>
+    template <typename Tuple, typename NextType, size_t offset>
     struct MultiConsumer
     {
         static ChatCommandResult TryConsumeTo(Tuple& tuple, ChatHandler const* handler, std::string_view args)
@@ -68,7 +71,7 @@ namespace Acore::Impl::ChatCommands
         }
     };
 
-    template <typename Tuple, typename NestedNextType, std::size_t offset>
+    template <typename Tuple, typename NestedNextType, size_t offset>
     struct MultiConsumer<Tuple, Optional<NestedNextType>, offset>
     {
         static ChatCommandResult TryConsumeTo(Tuple& tuple, ChatHandler const* handler, std::string_view args)
@@ -88,9 +91,9 @@ namespace Acore::Impl::ChatCommands
                 return result2;
             if (result1.HasErrorMessage() && result2.HasErrorMessage())
             {
-                return Acore::StringFormat("{} \"{}\"\n{} \"{}\"",
-                    GetAcoreString(handler, LANG_CMDPARSER_EITHER), result2.GetErrorMessage(),
-                    GetAcoreString(handler, LANG_CMDPARSER_OR), result1.GetErrorMessage());
+                return Trinity::StringFormat("{} \"{}\"\n{} \"{}\"",
+                    GetTrinityString(handler, LANG_CMDPARSER_EITHER), result2.GetErrorMessage(),
+                    GetTrinityString(handler, LANG_CMDPARSER_OR), result1.GetErrorMessage());
             }
             else if (result1.HasErrorMessage())
                 return result1;
@@ -99,7 +102,7 @@ namespace Acore::Impl::ChatCommands
         }
     };
 
-    template <typename Tuple, std::size_t offset>
+    template <typename Tuple, size_t offset>
     ChatCommandResult ConsumeFromOffset([[maybe_unused]] Tuple& tuple, [[maybe_unused]] ChatHandler const* handler, std::string_view args)
     {
         if constexpr (offset < std::tuple_size_v<Tuple>)
@@ -110,7 +113,7 @@ namespace Acore::Impl::ChatCommands
             return args;
     }
 
-    template <typename T> struct HandlerToTuple { static_assert(Acore::dependant_false_v<T>, "Invalid command handler signature"); };
+    template <typename T> struct HandlerToTuple { static_assert(Trinity::dependant_false_v<T>, "Invalid command handler signature"); };
     template <typename... Ts> struct HandlerToTuple<bool(ChatHandler*, Ts...)> { using type = std::tuple<ChatHandler*, std::remove_cvref_t<Ts>...>; };
     template <typename T> using TupleType = typename HandlerToTuple<T>::type;
 
@@ -165,99 +168,113 @@ namespace Acore::Impl::ChatCommands
 
     struct CommandPermissions
     {
-        CommandPermissions() : RequiredLevel{}, AllowConsole{} { }
-        CommandPermissions(uint32 securityLevel, Acore::ChatCommands::Console console) : RequiredLevel{ securityLevel }, AllowConsole{ console } {}
-        uint32 RequiredLevel;
-        Acore::ChatCommands::Console AllowConsole;
+        CommandPermissions() : RequiredPermission{}, AllowConsole{} {}
+        CommandPermissions(rbac::RBACPermissions perm, Trinity::ChatCommands::Console console) : RequiredPermission{ perm }, AllowConsole{ console } {}
+        rbac::RBACPermissions RequiredPermission;
+        Trinity::ChatCommands::Console AllowConsole;
     };
 
     class ChatCommandNode
     {
-    friend struct FilteredCommandListIterator;
-    using ChatCommandBuilder = Acore::ChatCommands::ChatCommandBuilder;
+        friend struct FilteredCommandListIterator;
+        using ChatCommandBuilder = Trinity::ChatCommands::ChatCommandBuilder;
 
-    public:
-        static void LoadCommandMap();
-        static void InvalidateCommandMap();
-        static bool TryExecuteCommand(ChatHandler& handler, std::string_view cmd);
-        static void SendCommandHelpFor(ChatHandler& handler, std::string_view cmd);
-        static std::vector<std::string> GetAutoCompletionsFor(ChatHandler const& handler, std::string_view cmd);
+        public:
+            static void LoadCommandMap();
+            static void InvalidateCommandMap();
+            static bool TryExecuteCommand(ChatHandler& handler, std::string_view cmd);
+            static void SendCommandHelpFor(ChatHandler& handler, std::string_view cmd);
+            static std::vector<std::string> GetAutoCompletionsFor(ChatHandler const& handler, std::string_view cmd);
 
-        ChatCommandNode() : _name{}, _invoker {}, _permission{}, _help{}, _subCommands{} { }
+            ChatCommandNode() : _name{}, _invoker {}, _permission{}, _help{}, _subCommands{} {}
 
-    private:
-        static std::map<std::string_view, ChatCommandNode, StringCompareLessI_T> const& GetTopLevelMap();
-        static void LoadCommandsIntoMap(ChatCommandNode* blank, std::map<std::string_view, Acore::Impl::ChatCommands::ChatCommandNode, StringCompareLessI_T>& map, Acore::ChatCommands::ChatCommandTable const& commands);
+        private:
+            static std::map<std::string_view, ChatCommandNode, StringCompareLessI_T> const& GetTopLevelMap();
+            static void LoadCommandsIntoMap(ChatCommandNode* blank, std::map<std::string_view, ChatCommandNode, StringCompareLessI_T>& map, Trinity::ChatCommands::ChatCommandTable const& commands);
 
-        void LoadFromBuilder(ChatCommandBuilder const& builder);
-        ChatCommandNode(ChatCommandNode&& other) = default;
+            void LoadFromBuilder(ChatCommandBuilder const& builder);
+            ChatCommandNode(ChatCommandNode&& other) = default;
 
-        void ResolveNames(std::string name);
-        void SendCommandHelp(ChatHandler& handler) const;
+            void ResolveNames(std::string name);
+            void SendCommandHelp(ChatHandler& handler) const;
 
-        bool IsVisible(ChatHandler const& who) const { return (IsInvokerVisible(who) || HasVisibleSubCommands(who)); }
-        bool IsInvokerVisible(ChatHandler const& who) const;
-        bool HasVisibleSubCommands(ChatHandler const& who) const;
+            bool IsVisible(ChatHandler const& who) const { return (IsInvokerVisible(who) || HasVisibleSubCommands(who)); }
+            bool IsInvokerVisible(ChatHandler const& who) const;
+            bool HasVisibleSubCommands(ChatHandler const& who) const;
 
-        std::string _name;
-        CommandInvoker _invoker;
-        CommandPermissions _permission;
-        std::variant<std::monostate, AcoreStrings, std::string> _help;
-        std::map<std::string_view, ChatCommandNode, StringCompareLessI_T> _subCommands;
+            std::string _name;
+            CommandInvoker _invoker;
+            CommandPermissions _permission;
+            std::variant<std::monostate, TrinityStrings, std::string> _help;
+            std::map<std::string_view, ChatCommandNode, StringCompareLessI_T> _subCommands;
     };
 }
 
-namespace Acore::ChatCommands
+namespace Trinity::ChatCommands
 {
     struct ChatCommandBuilder
     {
-        friend class Acore::Impl::ChatCommands::ChatCommandNode;
-
+        friend class Trinity::Impl::ChatCommands::ChatCommandNode;
         struct InvokerEntry
         {
             template <typename T>
-            InvokerEntry(T& handler, AcoreStrings help, uint32 securityLevel, Acore::ChatCommands::Console allowConsole)
-                : _invoker{ handler }, _help{ help }, _permissions{ securityLevel, allowConsole } { }
-
+            InvokerEntry(T& handler, TrinityStrings help, rbac::RBACPermissions permission, Trinity::ChatCommands::Console allowConsole)
+                : _invoker{ handler }, _help{ help }, _permissions{ permission, allowConsole }
+            {}
             InvokerEntry(InvokerEntry const&) = default;
             InvokerEntry(InvokerEntry&&) = default;
 
-            Acore::Impl::ChatCommands::CommandInvoker _invoker;
-            AcoreStrings _help;
-            Acore::Impl::ChatCommands::CommandPermissions _permissions;
-
-            auto operator*() const { return std::tie(_invoker, _help, _permissions); }
+            Trinity::Impl::ChatCommands::CommandInvoker _invoker;
+            TrinityStrings _help;
+            Trinity::Impl::ChatCommands::CommandPermissions _permissions;
         };
-
         using SubCommandEntry = std::reference_wrapper<std::vector<ChatCommandBuilder> const>;
 
         ChatCommandBuilder(ChatCommandBuilder&&) = default;
         ChatCommandBuilder(ChatCommandBuilder const&) = default;
 
         template <typename TypedHandler>
-        ChatCommandBuilder(char const* name, TypedHandler& handler, AcoreStrings help, uint32 securityLevel, Acore::ChatCommands::Console allowConsole)
-            : _name{ ASSERT_NOTNULL(name) }, _data{ std::in_place_type<InvokerEntry>, handler, help, securityLevel, allowConsole } { }
+        ChatCommandBuilder(char const* name, TypedHandler& handler, TrinityStrings help, rbac::RBACPermissions permission, Trinity::ChatCommands::Console allowConsole)
+            : _name{ ASSERT_NOTNULL(name) }, _data{ std::in_place_type<InvokerEntry>, handler, help, permission, allowConsole }
+        {}
 
         template <typename TypedHandler>
-        ChatCommandBuilder(char const* name, TypedHandler& handler, uint32 securityLevel, Acore::ChatCommands::Console allowConsole)
-            : ChatCommandBuilder(name, handler, AcoreStrings(), securityLevel, allowConsole) { }
-
+        ChatCommandBuilder(char const* name, TypedHandler& handler, rbac::RBACPermissions permission, Trinity::ChatCommands::Console allowConsole)
+            : ChatCommandBuilder(name, handler, TrinityStrings(), permission, allowConsole)
+        {}
         ChatCommandBuilder(char const* name, std::vector<ChatCommandBuilder> const& subCommands)
-            : _name{ ASSERT_NOTNULL(name) }, _data{ std::in_place_type<SubCommandEntry>, subCommands } { }
+            : _name{ ASSERT_NOTNULL(name) }, _data{ std::in_place_type<SubCommandEntry>, subCommands }
+        {}
+
+        [[deprecated("char const* parameters to command handlers are deprecated; convert this to a typed argument handler instead")]]
+        ChatCommandBuilder(char const* name, bool(&handler)(ChatHandler*, char const*), rbac::RBACPermissions permission, Trinity::ChatCommands::Console allowConsole)
+            : ChatCommandBuilder(name, handler, TrinityStrings(), permission, allowConsole)
+        {}
+
+        template <typename TypedHandler>
+        [[deprecated("you are using the old-style command format; convert this to the new format ({ name, handler (not a pointer!), permission, Console::(Yes/No) })")]]
+        ChatCommandBuilder(char const* name, rbac::RBACPermissions permission, bool console, TypedHandler* handler, char const*)
+            : ChatCommandBuilder(name, *handler, TrinityStrings(), permission, static_cast<Trinity::ChatCommands::Console>(console))
+        {}
+
+        [[deprecated("you are using the old-style command format; convert this to the new format ({ name, subCommands })")]]
+        ChatCommandBuilder(char const* name, rbac::RBACPermissions, bool, std::nullptr_t, char const*, std::vector <ChatCommandBuilder> const& sub)
+            : ChatCommandBuilder(name, sub)
+        {}
 
     private:
         std::string_view _name;
         std::variant<InvokerEntry, SubCommandEntry> _data;
     };
 
-    AC_GAME_API void LoadCommandMap();
-    AC_GAME_API void InvalidateCommandMap();
-    AC_GAME_API bool TryExecuteCommand(ChatHandler& handler, std::string_view cmd);
-    AC_GAME_API void SendCommandHelpFor(ChatHandler& handler, std::string_view cmd);
-    AC_GAME_API std::vector<std::string> GetAutoCompletionsFor(ChatHandler const& handler, std::string_view cmd);
+    TC_GAME_API void LoadCommandMap();
+    TC_GAME_API void InvalidateCommandMap();
+    TC_GAME_API bool TryExecuteCommand(ChatHandler& handler, std::string_view cmd);
+    TC_GAME_API void SendCommandHelpFor(ChatHandler& handler, std::string_view cmd);
+    TC_GAME_API std::vector<std::string> GetAutoCompletionsFor(ChatHandler const& handler, std::string_view cmd);
 }
 
 // backwards compatibility with old patches
-using ChatCommand [[deprecated("std::vector<ChatCommand> should be ChatCommandTable! (using namespace Acore::ChatCommands)")]] = Acore::ChatCommands::ChatCommandBuilder;
+using ChatCommand [[deprecated("std::vector<ChatCommand> should be ChatCommandTable! (using namespace Trinity::ChatCommands)")]] = Trinity::ChatCommands::ChatCommandBuilder;
 
 #endif

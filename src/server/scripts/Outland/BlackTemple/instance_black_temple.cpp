@@ -1,79 +1,44 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "InstanceMapScript.h"
-#include "InstanceScript.h"
-#include "SpellScriptLoader.h"
+#include "ScriptMgr.h"
+#include "AreaBoundary.h"
 #include "black_temple.h"
-#include "SpellAuraEffects.h"
-#include "SpellAuras.h"
-#include "SpellScript.h"
+#include "Creature.h"
+#include "CreatureAI.h"
+#include "GameObject.h"
+#include "InstanceScript.h"
+#include "Map.h"
 
 DoorData const doorData[] =
 {
-    { GO_NAJENTUS_GATE,         DATA_HIGH_WARLORD_NAJENTUS, DOOR_TYPE_PASSAGE  },
-    { GO_NAJENTUS_GATE,         DATA_SUPREMUS,              DOOR_TYPE_ROOM     },
-    { GO_SUPREMUS_GATE,         DATA_SUPREMUS,              DOOR_TYPE_PASSAGE  },
-    { GO_SHADE_OF_AKAMA_DOOR,   DATA_SHADE_OF_AKAMA,        DOOR_TYPE_ROOM     },
-    { GO_TERON_DOOR_1,          DATA_TERON_GOREFIEND,       DOOR_TYPE_ROOM     },
-    { GO_TERON_DOOR_2,          DATA_TERON_GOREFIEND,       DOOR_TYPE_ROOM     },
-    { GO_GURTOGG_DOOR,          DATA_GURTOGG_BLOODBOIL,     DOOR_TYPE_PASSAGE  },
-    { GO_TEMPLE_DOOR,           DATA_GURTOGG_BLOODBOIL,     DOOR_TYPE_PASSAGE  },
-    { GO_TEMPLE_DOOR,           DATA_TERON_GOREFIEND,       DOOR_TYPE_PASSAGE  },
-    { GO_TEMPLE_DOOR,           DATA_RELIQUARY_OF_SOULS,    DOOR_TYPE_PASSAGE  },
-    { GO_MOTHER_SHAHRAZ_DOOR,   DATA_MOTHER_SHAHRAZ,        DOOR_TYPE_PASSAGE  },
-    { GO_COUNCIL_DOOR_1,        DATA_ILLIDARI_COUNCIL,      DOOR_TYPE_ROOM     },
-    { GO_COUNCIL_DOOR_2,        DATA_ILLIDARI_COUNCIL,      DOOR_TYPE_ROOM     },
-    { GO_ILLIDAN_GATE,          DATA_AKAMA_ILLIDAN,         DOOR_TYPE_PASSAGE  },
-    { GO_ILLIDAN_DOOR_L,        DATA_ILLIDAN_STORMRAGE,     DOOR_TYPE_ROOM     },
-    { GO_ILLIDAN_DOOR_R,        DATA_ILLIDAN_STORMRAGE,     DOOR_TYPE_ROOM     },
-    { 0,                        0,                          DOOR_TYPE_ROOM     }
-};
-
-ObjectData const creatureData[] =
-{
-    { NPC_HIGH_WARLORD_NAJENTUS,     DATA_HIGH_WARLORD_NAJENTUS     },
-    { NPC_SUPREMUS,                  DATA_SUPREMUS                  },
-    { NPC_SHADE_OF_AKAMA,            DATA_SHADE_OF_AKAMA            },
-    { NPC_AKAMA_SHADE,               DATA_AKAMA_SHADE               },
-    { NPC_TERON_GOREFIEND,           DATA_TERON_GOREFIEND           },
-    { NPC_GURTOGG_BLOODBOIL,         DATA_GURTOGG_BLOODBOIL         },
-    { NPC_RELIQUARY_OF_THE_LOST,     DATA_RELIQUARY_OF_SOULS        },
-    { NPC_MOTHER_SHAHRAZ,            DATA_MOTHER_SHAHRAZ            },
-    { NPC_ILLIDARI_COUNCIL,          DATA_ILLIDARI_COUNCIL          },
-    { NPC_GATHIOS_THE_SHATTERER,     DATA_GATHIOS_THE_SHATTERER     },
-    { NPC_HIGH_NETHERMANCER_ZEREVOR, DATA_HIGH_NETHERMANCER_ZEREVOR },
-    { NPC_LADY_MALANDE,              DATA_LADY_MALANDE              },
-    { NPC_VERAS_DARKSHADOW,          DATA_VERAS_DARKSHADOW          },
-    { NPC_AKAMA_ILLIDAN,             DATA_AKAMA_ILLIDAN             },
-    { NPC_ILLIDAN_STORMRAGE,         DATA_ILLIDAN_STORMRAGE         },
-    { NPC_BLACK_TEMPLE_TRIGGER,      DATA_BLACK_TEMPLE_TRIGGER      },
-    { 0,                             0                              }
-};
-
-ObjectData const summonData[] =
-{
-    { NPC_BLADE_OF_AZZINOTH,     DATA_ILLIDAN_STORMRAGE  },
-    { NPC_FLAME_OF_AZZINOTH,     DATA_ILLIDAN_STORMRAGE  },
-    { NPC_PARASITIC_SHADOWFIEND, DATA_ILLIDAN_STORMRAGE  },
-    { NPC_SHADOWY_CONSTRUCT,     DATA_TERON_GOREFIEND    },
-    { NPC_ENSLAVED_SOUL,         DATA_RELIQUARY_OF_SOULS },
-    { 0, 0 }
+    { GO_NAJENTUS_GATE,         DATA_HIGH_WARLORD_NAJENTUS, EncounterDoorBehavior::OpenWhenDone },
+    { GO_NAJENTUS_GATE,         DATA_SUPREMUS,              EncounterDoorBehavior::OpenWhenNotInProgress },
+    { GO_SUPREMUS_GATE,         DATA_SUPREMUS,              EncounterDoorBehavior::OpenWhenDone },
+    { GO_SHADE_OF_AKAMA_DOOR,   DATA_SHADE_OF_AKAMA,        EncounterDoorBehavior::OpenWhenNotInProgress    },
+    { GO_TERON_DOOR_1,          DATA_TERON_GOREFIEND,       EncounterDoorBehavior::OpenWhenNotInProgress },
+    { GO_TERON_DOOR_2,          DATA_TERON_GOREFIEND,       EncounterDoorBehavior::OpenWhenNotInProgress },
+    { GO_GURTOGG_DOOR,          DATA_GURTOGG_BLOODBOIL,     EncounterDoorBehavior::OpenWhenDone },
+    { GO_MOTHER_SHAHRAZ_DOOR,   DATA_MOTHER_SHAHRAZ,        EncounterDoorBehavior::OpenWhenDone },
+    { GO_COUNCIL_DOOR_1,        DATA_ILLIDARI_COUNCIL,      EncounterDoorBehavior::OpenWhenNotInProgress },
+    { GO_COUNCIL_DOOR_2,        DATA_ILLIDARI_COUNCIL,      EncounterDoorBehavior::OpenWhenNotInProgress },
+    { GO_ILLIDAN_DOOR_R,        DATA_ILLIDAN_STORMRAGE,     EncounterDoorBehavior::OpenWhenNotInProgress },
+    { GO_ILLIDAN_DOOR_L,        DATA_ILLIDAN_STORMRAGE,     EncounterDoorBehavior::OpenWhenNotInProgress },
+    { 0,                        0,                          EncounterDoorBehavior::OpenWhenNotInProgress } // END
 };
 
 BossBoundaryData const boundaries =
@@ -91,441 +56,196 @@ BossBoundaryData const boundaries =
     { DATA_ILLIDAN_STORMRAGE,     new EllipseBoundary(Position(694.8f, 309.0f), 80.0 , 95.0) }
 };
 
+ObjectData const creatureData[] =
+{
+    { NPC_HIGH_WARLORD_NAJENTUS,        DATA_HIGH_WARLORD_NAJENTUS      },
+    { NPC_SUPREMUS,                     DATA_SUPREMUS                   },
+    { NPC_SHADE_OF_AKAMA,               DATA_SHADE_OF_AKAMA             },
+    { NPC_TERON_GOREFIEND,              DATA_TERON_GOREFIEND            },
+    { NPC_GURTOGG_BLOODBOIL,            DATA_GURTOGG_BLOODBOIL          },
+    { NPC_RELIQUARY_OF_SOULS,           DATA_RELIQUARY_OF_SOULS         },
+    { NPC_MOTHER_SHAHRAZ,               DATA_MOTHER_SHAHRAZ             },
+    { NPC_ILLIDARI_COUNCIL,             DATA_ILLIDARI_COUNCIL           },
+    { NPC_ILLIDAN_STORMRAGE,            DATA_ILLIDAN_STORMRAGE          },
+    { NPC_AKAMA_SHADE,                  DATA_AKAMA_SHADE                },
+    { NPC_AKAMA,                        DATA_AKAMA                      },
+    { NPC_GATHIOS_THE_SHATTERER,        DATA_GATHIOS_THE_SHATTERER      },
+    { NPC_HIGH_NETHERMANCER_ZEREVOR,    DATA_HIGH_NETHERMANCER_ZEREVOR  },
+    { NPC_LADY_MALANDE,                 DATA_LADY_MALANDE               },
+    { NPC_VERAS_DARKSHADOW,             DATA_VERAS_DARKSHADOW           },
+    { NPC_BLOOD_ELF_COUNCIL_VOICE,      DATA_BLOOD_ELF_COUNCIL_VOICE    },
+    { NPC_BLACK_TEMPLE_TRIGGER,         DATA_BLACK_TEMPLE_TRIGGER       },
+    { NPC_MAIEV_SHADOWSONG,             DATA_MAIEV                      },
+    { NPC_RELIQUARY_COMBAT_TRIGGER,     DATA_RELIQUARY_COMBAT_TRIGGER   },
+    { 0,                                0                               } // END
+};
+
+ObjectData const gameObjectData[] =
+{
+    { GO_ILLIDAN_GATE,                DATA_GO_ILLIDAN_GATE          },
+    { GO_DEN_OF_MORTAL_DOOR,          DATA_GO_DEN_OF_MORTAL_DOOR    },
+    { GO_ILLIDAN_MUSIC_CONTROLLER,    DATA_ILLIDAN_MUSIC_CONTROLLER },
+    { 0,                              0                             } //END
+};
+
+DungeonEncounterData const encounters[] =
+{
+    { DATA_HIGH_WARLORD_NAJENTUS, {{ 601 }} },
+    { DATA_SUPREMUS, {{ 602 }} },
+    { DATA_SHADE_OF_AKAMA, {{ 603 }} },
+    { DATA_TERON_GOREFIEND, {{ 604 }} },
+    { DATA_GURTOGG_BLOODBOIL, {{ 605 }} },
+    { DATA_RELIQUARY_OF_SOULS, {{ 606 }} },
+    { DATA_MOTHER_SHAHRAZ, {{ 607 }} },
+    { DATA_ILLIDARI_COUNCIL, {{ 608 }} },
+    { DATA_ILLIDAN_STORMRAGE, {{ 609 }} }
+};
+
 class instance_black_temple : public InstanceMapScript
 {
-public:
-    instance_black_temple() : InstanceMapScript("instance_black_temple", 564) { }
+    public:
+        instance_black_temple() : InstanceMapScript(BTScriptName, 564) { }
 
-    struct instance_black_temple_InstanceMapScript : public InstanceScript
-    {
-        instance_black_temple_InstanceMapScript(Map* map) : InstanceScript(map)
+        struct instance_black_temple_InstanceMapScript : public InstanceScript
         {
-            SetHeaders(DataHeader);
-            SetBossNumber(MAX_ENCOUNTERS);
-            LoadDoorData(doorData);
-            LoadBossBoundaries(boundaries);
-            LoadObjectData(creatureData, nullptr);
-            LoadSummonData(summonData);
-
-            ashtongueGUIDs.clear();
-        }
-
-        void OnCreatureCreate(Creature* creature) override
-        {
-            switch (creature->GetEntry())
+            instance_black_temple_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
             {
-                case NPC_ANGERED_SOUL_FRAGMENT:
-                case NPC_HUNGERING_SOUL_FRAGMENT:
-                case NPC_SUFFERING_SOUL_FRAGMENT:
-                    creature->SetCorpseDelay(5);
-                    break;
-                case NPC_ASHTONGUE_BATTLELORD:
-                case NPC_ASHTONGUE_MYSTIC:
-                case NPC_ASHTONGUE_STORMCALLER:
-                case NPC_ASHTONGUE_PRIMALIST:
-                case NPC_ASHTONGUE_FERAL_SPIRIT:
-                case NPC_ASHTONGUE_STALKER:
-                case NPC_STORM_FURY:
-                    if (GetBossState(DATA_SHADE_OF_AKAMA) == DONE)
-                        creature->SetFaction(FACTION_ASHTONGUE_DEATHSWORN);
-                    else
-                        ashtongueGUIDs.insert(creature->GetGUID());
-                    break;
-                default:
-                    break;
+                SetHeaders(DataHeader);
+                SetBossNumber(EncounterCount);
+                LoadDoorData(doorData);
+                LoadObjectData(creatureData, gameObjectData);
+                LoadBossBoundaries(boundaries);
+                LoadDungeonEncounterData(encounters);
+                AkamaState = AKAMA_INTRO;
+                AkamaIllidanIntro = 1;
             }
 
-            InstanceScript::OnCreatureCreate(creature);
-        }
-
-        void OnGameObjectCreate(GameObject* go) override
-        {
-            // If created after Illidari Council is done, then skip Akama's event. Used for crashes/reset
-            if (go->GetEntry() == GO_ILLIDAN_GATE)
+            void OnGameObjectCreate(GameObject* go) override
             {
-                if (GetBossState(DATA_ILLIDARI_COUNCIL) == DONE)
-                {
-                    SetBossState(DATA_AKAMA_ILLIDAN, DONE);
-                    HandleGameObject(ObjectGuid::Empty, true, go);
-                }
+                InstanceScript::OnGameObjectCreate(go);
+
+                if (go->GetEntry() == GO_DEN_OF_MORTAL_DOOR)
+                    if (CheckDenOfMortalDoor())
+                        HandleGameObject(ObjectGuid::Empty, true, go);
             }
 
-            InstanceScript::OnGameObjectCreate(go);
-        }
-
-        bool SetBossState(uint32 type, EncounterState state) override
-        {
-            if (!InstanceScript::SetBossState(type, state))
-                return false;
-
-            if (state == DONE)
+            void OnCreatureCreate(Creature* creature) override
             {
-                switch (type)
+                InstanceScript::OnCreatureCreate(creature);
+
+                switch (creature->GetEntry())
                 {
-                    case DATA_HIGH_WARLORD_NAJENTUS:
-                        if (Creature* trigger = GetCreature(DATA_BLACK_TEMPLE_TRIGGER))
-                            trigger->AI()->Talk(EMOTE_NAJENTUS_DEFEATED);
-                        break;
-                    case DATA_SHADE_OF_AKAMA:
-                        for (ObjectGuid const& guid : ashtongueGUIDs)
-                            if (Creature* ashtongue = instance->GetCreature(guid))
-                                ashtongue->SetFaction(FACTION_ASHTONGUE_DEATHSWORN);
-                        [[fallthrough]];
-                    case DATA_TERON_GOREFIEND:
-                    case DATA_GURTOGG_BLOODBOIL:
-                    case DATA_RELIQUARY_OF_SOULS:
-                        if (AllBossesDone({ DATA_SHADE_OF_AKAMA, DATA_TERON_GOREFIEND, DATA_GURTOGG_BLOODBOIL, DATA_RELIQUARY_OF_SOULS }))
-                            if (Creature* trigger = GetCreature(DATA_BLACK_TEMPLE_TRIGGER))
-                                trigger->AI()->Talk(EMOTE_LOWER_TEMPLE_DEFEATED);
-                        break;
-                    case DATA_ILLIDARI_COUNCIL:
-                        if (Creature* akama = GetCreature(DATA_AKAMA_ILLIDAN))
-                            akama->AI()->DoAction(0);
+                    case NPC_ASHTONGUE_STALKER:
+                    case NPC_ASHTONGUE_BATTLELORD:
+                    case NPC_ASHTONGUE_MYSTIC:
+                    case NPC_ASHTONGUE_PRIMALIST:
+                    case NPC_ASHTONGUE_STORMCALLER:
+                    case NPC_ASHTONGUE_FERAL_SPIRIT:
+                    case NPC_STORM_FURY:
+                        AshtongueGUIDs.push_back(creature->GetGUID());
+                        if (GetBossState(DATA_SHADE_OF_AKAMA) == DONE)
+                            creature->SetFaction(FACTION_ASHTONGUE_DEATHSWORN);
                         break;
                     default:
                         break;
                 }
             }
-            return true;
-        }
 
-    protected:
-        GuidSet ashtongueGUIDs;
-    };
-
-    InstanceScript* GetInstanceScript(InstanceMap* map) const override
-    {
-        return new instance_black_temple_InstanceMapScript(map);
-    }
-};
-
-class spell_black_template_harpooners_mark_aura : public AuraScript
-{
-    PrepareAuraScript(spell_black_template_harpooners_mark_aura);
-
-    bool Load() override
-    {
-        _turtleSet.clear();
-        return true;
-    }
-
-    void HandleEffectApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        std::list<Creature*> creatureList;
-        GetUnitOwner()->GetCreaturesWithEntryInRange(creatureList, 80.0f, NPC_DRAGON_TURTLE);
-        for (std::list<Creature*>::const_iterator itr = creatureList.begin(); itr != creatureList.end(); ++itr)
-        {
-            (*itr)->TauntApply(GetUnitOwner());
-            (*itr)->AddThreat(GetUnitOwner(), 10000000.0f);
-            _turtleSet.insert((*itr)->GetGUID());
-        }
-    }
-
-    void HandleEffectRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        for (ObjectGuid const& guid : _turtleSet)
-            if (Creature* turtle = ObjectAccessor::GetCreature(*GetUnitOwner(), guid))
+            uint32 GetData(uint32 type) const override
             {
-                turtle->TauntFadeOut(GetUnitOwner());
-                turtle->AddThreat(GetUnitOwner(), -10000000.0f);
+                switch (type)
+                {
+                    case DATA_AKAMA:
+                        return AkamaState;
+                    case DATA_AKAMA_ILLIDAN_INTRO:
+                        return AkamaIllidanIntro;
+                    default:
+                        return 0;
+                }
             }
-    }
 
-    void Register() override
-    {
-        OnEffectApply += AuraEffectApplyFn(spell_black_template_harpooners_mark_aura::HandleEffectApply, EFFECT_1, SPELL_AURA_PERIODIC_DUMMY, AURA_EFFECT_HANDLE_REAL);
-        OnEffectRemove += AuraEffectRemoveFn(spell_black_template_harpooners_mark_aura::HandleEffectRemove, EFFECT_1, SPELL_AURA_PERIODIC_DUMMY, AURA_EFFECT_HANDLE_REAL);
-    }
+            void SetData(uint32 type, uint32 data) override
+            {
+                switch (type)
+                {
+                    case DATA_AKAMA:
+                        AkamaState = data;
+                        break;
+                    case ACTION_OPEN_DOOR:
+                        if (GameObject* illidanGate = GetGameObject(DATA_GO_ILLIDAN_GATE))
+                            HandleGameObject(ObjectGuid::Empty, true, illidanGate);
+                        break;
+                    case DATA_AKAMA_ILLIDAN_INTRO:
+                        AkamaIllidanIntro = data;
+                        break;
+                    default:
+                        break;
+                }
+            }
 
-private:
-    GuidSet _turtleSet;
-};
+            bool SetBossState(uint32 type, EncounterState state) override
+            {
+                if (!InstanceScript::SetBossState(type, state))
+                    return false;
 
-class spell_black_template_free_friend : public SpellScript
-{
-    PrepareSpellScript(spell_black_template_free_friend);
+                switch (type)
+                {
+                    case DATA_HIGH_WARLORD_NAJENTUS:
+                        if (state == DONE)
+                            if (Creature* trigger = GetCreature(DATA_BLACK_TEMPLE_TRIGGER))
+                                trigger->AI()->Talk(EMOTE_HIGH_WARLORD_NAJENTUS_DIED);
+                        break;
+                    case DATA_SHADE_OF_AKAMA:
+                        if (state == DONE)
+                            for (ObjectGuid ashtongueGuid : AshtongueGUIDs)
+                                if (Creature* ashtongue = instance->GetCreature(ashtongueGuid))
+                                    ashtongue->SetFaction(FACTION_ASHTONGUE_DEATHSWORN);
+                        [[fallthrough]];
+                    case DATA_TERON_GOREFIEND:
+                    case DATA_GURTOGG_BLOODBOIL:
+                    case DATA_RELIQUARY_OF_SOULS:
+                        if (state == DONE && CheckDenOfMortalDoor())
+                        {
+                            if (Creature* trigger = GetCreature(DATA_BLACK_TEMPLE_TRIGGER))
+                                trigger->AI()->Talk(EMOTE_DEN_OF_MORTAL_DOOR_OPEN);
 
-    void HandleScriptEffect(SpellEffIndex effIndex)
-    {
-        PreventHitDefaultEffect(effIndex);
-        if (Unit* target = GetHitUnit())
-            target->RemoveAurasWithMechanic(IMMUNE_TO_MOVEMENT_IMPAIRMENT_AND_LOSS_CONTROL_MASK);
-    }
+                            if (GameObject* door = GetGameObject(DATA_GO_DEN_OF_MORTAL_DOOR))
+                                HandleGameObject(ObjectGuid::Empty, true, door);
+                        }
+                        break;
+                    case DATA_ILLIDARI_COUNCIL:
+                        if (state == DONE)
+                            if (Creature* akama = GetCreature(DATA_AKAMA))
+                                akama->AI()->DoAction(ACTION_ACTIVE_AKAMA_INTRO);
+                        break;
+                    default:
+                        break;
+                }
 
-    void Register() override
-    {
-        OnEffectHitTarget += SpellEffectFn(spell_black_template_free_friend::HandleScriptEffect, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
-    }
-};
+                return true;
+            }
 
-class spell_black_temple_curse_of_the_bleakheart_aura : public AuraScript
-{
-    PrepareAuraScript(spell_black_temple_curse_of_the_bleakheart_aura);
+            bool CheckDenOfMortalDoor()
+            {
+                for (BTDataTypes boss : {DATA_SHADE_OF_AKAMA, DATA_TERON_GOREFIEND, DATA_RELIQUARY_OF_SOULS, DATA_GURTOGG_BLOODBOIL})
+                    if (GetBossState(boss) != DONE)
+                        return false;
+                return true;
+            }
 
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_CHEST_PAINS });
-    }
+        protected:
+            GuidVector AshtongueGUIDs;
+            uint8 AkamaState;
+            uint8 AkamaIllidanIntro;
+        };
 
-    void CalcPeriodic(AuraEffect const* /*effect*/, bool& isPeriodic, int32& amplitude)
-    {
-        isPeriodic = true;
-        amplitude = 5000;
-    }
-
-    void Update(AuraEffect const*  /*effect*/)
-    {
-        PreventDefaultAction();
-        if (roll_chance_i(20))
-            GetUnitOwner()->CastSpell(GetUnitOwner(), SPELL_CHEST_PAINS, true);
-    }
-
-    void Register() override
-    {
-        DoEffectCalcPeriodic += AuraEffectCalcPeriodicFn(spell_black_temple_curse_of_the_bleakheart_aura::CalcPeriodic, EFFECT_0, SPELL_AURA_DUMMY);
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_black_temple_curse_of_the_bleakheart_aura::Update, EFFECT_0, SPELL_AURA_DUMMY);
-    }
-};
-
-class spell_black_temple_skeleton_shot_aura : public AuraScript
-{
-    PrepareAuraScript(spell_black_temple_skeleton_shot_aura);
-
-    void HandleEffectRemove(AuraEffect const*  /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        if (GetTargetApplication()->GetRemoveMode() == AURA_REMOVE_BY_DEATH)
-            GetTarget()->CastSpell(GetTarget(), GetSpellInfo()->Effects[EFFECT_2].CalcValue(), true);
-    }
-
-    void Register() override
-    {
-        AfterEffectRemove += AuraEffectRemoveFn(spell_black_temple_skeleton_shot_aura::HandleEffectRemove, EFFECT_1, SPELL_AURA_PERIODIC_DAMAGE, AURA_EFFECT_HANDLE_REAL);
-    }
-};
-
-class spell_black_temple_wyvern_sting_aura : public AuraScript
-{
-    PrepareAuraScript(spell_black_temple_wyvern_sting_aura);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_WYVERN_STING });
-    }
-
-    void HandleEffectRemove(AuraEffect const*  /*aurEff*/, AuraEffectHandleModes /*mode*/)
-    {
-        if (Unit* caster = GetCaster())
-            caster->CastSpell(GetTarget(), SPELL_WYVERN_STING, true);
-    }
-
-    void Register() override
-    {
-        AfterEffectRemove += AuraEffectRemoveFn(spell_black_temple_wyvern_sting_aura::HandleEffectRemove, EFFECT_0, SPELL_AURA_MOD_STUN, AURA_EFFECT_HANDLE_REAL);
-    }
-};
-
-class spell_black_temple_charge_rage_aura : public AuraScript
-{
-    PrepareAuraScript(spell_black_temple_charge_rage_aura);
-
-    void Update(AuraEffect const* effect)
-    {
-        PreventDefaultAction();
-        if (Unit* target = GetUnitOwner()->SelectNearbyNoTotemTarget((Unit*)nullptr, 50.0f))
-            GetUnitOwner()->CastSpell(target, GetSpellInfo()->Effects[effect->GetEffIndex()].TriggerSpell, true);
-    }
-
-    void Register() override
-    {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_black_temple_charge_rage_aura::Update, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
-    }
-};
-
-class spell_black_temple_shadow_inferno_aura : public AuraScript
-{
-    PrepareAuraScript(spell_black_temple_shadow_inferno_aura);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_SHADOW_INFERNO_DAMAGE });
-    }
-
-    void Update(AuraEffect const* effect)
-    {
-        PreventDefaultAction();
-        GetUnitOwner()->CastCustomSpell(SPELL_SHADOW_INFERNO_DAMAGE, SPELLVALUE_BASE_POINT0, effect->GetAmount(), GetUnitOwner(), TRIGGERED_FULL_MASK);
-        GetAura()->GetEffect(effect->GetEffIndex())->SetAmount(effect->GetAmount() + 500);
-    }
-
-    void Register() override
-    {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_black_temple_shadow_inferno_aura::Update, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
-    }
-};
-
-class spell_black_temple_spell_absorption_aura : public AuraScript
-{
-    PrepareAuraScript(spell_black_temple_spell_absorption_aura);
-
-    void CalculateAmount(AuraEffect const* /*aurEff*/, int32& amount, bool& /*canBeRecalculated*/)
-    {
-        // Set absorbtion amount to unlimited
-        amount = -1;
-    }
-
-    void Absorb(AuraEffect* /*aurEff*/, DamageInfo& dmgInfo, uint32& absorbAmount)
-    {
-        absorbAmount = dmgInfo.GetDamage();
-    }
-
-    void Update(AuraEffect const* effect)
-    {
-        PreventDefaultAction();
-        uint32 count = GetUnitOwner()->GetAuraCount(SPELL_CHAOTIC_CHARGE);
-        if (count == 0)
-            return;
-
-        GetUnitOwner()->CastCustomSpell(GetSpellInfo()->Effects[effect->GetEffIndex()].TriggerSpell, SPELLVALUE_BASE_POINT0, effect->GetAmount()*count, GetUnitOwner(), TRIGGERED_FULL_MASK);
-        GetUnitOwner()->RemoveAurasDueToSpell(SPELL_CHAOTIC_CHARGE);
-    }
-
-    void Register() override
-    {
-        DoEffectCalcAmount += AuraEffectCalcAmountFn(spell_black_temple_spell_absorption_aura::CalculateAmount, EFFECT_2, SPELL_AURA_SCHOOL_ABSORB);
-        OnEffectAbsorb += AuraEffectAbsorbFn(spell_black_temple_spell_absorption_aura::Absorb, EFFECT_2);
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_black_temple_spell_absorption_aura::Update, EFFECT_1, SPELL_AURA_PERIODIC_TRIGGER_SPELL_WITH_VALUE);
-    }
-};
-
-class spell_black_temple_bloodbolt : public SpellScript
-{
-    PrepareSpellScript(spell_black_temple_bloodbolt);
-
-    void HandleScriptEffect(SpellEffIndex effIndex)
-    {
-        PreventHitEffect(effIndex);
-        if (Unit* target = GetHitUnit())
-            GetCaster()->CastSpell(target, GetEffectValue(), true);
-    }
-
-    void Register() override
-    {
-        OnEffectHitTarget += SpellEffectFn(spell_black_temple_bloodbolt::HandleScriptEffect, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
-    }
-};
-
-class spell_black_temple_consuming_strikes_aura : public AuraScript
-{
-    PrepareAuraScript(spell_black_temple_consuming_strikes_aura);
-
-    void HandleProc(AuraEffect const* /*aurEff*/, ProcEventInfo& eventInfo)
-    {
-        PreventDefaultAction();
-        GetTarget()->CastCustomSpell(GetSpellInfo()->Effects[EFFECT_1].CalcValue(), SPELLVALUE_BASE_POINT0, eventInfo.GetDamageInfo()->GetDamage(), GetTarget(), true);
-    }
-
-    void Register() override
-    {
-        OnEffectProc += AuraEffectProcFn(spell_black_temple_consuming_strikes_aura::HandleProc, EFFECT_0, SPELL_AURA_PROC_TRIGGER_SPELL);
-    }
-};
-
-class spell_black_temple_curse_of_vitality_aura : public AuraScript
-{
-    PrepareAuraScript(spell_black_temple_curse_of_vitality_aura);
-
-    void OnPeriodic(AuraEffect const*  /*aurEff*/)
-    {
-        if (GetUnitOwner()->HealthBelowPct(50))
-            SetDuration(0);
-    }
-
-    void Register() override
-    {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_black_temple_curse_of_vitality_aura::OnPeriodic, EFFECT_0, SPELL_AURA_PERIODIC_DAMAGE);
-    }
-};
-
-class spell_black_temple_dementia_aura : public AuraScript
-{
-    PrepareAuraScript(spell_black_temple_dementia_aura);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_DEMENTIA1, SPELL_DEMENTIA2 });
-    }
-
-    void OnPeriodic(AuraEffect const*  /*aurEff*/)
-    {
-        if (roll_chance_i(50))
-            GetTarget()->CastSpell(GetTarget(), SPELL_DEMENTIA1, true);
-        else
-            GetTarget()->CastSpell(GetTarget(), SPELL_DEMENTIA2, true);
-    }
-
-    void Register() override
-    {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_black_temple_dementia_aura::OnPeriodic, EFFECT_0, SPELL_AURA_PERIODIC_DUMMY);
-    }
-};
-
-// 39649 - Summon Shadowfiends
-class spell_black_temple_summon_shadowfiends : public SpellScript
-{
-    PrepareSpellScript(spell_black_temple_summon_shadowfiends);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_SUMMON_SHADOWFIENDS });
-    }
-
-    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
-    {
-        Unit* caster = GetCaster();
-        if (!caster)
-            return;
-
-        for (uint8 i = 0; i < 11; i++)
-            caster->CastSpell(caster, SPELL_SUMMON_SHADOWFIENDS, true);
-    }
-
-    void Register() override
-    {
-        OnEffectHitTarget += SpellEffectFn(spell_black_temple_summon_shadowfiends::HandleScriptEffect, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
-    }
-};
-
-class spell_black_temple_l5_arcane_charge : public SpellScript
-{
-    PrepareSpellScript(spell_black_temple_l5_arcane_charge)
-
-    void RecalculateDamage()
-    {
-        uint32 damage = GetHitUnit()->SpellDamageBonusTaken(GetCaster(), GetSpellInfo(), GetHitUnit()->CountPctFromMaxHealth(100), SPELL_DIRECT_DAMAGE);
-        SetHitDamage(int32(damage));
-    }
-
-    void Register() override
-    {
-        OnHit += SpellHitFn(spell_black_temple_l5_arcane_charge::RecalculateDamage);
-    }
+        InstanceScript* GetInstanceScript(InstanceMap* map) const override
+        {
+            return new instance_black_temple_InstanceMapScript(map);
+        }
 };
 
 void AddSC_instance_black_temple()
 {
     new instance_black_temple();
-    RegisterSpellScript(spell_black_template_harpooners_mark_aura);
-    RegisterSpellScript(spell_black_template_free_friend);
-    RegisterSpellScript(spell_black_temple_curse_of_the_bleakheart_aura);
-    RegisterSpellScript(spell_black_temple_skeleton_shot_aura);
-    RegisterSpellScript(spell_black_temple_wyvern_sting_aura);
-    RegisterSpellScript(spell_black_temple_charge_rage_aura);
-    RegisterSpellScript(spell_black_temple_shadow_inferno_aura);
-    RegisterSpellScript(spell_black_temple_spell_absorption_aura);
-    RegisterSpellScript(spell_black_temple_bloodbolt);
-    RegisterSpellScript(spell_black_temple_consuming_strikes_aura);
-    RegisterSpellScript(spell_black_temple_curse_of_vitality_aura);
-    RegisterSpellScript(spell_black_temple_dementia_aura);
-    RegisterSpellScript(spell_black_temple_summon_shadowfiends);
-    RegisterSpellScript(spell_black_temple_l5_arcane_charge);
 }

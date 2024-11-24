@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -17,13 +17,15 @@
 
 #include "SkillDiscovery.h"
 #include "DatabaseEnv.h"
+#include "DB2Stores.h"
 #include "Log.h"
 #include "Player.h"
-#include "SpellInfo.h"
+#include "Random.h"
 #include "SpellMgr.h"
-#include "Util.h"
+#include "SpellInfo.h"
 #include "World.h"
 #include <map>
+#include <sstream>
 
 struct SkillDiscoveryEntry
 {
@@ -32,10 +34,10 @@ struct SkillDiscoveryEntry
     float   chance;                                         // chance
 
     SkillDiscoveryEntry()
-        : spellId(0), reqSkillValue(0), chance(0) {}
+        : spellId(0), reqSkillValue(0), chance(0) { }
 
     SkillDiscoveryEntry(uint32 _spellId, uint32 req_skill_val, float _chance)
-        : spellId(_spellId), reqSkillValue(req_skill_val), chance(_chance) {}
+        : spellId(_spellId), reqSkillValue(req_skill_val), chance(_chance) { }
 };
 
 typedef std::list<SkillDiscoveryEntry> SkillDiscoveryList;
@@ -54,8 +56,7 @@ void LoadSkillDiscoveryTable()
 
     if (!result)
     {
-        LOG_WARN("server.loading", ">> Loaded 0 skill discovery definitions. DB table `skill_discovery_template` is empty.");
-        LOG_INFO("server.loading", " ");
+        TC_LOG_INFO("server.loading", ">> Loaded 0 skill discovery definitions. DB table `skill_discovery_template` is empty.");
         return;
     }
 
@@ -68,27 +69,27 @@ void LoadSkillDiscoveryTable()
     {
         Field* fields = result->Fetch();
 
-        uint32 spellId         = fields[0].Get<uint32>();
-        int32  reqSkillOrSpell = fields[1].Get<int32>();
-        uint32 reqSkillValue   = fields[2].Get<uint16>();
-        float  chance          = fields[3].Get<float>();
+        uint32 spellId         = fields[0].GetUInt32();
+        int32  reqSkillOrSpell = fields[1].GetInt32();
+        uint32 reqSkillValue   = fields[2].GetUInt16();
+        float  chance          = fields[3].GetFloat();
 
         if (chance <= 0)                                    // chance
         {
             ssNonDiscoverableEntries << "spellId = " << spellId << " reqSkillOrSpell = " << reqSkillOrSpell
-                                     << " reqSkillValue = " << reqSkillValue << " chance = " << chance << "(chance problem)\n";
+                << " reqSkillValue = " << reqSkillValue << " chance = " << chance << "(chance problem)\n";
             continue;
         }
 
         if (reqSkillOrSpell > 0)                            // spell case
         {
             uint32 absReqSkillOrSpell = uint32(reqSkillOrSpell);
-            SpellInfo const* reqSpellInfo = sSpellMgr->GetSpellInfo(absReqSkillOrSpell);
+            SpellInfo const* reqSpellInfo = sSpellMgr->GetSpellInfo(absReqSkillOrSpell, DIFFICULTY_NONE);
             if (!reqSpellInfo)
             {
                 if (reportedReqSpells.find(absReqSkillOrSpell) == reportedReqSpells.end())
                 {
-                    LOG_ERROR("sql.sql", "Spell (ID: {}) have not existed spell (ID: {}) in `reqSpell` field in `skill_discovery_template` table", spellId, reqSkillOrSpell);
+                    TC_LOG_ERROR("sql.sql", "Spell (ID: {}) has a non-existing spell (ID: {}) in `reqSpell` field in the `skill_discovery_template` table.", spellId, reqSkillOrSpell);
                     reportedReqSpells.insert(absReqSkillOrSpell);
                 }
                 continue;
@@ -96,20 +97,20 @@ void LoadSkillDiscoveryTable()
 
             // mechanic discovery
             if (reqSpellInfo->Mechanic != MECHANIC_DISCOVERY &&
-                    // explicit discovery ability
-                    !reqSpellInfo->IsExplicitDiscovery())
+                // explicit discovery ability
+                !reqSpellInfo->IsExplicitDiscovery())
             {
                 if (reportedReqSpells.find(absReqSkillOrSpell) == reportedReqSpells.end())
                 {
-                    LOG_ERROR("sql.sql", "Spell (ID: {}) not have MECHANIC_DISCOVERY (28) value in Mechanic field in spell.dbc"
-                                     " and not 100% chance random discovery ability but listed for spellId {} (and maybe more) in `skill_discovery_template` table",
-                                     absReqSkillOrSpell, spellId);
+                    TC_LOG_ERROR("sql.sql", "Spell (ID: {}) does not have any MECHANIC_DISCOVERY (28) value in the Mechanic field in spell.dbc"
+                        " nor 100% chance random discovery ability, but is listed for spellId {} (and maybe more) in the `skill_discovery_template` table.",
+                        absReqSkillOrSpell, spellId);
                     reportedReqSpells.insert(absReqSkillOrSpell);
                 }
                 continue;
             }
 
-            SkillDiscoveryStore[reqSkillOrSpell].emplace_back(spellId, reqSkillValue, chance);
+            SkillDiscoveryStore[reqSkillOrSpell].push_back(SkillDiscoveryEntry(spellId, reqSkillValue, chance));
         }
         else if (reqSkillOrSpell == 0)                      // skill case
         {
@@ -117,42 +118,42 @@ void LoadSkillDiscoveryTable()
 
             if (bounds.first == bounds.second)
             {
-                LOG_ERROR("sql.sql", "Spell (ID: {}) not listed in `SkillLineAbility.dbc` but listed with `reqSpell`=0 in `skill_discovery_template` table", spellId);
+                TC_LOG_ERROR("sql.sql", "Spell (ID: {}) is not listed in `SkillLineAbility.dbc`, but listed with `reqSpell`= 0 in the `skill_discovery_template` table.", spellId);
                 continue;
             }
 
             for (SkillLineAbilityMap::const_iterator _spell_idx = bounds.first; _spell_idx != bounds.second; ++_spell_idx)
-                SkillDiscoveryStore[-int32(_spell_idx->second->SkillLine)].emplace_back(spellId, reqSkillValue, chance);
+                SkillDiscoveryStore[-int32(_spell_idx->second->SkillLine)].push_back(SkillDiscoveryEntry(spellId, reqSkillValue, chance));
         }
         else
         {
-            LOG_ERROR("sql.sql", "Spell (ID: {}) have negative value in `reqSpell` field in `skill_discovery_template` table", spellId);
+            TC_LOG_ERROR("sql.sql", "Spell (ID: {}) has a negative value in `reqSpell` field in the `skill_discovery_template` table.", spellId);
             continue;
         }
 
         ++count;
-    } while (result->NextRow());
+    }
+    while (result->NextRow());
 
     if (!ssNonDiscoverableEntries.str().empty())
-        LOG_ERROR("sql.sql", "Some items can't be successfully discovered: have in chance field value < 0.000001 in `skill_discovery_template` DB table . List:\n{}", ssNonDiscoverableEntries.str());
+        TC_LOG_ERROR("sql.sql", "Some items can't be successfully discovered, their chance field value is < 0.000001 in the `skill_discovery_template` DB table. List:\n{}", ssNonDiscoverableEntries.str());
 
     // report about empty data for explicit discovery spells
-    for (uint32 spell_id = 1; spell_id < sSpellMgr->GetSpellInfoStoreSize(); ++spell_id)
+    for (SpellNameEntry const* spellNameEntry : sSpellNameStore)
     {
-        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spell_id);
-        if (!spellInfo)
+        SpellInfo const* spellEntry = sSpellMgr->GetSpellInfo(spellNameEntry->ID, DIFFICULTY_NONE);
+        if (!spellEntry)
             continue;
 
         // skip not explicit discovery spells
-        if (!spellInfo->IsExplicitDiscovery())
+        if (!spellEntry->IsExplicitDiscovery())
             continue;
 
-        if (SkillDiscoveryStore.find(int32(spell_id)) == SkillDiscoveryStore.end())
-            LOG_ERROR("sql.sql", "Spell (ID: {}) is 100% chance random discovery ability but not have data in `skill_discovery_template` table", spell_id);
+        if (SkillDiscoveryStore.find(int32(spellEntry->Id)) == SkillDiscoveryStore.end())
+            TC_LOG_ERROR("sql.sql", "Spell (ID: {}) has got 100% chance random discovery ability, but does not have data in the `skill_discovery_template` table.", spellEntry->Id);
     }
 
-    LOG_INFO("server.loading", ">> Loaded {} skill discovery definitions in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
-    LOG_INFO("server.loading", " ");
+    TC_LOG_INFO("server.loading", ">> Loaded {} skill discovery definitions in {} ms.", count, GetMSTimeDiffToNow(oldMSTime));
 }
 
 uint32 GetExplicitDiscoverySpell(uint32 spellId, Player* player)
@@ -173,7 +174,7 @@ uint32 GetExplicitDiscoverySpell(uint32 spellId, Player* player)
                 full_chance += item_iter->chance;
 
     float rate = full_chance / 100.0f;
-    float roll = (float)rand_chance() * rate;                      // roll now in range 0..full_chance
+    float roll = rand_chance() * rate;                             // roll now in range 0..full_chance
 
     for (SkillDiscoveryList::const_iterator item_iter = tab->second.begin(); item_iter != tab->second.end(); ++item_iter)
     {
@@ -184,12 +185,7 @@ uint32 GetExplicitDiscoverySpell(uint32 spellId, Player* player)
             continue;
 
         if (item_iter->chance > roll)
-        {
-            // Update skill, not Book of Glyph Mastery
-            if (spellId != 64323)
-                player->UpdateGatherSkill(SKILL_INSCRIPTION, player->GetPureSkillValue(SKILL_INSCRIPTION), item_iter->reqSkillValue);
             return item_iter->spellId;
-        }
 
         roll -= item_iter->chance;
     }
@@ -210,6 +206,19 @@ bool HasDiscoveredAllSpells(uint32 spellId, Player* player)
     return true;
 }
 
+bool HasDiscoveredAnySpell(uint32 spellId, Player* player)
+{
+    SkillDiscoveryMap::const_iterator tab = SkillDiscoveryStore.find(int32(spellId));
+    if (tab == SkillDiscoveryStore.end())
+        return false;
+
+    for (SkillDiscoveryList::const_iterator item_iter = tab->second.begin(); item_iter != tab->second.end(); ++item_iter)
+        if (player->HasSpell(item_iter->spellId))
+            return true;
+
+    return false;
+}
+
 uint32 GetSkillDiscoverySpell(uint32 skillId, uint32 spellId, Player* player)
 {
     uint32 skillvalue = skillId ? player->GetSkillValue(skillId) : uint32(0);
@@ -222,8 +231,8 @@ uint32 GetSkillDiscoverySpell(uint32 skillId, uint32 spellId, Player* player)
         for (SkillDiscoveryList::const_iterator item_iter = tab->second.begin(); item_iter != tab->second.end(); ++item_iter)
         {
             if (roll_chance_f(item_iter->chance * sWorld->getRate(RATE_SKILL_DISCOVERY)) &&
-                    item_iter->reqSkillValue <= skillvalue &&
-                    !player->HasSpell(item_iter->spellId))
+                item_iter->reqSkillValue <= skillvalue &&
+                !player->HasSpell(item_iter->spellId))
                 return item_iter->spellId;
         }
 
@@ -240,8 +249,8 @@ uint32 GetSkillDiscoverySpell(uint32 skillId, uint32 spellId, Player* player)
         for (SkillDiscoveryList::const_iterator item_iter = tab->second.begin(); item_iter != tab->second.end(); ++item_iter)
         {
             if (roll_chance_f(item_iter->chance * sWorld->getRate(RATE_SKILL_DISCOVERY)) &&
-                    item_iter->reqSkillValue <= skillvalue &&
-                    !player->HasSpell(item_iter->spellId))
+                item_iter->reqSkillValue <= skillvalue &&
+                !player->HasSpell(item_iter->spellId))
                 return item_iter->spellId;
         }
 

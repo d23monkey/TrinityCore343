@@ -1,375 +1,341 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "PassiveAI.h"
+/* ScriptData
+SDName: Boss_Prince_Keleseth
+SD%Complete: 100
+SDComment:
+SDCategory: Utgarde Keep
+EndScriptData */
+
+#include "ScriptMgr.h"
+#include "InstanceScript.h"
+#include "MotionMaster.h"
+#include "ObjectAccessor.h"
 #include "ScriptedCreature.h"
-#include "SpellAuraEffects.h"
+#include "SpellAuras.h"
 #include "SpellScript.h"
-#include "SpellScriptLoader.h"
 #include "utgarde_keep.h"
 
-enum eTexts
+enum KelsethEncounter
 {
-    SAY_START_COMBAT                    = 1,
-    SAY_FROST_TOMB                      = 3,
-    SAY_SUMMON_SKELETONS                = 2,
-    SAY_FROST_TOMB_EMOTE                = 4,
-    SAY_DEATH                           = 5,
-    SAY_KILL                            = 6,
-};
+    SPELL_SHADOWBOLT                         = 43667,
+    SPELL_FROST_TOMB                         = 48400,
+    SPELL_FROST_TOMB_STUN                    = 42672,
+    SPELL_FROST_TOMB_SUMMON                  = 42714,
 
-enum eNPCs
-{
-    NPC_FROST_TOMB                      = 23965,
-    NPC_SKELETON                        = 23970,
-};
+    SPELL_SHADOW_FISSURE                     = 50657,
+    SPELL_FULL_HEAL                          = 17683,
+    SPELL_DECREPIFY                          = 42702,
+    SPELL_BONE_ARMOR                         = 59386,
 
-enum eSpells
-{
-    SPELL_FROST_TOMB                    = 42672,
-    SPELL_FROST_TOMB_SUMMON             = 42714,
-    SPELL_FROST_TOMB_AURA               = 48400,
+    NPC_FROSTTOMB                            = 23965,
+    NPC_SKELETON                             = 23970,
 
-    SPELL_SHADOWBOLT_N                  = 43667,
-    SPELL_SHADOWBOLT_H                  = 59389,
-};
+    NPC_RUNEMAGE                             = 23960,
+    NPC_STRATEGIST                           = 23956,
 
-#define SPELL_SHADOWBOLT                DUNGEON_MODE(SPELL_SHADOWBOLT_N, SPELL_SHADOWBOLT_H)
+    SAY_START_COMBAT = 1,
+    SAY_SUMMON_SKELETONS,
+    SAY_FROST_TOMB,
+    SAY_FROST_TOMB_EMOTE,
+    SAY_DEATH,
 
-enum eEvents
-{
-    EVENT_SPELL_SHADOWBOLT = 1,
+    EVENT_SHADOWBOLT = 1,
     EVENT_FROST_TOMB,
     EVENT_SUMMON_SKELETONS,
+
+    EVENT_DECREPIFY,
+    EVENT_FULL_HEAL,
+    EVENT_SHADOW_FISSURE,
+    EVENT_RESURRECT,
+
+    DATA_ON_THE_ROCKS
 };
 
-class npc_frost_tomb : public CreatureScript
+#define SKELETONSPAWN_Z                          42.8668f
+
+float const SkeletonSpawnPoint[1][2] =
 {
-public:
-    npc_frost_tomb() : CreatureScript("npc_frost_tomb") { }
-
-    CreatureAI* GetAI(Creature* pCreature) const override
-    {
-        return GetUtgardeKeepAI<npc_frost_tombAI>(pCreature);
-    }
-
-    struct npc_frost_tombAI : public NullCreatureAI
-    {
-        npc_frost_tombAI(Creature* c) : NullCreatureAI(c)
-        {
-            if (TempSummon* t = c->ToTempSummon())
-                if (Unit* s = t->GetSummonerUnit())
-                {
-                    PrisonerGUID = s->GetGUID();
-                    if (me->GetInstanceScript() && me->GetInstanceScript()->instance->IsHeroic())
-                    {
-                        const int32 dmg = 2000;
-                        c->CastCustomSpell(s, SPELL_FROST_TOMB_AURA, nullptr, &dmg, nullptr, true);
-                    }
-                    else
-                        c->CastSpell(s, SPELL_FROST_TOMB_AURA, true);
-                }
-        }
-        ObjectGuid PrisonerGUID;
-
-        void JustDied(Unit* killer) override
-        {
-            if (killer && killer->GetGUID() != me->GetGUID())
-                if (InstanceScript* pInstance = me->GetInstanceScript())
-                    pInstance->SetData(DATA_ON_THE_ROCKS_ACHIEV, 0);
-
-            if (PrisonerGUID)
-                if (Unit* p = ObjectAccessor::GetUnit(*me, PrisonerGUID))
-                    p->RemoveAurasDueToSpell(SPELL_FROST_TOMB_AURA);
-            me->DespawnOrUnsummon(5000);
-        }
-
-        void UpdateAI(uint32  /*diff*/) override
-        {
-            if (PrisonerGUID)
-            {
-                if (Unit* p = ObjectAccessor::GetUnit(*me, PrisonerGUID))
-                {
-                    if (!p->HasAura(SPELL_FROST_TOMB_AURA))
-                        me->KillSelf();
-                }
-                else
-                    me->KillSelf();
-            }
-        }
-    };
+    {156.2559f, 259.2093f},
 };
 
-class boss_keleseth : public CreatureScript
-{
-public:
-    boss_keleseth() : CreatureScript("boss_keleseth") { }
+float AttackLoc[3]= {197.636f, 194.046f, 40.8164f};
 
-    CreatureAI* GetAI(Creature* pCreature) const override
+struct npc_frost_tomb : public ScriptedAI
+{
+    npc_frost_tomb(Creature* creature) : ScriptedAI(creature)
     {
-        return GetUtgardeKeepAI<boss_kelesethAI>(pCreature);
+        _instance = creature->GetInstanceScript();
     }
 
-    struct boss_kelesethAI : public ScriptedAI
+    void IsSummonedBy(WorldObject* summonerWO) override
     {
-        boss_kelesethAI(Creature* c) : ScriptedAI(c)
-        {
-            pInstance = c->GetInstanceScript();
-        }
+        Unit* summoner = summonerWO->ToUnit();
+        if (!summoner)
+            return;
+        DoCast(summoner, SPELL_FROST_TOMB, true);
+    }
 
-        InstanceScript* pInstance;
-        EventMap events;
+    void UpdateAI(uint32 /*diff*/) override { }
 
-        void Reset() override
-        {
-            events.Reset();
-            if (pInstance)
-                pInstance->SetData(DATA_KELESETH, NOT_STARTED);
-        }
+    void JustDied(Unit* /*killer*/) override
+    {
+        if (Creature* keleseth = ObjectAccessor::GetCreature(*me, _instance->GetGuidData(DATA_PRINCE_KELESETH)))
+            keleseth->AI()->SetData(DATA_ON_THE_ROCKS, false);
+    }
 
-        void KilledUnit(Unit* victim) override
+private:
+    InstanceScript* _instance;
+};
+
+struct boss_keleseth : public BossAI
+{
+    boss_keleseth(Creature* creature) : BossAI(creature, DATA_PRINCE_KELESETH)
+    {
+        Initialize();
+    }
+
+    void Initialize()
+    {
+        onTheRocks = true;
+    }
+
+    void Reset() override
+    {
+        _Reset();
+        events.ScheduleEvent(EVENT_SHADOWBOLT, 2s, 3s);
+        events.ScheduleEvent(EVENT_FROST_TOMB, 14s, 19s);
+        events.ScheduleEvent(EVENT_SUMMON_SKELETONS, 6s);
+
+        Initialize();
+    }
+
+    void JustEngagedWith(Unit* who) override
+    {
+        BossAI::JustEngagedWith(who);
+        Talk(SAY_START_COMBAT);
+
+        if (!who)
+            return;
+
+        std::list<Creature*> guards;
+        me->GetCreatureListWithEntryInGrid(guards, NPC_RUNEMAGE, 60.0f);
+        me->GetCreatureListWithEntryInGrid(guards, NPC_STRATEGIST, 60.0f);
+        if (!guards.empty())
         {
-            if (victim->IsPlayer())
+            for (std::list<Creature*>::iterator itr = guards.begin(); itr != guards.end(); ++itr)
             {
-                Talk(SAY_KILL);
+                if ((*itr)->IsAlive() && (*itr)->IsWithinLOSInMap(me))
+                    (*itr)->AI()->AttackStart(who);
             }
         }
+    }
 
-        void JustDied(Unit* /*killer*/) override
+    void JustDied(Unit* /*killer*/) override
+    {
+        _JustDied();
+        Talk(SAY_DEATH);
+    }
+
+    void SetData(uint32 data, uint32 value) override
+    {
+        if (data == DATA_ON_THE_ROCKS)
+            onTheRocks = value != 0;
+    }
+
+    uint32 GetData(uint32 data) const override
+    {
+        if (data == DATA_ON_THE_ROCKS)
+            return onTheRocks;
+
+        return 0;
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
         {
-            Talk(SAY_DEATH);
-            if (pInstance)
-                pInstance->SetData(DATA_KELESETH, DONE);
-        }
-
-        void JustEngagedWith(Unit* /*who*/) override
-        {
-            events.Reset();
-            events.RescheduleEvent(EVENT_SPELL_SHADOWBOLT, 0ms);
-            events.RescheduleEvent(EVENT_FROST_TOMB, 28s);
-            events.RescheduleEvent(EVENT_SUMMON_SKELETONS, 4s);
-
-            Talk(SAY_START_COMBAT);
-            DoZoneInCombat();
-
-            if (pInstance)
-                pInstance->SetData(DATA_KELESETH, IN_PROGRESS);
-        }
-
-        void AttackStart(Unit* who) override
-        {
-            if (!who)
-                return;
-
-            UnitAI::AttackStartCaster(who, 12.0f);
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
-
-            if (me->HasUnitState(UNIT_STATE_CASTING))
-                return;
-
-            switch (events.ExecuteEvent())
+            switch (eventId)
             {
-                case 0:
-                    break;
-                case EVENT_SPELL_SHADOWBOLT:
-                    me->CastSpell(me->GetVictim(), SPELL_SHADOWBOLT, false);
-                    events.Repeat(4s, 5s);
-                    break;
-                case EVENT_FROST_TOMB:
-                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 0.0f, true, true))
-                        if (!target->HasAura(SPELL_FROST_TOMB_AURA))
-                        {
-                            Talk(SAY_FROST_TOMB_EMOTE, target);
-                            Talk(SAY_FROST_TOMB);
-                            me->CastSpell(target, SPELL_FROST_TOMB, false);
-                            events.Repeat(15s);
-                            break;
-                        }
-                    events.Repeat(1s);
-                    break;
                 case EVENT_SUMMON_SKELETONS:
                     Talk(SAY_SUMMON_SKELETONS);
-                    for (uint8 i = 0; i < 5; ++i)
+                    SummonSkeletons();
+                    break;
+                case EVENT_SHADOWBOLT:
+                    DoCastVictim(SPELL_SHADOWBOLT);
+                    events.ScheduleEvent(EVENT_SHADOWBOLT, 2s, 3s);
+                    break;
+                case EVENT_FROST_TOMB:
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 100.0f, true, true, -SPELL_FROST_TOMB))
                     {
-                        float dist = rand_norm() * 4 + 3.0f;
-                        float angle = rand_norm() * 2 * M_PI;
-                        if (Creature* c = me->SummonCreature(NPC_SKELETON, 156.2f + cos(angle) * dist, 259.1f + std::sin(angle) * dist, 42.9f, 0, TEMPSUMMON_CORPSE_TIMED_DESPAWN, 20000))
-                            if (Unit* target = c->SelectNearestTarget(250.0f))
-                            {
-                                c->AddThreat(target, 5.0f);
-                                DoZoneInCombat(c);
-                            }
+                        Talk(SAY_FROST_TOMB);
+                        Talk(SAY_FROST_TOMB_EMOTE, target);
+
+                        DoCast(target, SPELL_FROST_TOMB_STUN, true);
+                        // checked from sniffs - the player casts the spell
+                        target->CastSpell(target, SPELL_FROST_TOMB_SUMMON, true);
                     }
+                    events.ScheduleEvent(EVENT_FROST_TOMB, 14s, 19s);
+                    break;
+                default:
                     break;
             }
-
-            DoMeleeAttackIfReady();
-        }
-    };
-};
-
-enum eSkeletonEnum
-{
-    SPELL_DECREPIFY                     = 42702,
-    SPELL_BONE_ARMOR                    = 59386,
-    SPELL_SCOURGE_RESURRECTION          = 42704,
-
-    EVENT_SPELL_DECREPIFY = 1,
-    EVENT_SPELL_BONE_ARMOR,
-    EVENT_RESURRECT,
-    EVENT_RESURRECT_2,
-};
-
-class npc_vrykul_skeleton : public CreatureScript
-{
-public:
-    npc_vrykul_skeleton() : CreatureScript("npc_vrykul_skeleton") { }
-
-    CreatureAI* GetAI(Creature* pCreature) const override
-    {
-        return GetUtgardeKeepAI<npc_vrykul_skeletonAI>(pCreature);
-    }
-
-    struct npc_vrykul_skeletonAI : public ScriptedAI
-    {
-        npc_vrykul_skeletonAI(Creature* c) : ScriptedAI(c)
-        {
-            pInstance = c->GetInstanceScript();
-        }
-
-        InstanceScript* pInstance;
-        EventMap events;
-
-        void Reset() override
-        {
-            events.Reset();
-            events.RescheduleEvent(EVENT_SPELL_DECREPIFY, 10s, 20s);
-            if (IsHeroic())
-                events.RescheduleEvent(EVENT_SPELL_BONE_ARMOR, 25s, 120s);
-        }
-
-        void DamageTaken(Unit*, uint32& damage, DamageEffectType, SpellSchoolMask) override
-        {
-            if (damage >= me->GetHealth())
-            {
-                damage = 0;
-                me->InterruptNonMeleeSpells(true);
-                me->RemoveAllAuras();
-                me->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                me->SetControlled(true, UNIT_STATE_ROOT);
-                me->GetMotionMaster()->MovementExpired();
-                me->GetMotionMaster()->MoveIdle();
-                me->StopMoving();
-                me->SetStandState(UNIT_STAND_STATE_DEAD);
-                me->SetUnitFlag(UNIT_FLAG_PREVENT_EMOTES_FROM_CHAT_TEXT);
-                me->SetUnitFlag2(UNIT_FLAG2_FEIGN_DEATH);
-                me->SetDynamicFlag(UNIT_DYNFLAG_DEAD);
-                events.RescheduleEvent(EVENT_RESURRECT, 12s);
-            }
-        }
-
-        void UpdateAI(uint32 diff) override
-        {
-            if (pInstance && pInstance->GetData(DATA_KELESETH) != IN_PROGRESS )
-            {
-                if (me->IsAlive())
-                    me->KillSelf();
-                return;
-            }
-
-            if (!UpdateVictim())
-                return;
-
-            events.Update(diff);
 
             if (me->HasUnitState(UNIT_STATE_CASTING))
                 return;
+        }
+    }
 
-            switch (events.ExecuteEvent())
+    void SummonSkeletons()
+    {
+        // I could not found any spell cast for this
+        for (uint8 i = 0; i < 4; ++i)
+            me->SummonCreature(NPC_SKELETON, SkeletonSpawnPoint[0][0], SkeletonSpawnPoint[0][1], SKELETONSPAWN_Z, 0);
+    }
+
+private:
+    bool onTheRocks;
+};
+
+struct npc_vrykul_skeleton : public ScriptedAI
+{
+    npc_vrykul_skeleton(Creature* creature) : ScriptedAI(creature) { }
+
+    void Reset() override
+    {
+        events.Reset();
+        events.ScheduleEvent(EVENT_DECREPIFY, 4s, 6s);
+    }
+
+    void DamageTaken(Unit* /*attacker*/, uint32& damage, DamageEffectType /*damageType*/, SpellInfo const* /*spellInfo = nullptr*/) override
+    {
+        if (damage >= me->GetHealth())
+        {
+            damage = 0;
+
+            // There are some issues with pets
+            // they will still attack. I would say it is a PetAI bug
+            if (!me->IsUninteractible())
             {
-                case 0:
-                    break;
-                case EVENT_SPELL_DECREPIFY:
-                    if (!me->HasUnitFlag(UNIT_FLAG_NON_ATTACKABLE))
-                        me->CastSpell(me->GetVictim(), SPELL_DECREPIFY, false);
-                    events.Repeat(15s, 25s);
-                    break;
-                case EVENT_SPELL_BONE_ARMOR:
-                    if (!me->HasUnitFlag(UNIT_FLAG_NON_ATTACKABLE))
-                        me->CastSpell((Unit*)nullptr, SPELL_BONE_ARMOR, false);
-                    events.Repeat(40s, 120s);
+                // from sniffs
+                me->SetUninteractible(true);
+                me->SetCanMelee(false);
+                me->SetStandState(UNIT_STAND_STATE_DEAD);
+
+                events.Reset();
+                events.ScheduleEvent(EVENT_RESURRECT, 18s, 22s);
+
+                me->GetMotionMaster()->Clear();
+                me->GetMotionMaster()->MoveIdle();
+            }
+        }
+    }
+
+    void UpdateAI(uint32 diff) override
+    {
+        if (!UpdateVictim())
+            return;
+
+        events.Update(diff);
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_DECREPIFY:
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 0.0f, true, true, -SPELL_DECREPIFY))
+                        DoCast(target, SPELL_DECREPIFY);
+                    events.ScheduleEvent(EVENT_DECREPIFY, 1s, 5s);
                     break;
                 case EVENT_RESURRECT:
-                    events.DelayEvents(3500ms);
-                    DoCast(me, SPELL_SCOURGE_RESURRECTION, true);
-                    me->SetStandState(UNIT_STAND_STATE_STAND);
-                    me->RemoveUnitFlag(UNIT_FLAG_PREVENT_EMOTES_FROM_CHAT_TEXT);
-                    me->RemoveUnitFlag2(UNIT_FLAG2_FEIGN_DEATH);
-                    me->RemoveDynamicFlag(UNIT_DYNFLAG_DEAD);
-                    events.RescheduleEvent(EVENT_RESURRECT_2, 3s);
+                    events.ScheduleEvent(EVENT_FULL_HEAL, 1s);
+                    events.ScheduleEvent(EVENT_SHADOW_FISSURE, 1s);
                     break;
-                case EVENT_RESURRECT_2:
-                    me->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                    me->SetControlled(false, UNIT_STATE_ROOT);
+                case EVENT_FULL_HEAL:
+                    DoCast(me, SPELL_FULL_HEAL, true);
+                    break;
+                case EVENT_SHADOW_FISSURE:
+                    DoCast(me, SPELL_SHADOW_FISSURE, true);
+                    DoCastAOE(SPELL_BONE_ARMOR, true);
+                    me->SetUninteractible(false);
+                    me->SetCanMelee(true);
+                    me->SetStandState(UNIT_STAND_STATE_STAND);
                     me->GetMotionMaster()->MoveChase(me->GetVictim());
+                    events.ScheduleEvent(EVENT_DECREPIFY, 4s, 6s);
+                    break;
+                default:
                     break;
             }
 
-            if (!me->HasUnitFlag(UNIT_FLAG_NON_ATTACKABLE))
-                DoMeleeAttackIfReady();
+            if (me->HasUnitState(UNIT_STATE_CASTING))
+                return;
         }
-    };
-};
-
-class spell_frost_tomb_aura : public AuraScript
-{
-    PrepareAuraScript(spell_frost_tomb_aura);
-
-    bool Validate(SpellInfo const* /*spellInfo*/) override
-    {
-        return ValidateSpellInfo({ SPELL_FROST_TOMB_SUMMON });
     }
 
-    void HandleEffectPeriodic(AuraEffect const* aurEff)
+private:
+    EventMap events;
+};
+
+// 48400 - Frost Tomb
+class spell_frost_tomb : public AuraScript
+{
+    void OnRemove(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
     {
-        PreventDefaultAction();
-        if (aurEff->GetTickNumber() == 1)
-            if (Unit* target = GetTarget())
-                target->CastSpell((Unit*)nullptr, SPELL_FROST_TOMB_SUMMON, true);
+        if (GetTargetApplication()->GetRemoveMode() != AURA_REMOVE_BY_DEATH)
+            if (Unit* caster = GetCaster())
+                if (caster->IsAlive())
+                    if (Creature* creature = caster->ToCreature())
+                        creature->DespawnOrUnsummon(1s);
     }
 
     void Register() override
     {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_frost_tomb_aura::HandleEffectPeriodic, EFFECT_1, SPELL_AURA_PERIODIC_DUMMY);
+         AfterEffectRemove += AuraEffectRemoveFn(spell_frost_tomb::OnRemove, EFFECT_0, SPELL_AURA_MOD_STUN, AURA_EFFECT_HANDLE_REAL);
     }
+};
+
+class achievement_on_the_rocks : public AchievementCriteriaScript
+{
+    public:
+        achievement_on_the_rocks() : AchievementCriteriaScript("achievement_on_the_rocks") { }
+
+        bool OnCheck(Player* /*source*/, Unit* target) override
+        {
+            return target && target->GetAI() && target->GetAI()->GetData(DATA_ON_THE_ROCKS);
+        }
 };
 
 void AddSC_boss_keleseth()
 {
-    new boss_keleseth();
-    new npc_frost_tomb();
-    new npc_vrykul_skeleton();
-    RegisterSpellScript(spell_frost_tomb_aura);
+    RegisterUtgardeKeepCreatureAI(boss_keleseth);
+    RegisterUtgardeKeepCreatureAI(npc_frost_tomb);
+    RegisterUtgardeKeepCreatureAI(npc_vrykul_skeleton);
+    RegisterSpellScript(spell_frost_tomb);
+    new achievement_on_the_rocks();
 }

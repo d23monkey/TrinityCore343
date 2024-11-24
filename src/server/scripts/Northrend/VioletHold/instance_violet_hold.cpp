@@ -1,676 +1,953 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "CreatureScript.h"
-#include "InstanceMapScript.h"
-#include "Player.h"
-#include "ScriptedCreature.h"
 #include "violet_hold.h"
+#include "Creature.h"
+#include "CreatureAI.h"
+#include "GameObject.h"
+#include "InstanceScript.h"
+#include "Map.h"
+#include "MotionMaster.h"
+#include "Player.h"
+#include "TaskScheduler.h"
+#include "ScriptMgr.h"
+#include "TemporarySummon.h"
 
-enum vYells
+/*
+ * TODO:
+ * - replace bosses by dummy npcs also after grid unload
+ */
+
+Position const DefenseSystemLocation  = { 1888.146f, 803.382f,  58.60389f, 3.071779f }; // sniff
+
+Position const CyanigosaSpawnLocation = { 1922.109f, 804.4493f, 52.49254f, 3.176499f }; // sniff
+Position const CyanigosaJumpLocation  = { 1888.32f,  804.473f,  38.3578f,  0.0f      }; // sniff
+
+Position const SaboteurSpawnLocation  = { 1886.251f, 803.0743f, 38.42326f, 3.211406f }; // sniff
+
+uint32 const PortalPositionsSize = 5;
+Position const PortalPositions[PortalPositionsSize] = // sniff
 {
-    CYANIGOSA_SAY_SPAWN       = 3,
-    SAY_SINCLARI_LEAVING      = 0,
-    SAY_SINCLARI_DOOR_LOCK    = 1,
-    SAY_SINCLARI_COMPLETE     = 2,
+    { 1877.523f, 850.1788f, 45.36822f, 4.34587f   }, // 0
+    { 1890.679f, 753.4202f, 48.771f,   1.675516f  }, // 1
+    { 1936.09f,  803.1875f, 54.09715f, 3.054326f  }, // 2
+    { 1858.243f, 770.2379f, 40.42146f, 0.9075712f }, // 3
+    { 1907.288f, 831.1111f, 40.22015f, 3.560472f  }  // 4
+};
+
+uint32 const PortalElitePositionsSize = 3;
+Position const PortalElitePositions[PortalElitePositionsSize] = // sniff
+{
+    { 1911.281f, 800.9722f, 39.91673f, 3.01942f  }, // 5
+    { 1926.516f, 763.6616f, 52.35725f, 2.251475f }, // 6
+    { 1922.464f, 847.0699f, 48.50161f, 3.961897f }  // 7
+};
+
+uint32 const PortalIntroPositionsSize = 5;
+Position const PortalIntroPositions[PortalIntroPositionsSize] = // sniff
+{
+    { 1877.51f,  850.1042f, 44.65989f, 4.782202f }, // 0 - Intro
+    { 1890.637f, 753.4705f, 48.72239f, 1.710423f }, // 1 - Intro
+    { 1936.073f, 803.1979f, 53.37491f, 3.124139f }, // 2 - Intro
+    { 1886.545f, 803.2014f, 40.40931f, 3.159046f }, // 3 - Boss 1/2
+    { 1924.096f, 804.3707f, 54.29256f, 3.228859f }  // 4 - Boss 3
+};
+
+uint32 const EncouterPortalsCount = PortalPositionsSize + PortalElitePositionsSize;
+
+uint32 const MoraggPathSize = 3;
+Position const MoraggPath[MoraggPathSize] = // sniff
+{
+    { 1893.895f, 728.1261f, 47.75016f },
+    { 1892.997f, 738.4987f, 47.66684f },
+    { 1889.76f,  758.1089f, 47.66684f }
+};
+
+uint32 const ErekemPathSize = 3;
+Position const ErekemPath[ErekemPathSize] = // sniff
+{
+    { 1871.456f, 871.0361f, 43.41524f },
+    { 1874.948f, 859.5452f, 43.33349f },
+    { 1877.245f, 851.967f,  43.3335f  }
+};
+
+uint32 const ErekemGuardLeftPathSize = 3;
+Position const ErekemGuardLeftPath[ErekemGuardLeftPathSize] = // sniff
+{
+    { 1853.752f, 862.4528f, 43.41614f },
+    { 1866.931f, 854.577f,  43.3335f  },
+    { 1872.973f, 850.7875f, 43.3335f  }
+};
+
+uint32 const ErekemGuardRightPathSize = 3;
+Position const ErekemGuardRightPath[ErekemGuardRightPathSize] = // sniff
+{
+    { 1892.418f, 872.2831f, 43.41563f },
+    { 1885.639f, 859.0245f, 43.3335f  },
+    { 1882.432f, 852.2423f, 43.3335f  }
+};
+
+uint32 const IchoronPathSize = 5;
+Position const IchoronPath[IchoronPathSize] = // sniff
+{
+    { 1942.041f, 749.5228f, 30.95229f },
+    { 1930.571f, 762.9065f, 31.98814f },
+    { 1923.657f, 770.6718f, 34.07256f },
+    { 1910.631f, 784.4096f, 37.09015f },
+    { 1906.595f, 788.3828f, 37.99429f }
+};
+
+uint32 const LavanthorPathSize = 3;
+Position const LavanthorPath[LavanthorPathSize] = // sniff
+{
+    { 1844.557f, 748.7083f, 38.74205f },
+    { 1854.618f, 761.5295f, 38.65631f },
+    { 1862.17f,  773.2255f, 38.74879f }
+};
+
+uint32 const XevozzPathSize = 3;
+Position const XevozzPath[XevozzPathSize] = // sniff
+{
+    { 1908.417f, 845.8502f, 38.71947f },
+    { 1905.557f, 841.3157f, 38.65529f },
+    { 1899.453f, 832.533f,  38.70752f }
+};
+
+uint32 const ZuramatPathSize = 3;
+Position const ZuramatPath[ZuramatPathSize] = // sniff
+{
+    { 1934.151f, 860.9463f, 47.29499f },
+    { 1927.085f, 852.1342f, 47.19214f },
+    { 1923.226f, 847.3297f, 47.15541f }
+};
+
+enum Yells
+{
+    SAY_CYANIGOSA_SPAWN                         = 3,
+    SAY_XEVOZZ_SPAWN                            = 3,
+    SAY_EREKEM_SPAWN                            = 3,
+    SAY_ICHORON_SPAWN                           = 3,
+    SAY_ZURAMAT_SPAWN                           = 3,
+
+    SOUND_MORAGG_SPAWN                          = 10112
+};
+
+enum Spells
+{
+    SPELL_CYANIGOSA_TRANSFORM                   = 58668,
+    SPELL_CYANIGOSA_ARCANE_POWER_STATE          = 49411,
+    SPELL_MORAGG_EMOTE_ROAR                     = 48350,
+    SPELL_LAVANTHOR_SPECIAL_UNARMED             = 33334,
+    SPELL_ZURAMAT_COSMETIC_CHANNEL_OMNI         = 57552
+};
+
+ObjectData const creatureData[] =
+{
+    { NPC_XEVOZZ,           DATA_XEVOZZ           },
+    { NPC_LAVANTHOR,        DATA_LAVANTHOR        },
+    { NPC_ICHORON,          DATA_ICHORON          },
+    { NPC_ZURAMAT,          DATA_ZURAMAT          },
+    { NPC_EREKEM,           DATA_EREKEM           },
+    { NPC_MORAGG,           DATA_MORAGG           },
+    { NPC_CYANIGOSA,        DATA_CYANIGOSA        },
+    { NPC_SINCLARI,         DATA_SINCLARI         },
+    { NPC_SINCLARI_TRIGGER, DATA_SINCLARI_TRIGGER },
+    { 0,                    0                     } // END
+};
+
+ObjectData const gameObjectData[] =
+{
+    { GO_EREKEM_GUARD_1_DOOR, DATA_EREKEM_LEFT_GUARD_CELL  },
+    { GO_EREKEM_GUARD_2_DOOR, DATA_EREKEM_RIGHT_GUARD_CELL },
+    { GO_EREKEM_DOOR,         DATA_EREKEM_CELL             },
+    { GO_ZURAMAT_DOOR,        DATA_ZURAMAT_CELL            },
+    { GO_LAVANTHOR_DOOR,      DATA_LAVANTHOR_CELL          },
+    { GO_MORAGG_DOOR,         DATA_MORAGG_CELL             },
+    { GO_ICHORON_DOOR,        DATA_ICHORON_CELL            },
+    { GO_XEVOZZ_DOOR,         DATA_XEVOZZ_CELL             },
+    { GO_MAIN_DOOR,           DATA_MAIN_DOOR               },
+    { 0,                      0                            } // END
+};
+
+MinionData const minionData[] =
+{
+    { NPC_EREKEM_GUARD, DATA_EREKEM },
+    { 0,                0           } // END
+};
+
+DungeonEncounterData const encounters[] =
+{
+    { DATA_1ST_BOSS, {{ 2019 }} },
+    { DATA_2ND_BOSS, {{ 2018 }} },
+    { DATA_CYANIGOSA, {{ 2020 }} }
 };
 
 class instance_violet_hold : public InstanceMapScript
 {
-public:
-    instance_violet_hold() : InstanceMapScript("instance_violet_hold", 608) { }
+    public:
+        instance_violet_hold() : InstanceMapScript(VioletHoldScriptName, 608) { }
 
-    InstanceScript* GetInstanceScript(InstanceMap* pMap) const override
-    {
-        return new instance_violet_hold_InstanceMapScript(pMap);
-    }
-
-    struct instance_violet_hold_InstanceMapScript : public InstanceScript
-    {
-        instance_violet_hold_InstanceMapScript(Map* pMap) : InstanceScript(pMap) {}
-
-        uint32 m_auiEncounter[MAX_ENCOUNTER];
-        bool CLEANED;
-        uint8 EncounterStatus;
-        uint32 uiFirstBoss, uiSecondBoss;
-        std::string str_data;
-        EventMap events;
-        uint8 GateHealth;
-        uint8 WaveCount;
-        uint8 PortalLocation;
-        bool bAchiev;
-        bool bDefensesUsed;
-
-        GuidVector GO_ActivationCrystalGUID;
-        ObjectGuid GO_MainGateGUID;
-
-        ObjectGuid GO_MoraggCellGUID;
-        ObjectGuid GO_ErekemCellGUID;
-        ObjectGuid GO_ErekemRightGuardCellGUID;
-        ObjectGuid GO_ErekemLeftGuardCellGUID;
-        ObjectGuid GO_IchoronCellGUID;
-        ObjectGuid GO_LavanthorCellGUID;
-        ObjectGuid GO_XevozzCellGUID;
-        ObjectGuid GO_ZuramatCellGUID;
-
-        GuidSet trashMobs;
-        ObjectGuid NPC_SinclariGUID;
-        ObjectGuid NPC_GuardGUID[4];
-        ObjectGuid NPC_PortalGUID;
-        ObjectGuid NPC_DoorSealGUID;
-
-        ObjectGuid NPC_MoraggGUID;
-        ObjectGuid NPC_ErekemGUID;
-        ObjectGuid NPC_ErekemGuardGUID[2];
-        ObjectGuid NPC_IchoronGUID;
-        ObjectGuid NPC_LavanthorGUID;
-        ObjectGuid NPC_XevozzGUID;
-        ObjectGuid NPC_ZuramatGUID;
-        ObjectGuid NPC_CyanigosaGUID;
-
-        void Initialize() override
+        struct instance_violet_hold_InstanceMapScript : public InstanceScript
         {
-            SetHeaders(DataHeader);
-            memset(&m_auiEncounter, 0, sizeof(m_auiEncounter));
-            CLEANED = false;
-            EncounterStatus = NOT_STARTED;
-            uiFirstBoss = 0;
-            uiSecondBoss = 0;
-            events.Reset();
-            events.RescheduleEvent(EVENT_CHECK_PLAYERS, 0);
-            GateHealth = 100;
-            WaveCount = 0;
-            PortalLocation = 0;
-            bDefensesUsed = false;
-
-            GO_ActivationCrystalGUID.clear();
-        }
-
-        bool IsEncounterInProgress() const override
-        {
-            return false;
-        }
-
-        void OnCreatureCreate(Creature* creature) override
-        {
-            switch (creature->GetEntry())
+            instance_violet_hold_InstanceMapScript(InstanceMap* map) : InstanceScript(map),
+                FirstBossId(*this, "FirstBossId", 0),
+                SecondBossId(*this, "SecondBossId", 0)
             {
-                case NPC_SINCLARI:
-                    NPC_SinclariGUID = creature->GetGUID();
-                    break;
-                case NPC_VIOLET_HOLD_GUARD:
-                    for (uint8 i = 0; i < 4; ++i)
-                        if (!NPC_GuardGUID[i])
-                        {
-                            NPC_GuardGUID[i] = creature->GetGUID();
-                            break;
-                        }
-                    break;
-                case NPC_DEFENSE_DUMMY_TARGET:
-                    creature->ApplySpellImmune(0, IMMUNITY_ID, SPELL_ARCANE_LIGHTNING, true);
-                    break;
-                case NPC_TELEPORTATION_PORTAL:
-                    NPC_PortalGUID = creature->GetGUID();
-                    break;
-                case NPC_PRISON_DOOR_SEAL:
-                    NPC_DoorSealGUID = creature->GetGUID();
-                    break;
-                // BOSSES BELOW:
-                case NPC_XEVOZZ:
-                    NPC_XevozzGUID = creature->GetGUID();
-                    break;
-                case NPC_LAVANTHOR:
-                    NPC_LavanthorGUID = creature->GetGUID();
-                    break;
-                case NPC_ICHORON:
-                    NPC_IchoronGUID = creature->GetGUID();
-                    break;
-                case NPC_ZURAMAT:
-                    NPC_ZuramatGUID = creature->GetGUID();
-                    break;
-                case NPC_EREKEM:
-                    NPC_ErekemGUID = creature->GetGUID();
-                    break;
-                case NPC_EREKEM_GUARD:
-                    if (!NPC_ErekemGuardGUID[0])
-                        NPC_ErekemGuardGUID[0] = creature->GetGUID();
-                    else
-                        NPC_ErekemGuardGUID[1] = creature->GetGUID();
-                    break;
-                case NPC_MORAGG:
-                    NPC_MoraggGUID = creature->GetGUID();
-                    break;
-                case NPC_CYANIGOSA:
-                    NPC_CyanigosaGUID = creature->GetGUID();
-                    break;
-            }
-        }
+                SetHeaders(DataHeader);
+                SetBossNumber(EncounterCount);
+                LoadObjectData(creatureData, gameObjectData);
+                LoadMinionData(minionData);
+                LoadDungeonEncounterData(encounters);
 
-        void OnGameObjectCreate(GameObject* go) override
-        {
-            switch (go->GetEntry())
-            {
-                case GO_ACTIVATION_CRYSTAL:
-                    HandleGameObject(ObjectGuid::Empty, false, go); // make go not used yet
-                    go->SetGameObjectFlag(GO_FLAG_NOT_SELECTABLE); // not useable at the beginning
-                    GO_ActivationCrystalGUID.push_back(go->GetGUID());
-                    break;
-                case GO_MAIN_DOOR:
-                    GO_MainGateGUID = go->GetGUID();
-                    break;
-                // BOSS GATES BELOW:
-                case GO_EREKEM_GUARD_1_DOOR:
-                    GO_ErekemLeftGuardCellGUID = go->GetGUID();
-                    break;
-                case GO_EREKEM_GUARD_2_DOOR:
-                    GO_ErekemRightGuardCellGUID = go->GetGUID();
-                    break;
-                case GO_EREKEM_DOOR:
-                    GO_ErekemCellGUID = go->GetGUID();
-                    break;
-                case GO_ZURAMAT_DOOR:
-                    GO_ZuramatCellGUID = go->GetGUID();
-                    break;
-                case GO_LAVANTHOR_DOOR:
-                    GO_LavanthorCellGUID = go->GetGUID();
-                    break;
-                case GO_MORAGG_DOOR:
-                    GO_MoraggCellGUID = go->GetGUID();
-                    break;
-                case GO_ICHORON_DOOR:
-                    GO_IchoronCellGUID = go->GetGUID();
-                    break;
-                case GO_XEVOZZ_DOOR:
-                    GO_XevozzCellGUID = go->GetGUID();
-                    break;
-            }
-        }
+                DoorIntegrity       = 100;
+                WaveCount           = 0;
+                EventState          = NOT_STARTED;
 
-        void SetData(uint32 type, uint32 data) override
-        {
-            switch (type)
-            {
-                case DATA_ACTIVATE_DEFENSE_SYSTEM:
-                    {
-                        if (data)
-                            bDefensesUsed = true;
-                        const Position pos = {1919.09546f, 812.29724f, 86.2905f, M_PI};
-                        instance->SummonCreature(NPC_DEFENSE_SYSTEM, pos, 0, 6499);
-                    }
-                    break;
-                case DATA_START_INSTANCE:
-                    if (EncounterStatus == NOT_STARTED)
-                    {
-                        EncounterStatus = IN_PROGRESS;
-                        if (Creature* c = instance->GetCreature(NPC_SinclariGUID))
-                            c->AI()->Talk(SAY_SINCLARI_LEAVING);
-                        events.RescheduleEvent(EVENT_GUARDS_FALL_BACK, 4s);
-                    }
-                    break;
-                case DATA_PORTAL_DEFEATED:
-                    events.RescheduleEvent(EVENT_SUMMON_PORTAL, 3s);
-                    break;
-                case DATA_PORTAL_LOCATION:
-                    PortalLocation = data;
-                    break;
-                case DATA_DECRASE_DOOR_HEALTH:
-                    if (GateHealth > 0)
-                        --GateHealth;
-                    if (GateHealth == 0)
-                    {
-                        CLEANED = false;
-                        InstanceCleanup();
-                    }
-                    DoUpdateWorldState(WORLD_STATE_VH_PRISON_STATE, (uint32)GateHealth);
-                    break;
-                case DATA_RELEASE_BOSS:
-                    if (WaveCount == 6)
-                        StartBossEncounter(uiFirstBoss);
-                    else
-                        StartBossEncounter(uiSecondBoss);
-                    break;
-                case DATA_BOSS_DIED:
-                    if (WaveCount == 6)
-                        m_auiEncounter[0] = DONE;
-                    else if (WaveCount == 12)
-                        m_auiEncounter[1] = DONE;
-                    else if (WaveCount == 18)
-                    {
-                        m_auiEncounter[2] = DONE;
-                        EncounterStatus = DONE;
-                        HandleGameObject(GO_MainGateGUID, true);
-                        DoUpdateWorldState(WORLD_STATE_VH_SHOW, 0);
-                        if (Creature* c = instance->GetCreature(NPC_SinclariGUID))
-                        {
-                            c->AI()->Talk(SAY_SINCLARI_COMPLETE);
-                            c->DespawnOrUnsummon();
-                            c->SetRespawnTime(3);
-                        }
-                    }
-                    SaveToDB();
-                    if (WaveCount < 18)
-                        events.RescheduleEvent(EVENT_SUMMON_PORTAL, 35s);
-                    break;
-                case DATA_FAILED:
-                    CLEANED = false;
-                    InstanceCleanup();
-                    break;
-                case DATA_ACHIEV:
-                    bAchiev = !!data;
-                    break;
-            }
-        }
+                LastPortalLocation  = urand(0, EncouterPortalsCount - 1);
 
-        void SetGuidData(uint32 type, ObjectGuid data) override
-        {
-            switch (type)
-            {
-                case DATA_ADD_TRASH_MOB:
-                    trashMobs.insert(data);
-                    break;
-                case DATA_DELETE_TRASH_MOB:
-                    if (!CLEANED)
-                        trashMobs.erase(data);
-                    break;
-            }
-        }
-
-        uint32 GetData(uint32 type) const override
-        {
-            switch (type)
-            {
-                case DATA_ENCOUNTER_STATUS:
-                    return (uint32)EncounterStatus;
-                case DATA_WAVE_COUNT:
-                    return (uint32)WaveCount;
-                case DATA_PORTAL_LOCATION:
-                    return PortalLocation;
-                case DATA_FIRST_BOSS_NUMBER:
-                    return uiFirstBoss;
-                case DATA_SECOND_BOSS_NUMBER:
-                    return uiSecondBoss;
+                Defenseless         = true;
             }
 
-            return 0;
-        }
-
-        ObjectGuid GetGuidData(uint32 identifier) const override
-        {
-            switch (identifier)
+            void OnCreatureCreate(Creature* creature) override
             {
-                case DATA_TELEPORTATION_PORTAL_GUID:
-                    return NPC_PortalGUID;
-                case DATA_DOOR_SEAL_GUID:
-                    return NPC_DoorSealGUID;
-                case DATA_EREKEM_GUID:
-                    return NPC_ErekemGUID;
-                case DATA_EREKEM_GUARD_1_GUID:
-                    return NPC_ErekemGuardGUID[0];
-                case DATA_EREKEM_GUARD_2_GUID:
-                    return NPC_ErekemGuardGUID[1];
-                case DATA_ICHORON_GUID:
-                    return NPC_IchoronGUID;
-            }
+                InstanceScript::OnCreatureCreate(creature);
 
-            return ObjectGuid::Empty;
-        }
-
-        void StartBossEncounter(uint8 uiBoss)
-        {
-            Creature* pBoss = nullptr;
-
-            switch (uiBoss)
-            {
-                case BOSS_MORAGG:
-                    HandleGameObject(GO_MoraggCellGUID, true);
-                    pBoss = instance->GetCreature(NPC_MoraggGUID);
-                    if (pBoss)
-                        pBoss->GetMotionMaster()->MovePoint(0, BossStartMove1);
-                    break;
-                case BOSS_EREKEM:
-                    HandleGameObject(GO_ErekemCellGUID, true);
-                    HandleGameObject(GO_ErekemRightGuardCellGUID, true);
-                    HandleGameObject(GO_ErekemLeftGuardCellGUID, true);
-                    pBoss = instance->GetCreature(NPC_ErekemGUID);
-                    if (pBoss)
-                        pBoss->GetMotionMaster()->MovePoint(0, BossStartMove2);
-                    if (Creature* pGuard1 = instance->GetCreature(NPC_ErekemGuardGUID[0]))
-                    {
-                        pGuard1->RemoveUnitMovementFlag(MOVEMENTFLAG_WALKING);
-                        pGuard1->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                        pGuard1->SetImmuneToNPC(false);
-                        pGuard1->GetMotionMaster()->MovePoint(0, BossStartMove21);
-                    }
-                    if (Creature* pGuard2 = instance->GetCreature(NPC_ErekemGuardGUID[1]))
-                    {
-                        pGuard2->RemoveUnitMovementFlag(MOVEMENTFLAG_WALKING);
-                        pGuard2->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                        pGuard2->SetImmuneToNPC(false);
-                        pGuard2->GetMotionMaster()->MovePoint(0, BossStartMove22);
-                    }
-                    break;
-                case BOSS_ICHORON:
-                    HandleGameObject(GO_IchoronCellGUID, true);
-                    pBoss = instance->GetCreature(NPC_IchoronGUID);
-                    if (pBoss)
-                        pBoss->GetMotionMaster()->MovePoint(0, BossStartMove3);
-                    break;
-                case BOSS_LAVANTHOR:
-                    HandleGameObject(GO_LavanthorCellGUID, true);
-                    pBoss = instance->GetCreature(NPC_LavanthorGUID);
-                    if (pBoss)
-                        pBoss->GetMotionMaster()->MovePoint(0, BossStartMove4);
-                    break;
-                case BOSS_XEVOZZ:
-                    HandleGameObject(GO_XevozzCellGUID, true);
-                    pBoss = instance->GetCreature(NPC_XevozzGUID);
-                    if (pBoss)
-                        pBoss->GetMotionMaster()->MovePoint(0, BossStartMove5);
-                    break;
-                case BOSS_ZURAMAT:
-                    HandleGameObject(GO_ZuramatCellGUID, true);
-                    pBoss = instance->GetCreature(NPC_ZuramatGUID);
-                    if (pBoss)
-                        pBoss->GetMotionMaster()->MovePoint(0, BossStartMove6);
-                    break;
-            }
-
-            if (pBoss)
-            {
-                pBoss->RemoveUnitMovementFlag(MOVEMENTFLAG_WALKING);
-                pBoss->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                pBoss->SetImmuneToNPC(false);
-                pBoss->SetReactState(REACT_AGGRESSIVE);
-                if ((WaveCount == 6 && m_auiEncounter[0] == DONE) || (WaveCount == 12 && m_auiEncounter[1] == DONE))
-                    pBoss->SetLootMode(0);
-            }
-        }
-
-        void Update(uint32 diff) override
-        {
-            events.Update(diff);
-            switch (events.ExecuteEvent())
-            {
-                case 0:
-                    break;
-                case EVENT_CHECK_PLAYERS:
-                    {
-                        if (DoNeedCleanup(false))
-                            InstanceCleanup();
-                        events.Repeat(5s);
-                    }
-                    break;
-                case EVENT_GUARDS_FALL_BACK:
-                    {
-                        for (uint8 i = 0; i < 4; ++i)
-                            if (Creature* c = instance->GetCreature(NPC_GuardGUID[i]))
-                            {
-                                c->SetReactState(REACT_PASSIVE);
-                                c->CombatStop();
-                                c->RemoveUnitMovementFlag(MOVEMENTFLAG_WALKING);
-                                c->GetMotionMaster()->MovePoint(0, guardMovePosition);
-                            }
-                        events.RescheduleEvent(EVENT_GUARDS_DISAPPEAR, 5s);
-                    }
-                    break;
-                case EVENT_GUARDS_DISAPPEAR:
-                    {
-                        for (uint8 i = 0; i < 4; ++i)
-                            if (Creature* c = instance->GetCreature(NPC_GuardGUID[i]))
-                                c->SetVisible(false);
-                        events.RescheduleEvent(EVENT_SINCLARI_FALL_BACK, 2s);
-                    }
-                    break;
-                case EVENT_SINCLARI_FALL_BACK:
-                    {
-                        if (Creature* c = instance->GetCreature(NPC_SinclariGUID))
-                        {
-                            c->RemoveUnitMovementFlag(MOVEMENTFLAG_WALKING);
-                            c->GetMotionMaster()->MovePoint(0, sinclariOutsidePosition);
-                        }
-                        SetData(DATA_ACTIVATE_DEFENSE_SYSTEM, 0);
-                        events.RescheduleEvent(EVENT_START_ENCOUNTER, 4s);
-                    }
-                    break;
-                case EVENT_START_ENCOUNTER:
-                    {
-                        if (Creature* c = instance->GetCreature(NPC_SinclariGUID))
-                        {
-                            c->AI()->Talk(SAY_SINCLARI_DOOR_LOCK);
-                        }
-                        if (Creature* c = instance->GetCreature(NPC_DoorSealGUID))
-                        {
-                            c->RemoveAllAuras(); // just to be sure...
-                        }
-                        GateHealth = 100;
-                        HandleGameObject(GO_MainGateGUID, false);
-                        DoUpdateWorldState(WORLD_STATE_VH_SHOW, 1);
-                        DoUpdateWorldState(WORLD_STATE_VH_PRISON_STATE, (uint32)GateHealth);
-                        DoUpdateWorldState(WORLD_STATE_VH_WAVE_COUNT, (uint32)WaveCount);
-
-                        for (ObjectGuid const& guid : GO_ActivationCrystalGUID)
-                            if (GameObject* go = instance->GetGameObject(guid))
-                            {
-                                HandleGameObject(ObjectGuid::Empty, false, go); // not used yet
-                                go->RemoveGameObjectFlag(GO_FLAG_NOT_SELECTABLE); // make it useable
-                            }
-                        events.RescheduleEvent(EVENT_SUMMON_PORTAL, 4s);
-                    }
-                    break;
-                case EVENT_SUMMON_PORTAL:
-                    ++WaveCount;
-                    DoUpdateWorldState(WORLD_STATE_VH_WAVE_COUNT, (uint32)WaveCount);
-                    SetData(DATA_PORTAL_LOCATION, (GetData(DATA_PORTAL_LOCATION) + urand(1, 5)) % 6);
-                    if (Creature* c = instance->GetCreature(NPC_SinclariGUID))
-                    {
-                        if (WaveCount % 6 != 0)
-                            c->SummonCreature(NPC_TELEPORTATION_PORTAL, PortalLocations[GetData(DATA_PORTAL_LOCATION)], TEMPSUMMON_CORPSE_DESPAWN);
-                        else if (WaveCount == 6 || WaveCount == 12) // first or second boss
-                        {
-                            if (!uiFirstBoss || !uiSecondBoss)
-                            {
-                                uiFirstBoss = urand(1, 6);
-                                do { uiSecondBoss = urand(1, 6); }
-                                while (uiFirstBoss == uiSecondBoss);
-                                SaveToDB();
-                            }
-                            c->SummonCreature(NPC_TELEPORTATION_PORTAL, MiddleRoomPortalSaboLocation, TEMPSUMMON_CORPSE_DESPAWN);
-                        }
-                        else // cyanigossa
-                        {
-                            if (Creature* cyanigosa = c->SummonCreature(NPC_CYANIGOSA, CyanigosasSpawnLocation, TEMPSUMMON_DEAD_DESPAWN))
-                            {
-                                cyanigosa->CastSpell(cyanigosa, SPELL_CYANIGOSA_BLUE_AURA, false);
-                                cyanigosa->AI()->Talk(CYANIGOSA_SAY_SPAWN);
-                                cyanigosa->GetMotionMaster()->MoveJump(MiddleRoomLocation.GetPositionX(), MiddleRoomLocation.GetPositionY(), MiddleRoomLocation.GetPositionZ(), 10.0f, 20.0f);
-                            }
-                            events.RescheduleEvent(EVENT_CYANIGOSSA_TRANSFORM, 10s);
-                        }
-                    }
-                    break;
-                case EVENT_CYANIGOSSA_TRANSFORM:
-                    if (Creature* c = instance->GetCreature(NPC_CyanigosaGUID))
-                    {
-                        c->RemoveAurasDueToSpell(SPELL_CYANIGOSA_BLUE_AURA);
-                        c->CastSpell(c, SPELL_CYANIGOSA_TRANSFORM, 0);
-                        events.RescheduleEvent(EVENT_CYANIGOSA_ATTACK, 2500ms);
-                    }
-                    break;
-                case EVENT_CYANIGOSA_ATTACK:
-                    if (Creature* c = instance->GetCreature(NPC_CyanigosaGUID))
-                    {
-                        c->RemoveUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-                        c->SetImmuneToNPC(false);
-                    }
-                    break;
-            }
-        }
-
-        void OnPlayerEnter(Player* plr) override
-        {
-            if (DoNeedCleanup(plr->IsAlive()))
-                InstanceCleanup();
-
-            if (EncounterStatus == IN_PROGRESS)
-            {
-                plr->SendUpdateWorldState(WORLD_STATE_VH_SHOW, 1);
-                plr->SendUpdateWorldState(WORLD_STATE_VH_PRISON_STATE, (uint32)GateHealth);
-                plr->SendUpdateWorldState(WORLD_STATE_VH_WAVE_COUNT, (uint32)WaveCount);
-            }
-            else
-                plr->SendUpdateWorldState(WORLD_STATE_VH_SHOW, 0);
-
-            events.RescheduleEvent(EVENT_CHECK_PLAYERS, 5s);
-        }
-
-        bool DoNeedCleanup(bool enter)
-        {
-            uint8 aliveCount = 0;
-            Map::PlayerList const& pl = instance->GetPlayers();
-            for( Map::PlayerList::const_iterator itr = pl.begin(); itr != pl.end(); ++itr )
-                if (Player* plr = itr->GetSource())
-                    if (plr->IsAlive() && !plr->IsGameMaster() && !plr->HasAura(27827)/*spirit of redemption aura*/ )
-                        ++aliveCount;
-
-            bool need = enter ? aliveCount <= 1 : aliveCount == 0;
-            if (!need && CLEANED)
-                CLEANED = false;
-            return need;
-        }
-
-        void InstanceCleanup()
-        {
-            if (CLEANED)
-                return;
-            CLEANED = true;
-
-            // reset defense crystals
-            for (ObjectGuid const& guid : GO_ActivationCrystalGUID)
-                if (GameObject* go = instance->GetGameObject(guid))
+                switch (creature->GetEntry())
                 {
-                    HandleGameObject(ObjectGuid::Empty, false, go); // not used yet
-                    go->SetGameObjectFlag(GO_FLAG_NOT_SELECTABLE); // not useable at the beginning
+                    case NPC_EREKEM_GUARD:
+                        for (uint8 i = 0; i < ErekemGuardCount; ++i)
+                            if (ErekemGuardGUIDs[i].IsEmpty())
+                            {
+                                ErekemGuardGUIDs[i] = creature->GetGUID();
+                                break;
+                            }
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            void OnCreatureRemove(Creature* creature) override
+            {
+                InstanceScript::OnCreatureRemove(creature);
+
+                switch (creature->GetEntry())
+                {
+                    case NPC_EREKEM_GUARD:
+                        for (uint8 i = 0; i < ErekemGuardCount; ++i)
+                            if (ErekemGuardGUIDs[i] == creature->GetGUID())
+                            {
+                                ErekemGuardGUIDs[i].Clear();
+                                break;
+                            }
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            void OnGameObjectCreate(GameObject* go) override
+            {
+                InstanceScript::OnGameObjectCreate(go);
+
+                switch (go->GetEntry())
+                {
+                    case GO_ACTIVATION_CRYSTAL:
+                        for (uint8 i = 0; i < ActivationCrystalCount; ++i)
+                            if (ActivationCrystalGUIDs[i].IsEmpty())
+                            {
+                                ActivationCrystalGUIDs[i] = go->GetGUID();
+                                break;
+                            }
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            void OnGameObjectRemove(GameObject* go) override
+            {
+                InstanceScript::OnGameObjectRemove(go);
+
+                switch (go->GetEntry())
+                {
+                    case GO_ACTIVATION_CRYSTAL:
+                        for (uint8 i = 0; i < ActivationCrystalCount; ++i)
+                            if (ActivationCrystalGUIDs[i] == go->GetGUID())
+                            {
+                                ActivationCrystalGUIDs[i].Clear();
+                                break;
+                            }
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            bool CheckRequiredBosses(uint32 bossId, Player const* player = nullptr) const override
+            {
+                if (_SkipCheckRequiredBosses(player))
+                    return true;
+
+                switch (bossId)
+                {
+                    case DATA_MORAGG:
+                    case DATA_EREKEM:
+                    case DATA_ICHORON:
+                    case DATA_LAVANTHOR:
+                    case DATA_XEVOZZ:
+                    case DATA_ZURAMAT:
+                        /// old code used cell door state to check this
+                        if (!(WaveCount == 6 && FirstBossId == bossId) && !(WaveCount == 12 && SecondBossId == bossId))
+                            return false;
+                        break;
+                    case DATA_CYANIGOSA:
+                        if (WaveCount < 18)
+                            return false;
+                        break;
+                    default:
+                        break;
                 }
 
-            // reset positions of Sinclari and Guards
-            if (Creature* c = instance->GetCreature(NPC_SinclariGUID)) { c->DespawnOrUnsummon(); c->SetRespawnTime(3); }
-            for (uint8 i = 0; i < 4; ++i)
-                if (Creature* c = instance->GetCreature(NPC_GuardGUID[i]))
+                return true;
+            }
+
+            bool SetBossState(uint32 type, EncounterState state) override
+            {
+                if (!InstanceScript::SetBossState(type, state))
+                    return false;
+
+                switch (type)
                 {
-                    c->DespawnOrUnsummon();
-                    c->SetRespawnTime(3);
-                    if (m_auiEncounter[MAX_ENCOUNTER - 1] == DONE)
-                        c->SetVisible(false);
-                    else
-                        c->SetVisible(true);
-                    c->SetReactState(REACT_AGGRESSIVE);
+                    case DATA_CYANIGOSA:
+                        if (state == DONE)
+                            SetData(DATA_MAIN_EVENT_STATE, DONE);
+                        break;
+                    case DATA_MORAGG:
+                    case DATA_EREKEM:
+                    case DATA_ICHORON:
+                    case DATA_LAVANTHOR:
+                    case DATA_XEVOZZ:
+                    case DATA_ZURAMAT:
+                        // this won't work correctly because bossstate was initializd with TO_BE_DECIDED
+                        if (WaveCount == 6)
+                            SetBossState(DATA_1ST_BOSS, state);
+                        else if (WaveCount == 12)
+                            SetBossState(DATA_2ND_BOSS, state);
+
+                        if (state == DONE)
+                            SetData(DATA_WAVE_COUNT, WaveCount + 1);
+                        break;
+                    default:
+                        break;
                 }
 
-            // remove portal if any
-            if (Creature* c = instance->GetCreature(NPC_PortalGUID))
-                c->DespawnOrUnsummon();
-            NPC_PortalGUID.Clear();
-
-            // remove trash
-            for (ObjectGuid const& guid : trashMobs)
-                if (Creature* c = instance->GetCreature(guid))
-                    c->DespawnOrUnsummon();
-
-            trashMobs.clear();
-
-            // clear door seal damaging auras:
-            if (Creature* c = instance->GetCreature(NPC_DoorSealGUID))
-                c->RemoveAllAuras();
-
-            // open main gate
-            HandleGameObject(GO_MainGateGUID, true);
-
-            if (m_auiEncounter[MAX_ENCOUNTER - 1] != DONE) // instance not finished
-            {
-                // close all cells
-                HandleGameObject(GO_MoraggCellGUID, false);
-                HandleGameObject(GO_ErekemCellGUID, false);
-                HandleGameObject(GO_ErekemRightGuardCellGUID, false);
-                HandleGameObject(GO_ErekemLeftGuardCellGUID, false);
-                HandleGameObject(GO_IchoronCellGUID, false);
-                HandleGameObject(GO_LavanthorCellGUID, false);
-                HandleGameObject(GO_XevozzCellGUID, false);
-                HandleGameObject(GO_ZuramatCellGUID, false);
-
-                // respawn bosses
-                if (Creature* c = instance->GetCreature(NPC_MoraggGUID)) { c->DespawnOrUnsummon(); c->SetRespawnTime(3); c->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE); c->SetImmuneToNPC(true); }
-                if (Creature* c = instance->GetCreature(NPC_MoraggGUID)) { c->DespawnOrUnsummon(); c->SetRespawnTime(3); c->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE); c->SetImmuneToNPC(true); }
-                if (Creature* c = instance->GetCreature(NPC_ErekemGUID)) { c->DespawnOrUnsummon(); c->SetRespawnTime(3); c->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE); c->SetImmuneToNPC(true); }
-                if (Creature* c = instance->GetCreature(NPC_ErekemGuardGUID[0])) { c->DespawnOrUnsummon(); c->SetRespawnTime(3); c->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE); c->SetImmuneToNPC(true); }
-                if (Creature* c = instance->GetCreature(NPC_ErekemGuardGUID[1])) { c->DespawnOrUnsummon(); c->SetRespawnTime(3); c->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE); c->SetImmuneToNPC(true); }
-                if (Creature* c = instance->GetCreature(NPC_IchoronGUID)) { c->DespawnOrUnsummon(); c->SetRespawnTime(3); c->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE); c->SetImmuneToNPC(true); }
-                if (Creature* c = instance->GetCreature(NPC_LavanthorGUID)) { c->DespawnOrUnsummon(); c->SetRespawnTime(3); c->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE); c->SetImmuneToNPC(true); }
-                if (Creature* c = instance->GetCreature(NPC_XevozzGUID)) { c->DespawnOrUnsummon(); c->SetRespawnTime(3); c->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE); c->SetImmuneToNPC(true); }
-                if (Creature* c = instance->GetCreature(NPC_ZuramatGUID)) { c->DespawnOrUnsummon(); c->SetRespawnTime(3); c->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE); c->SetImmuneToNPC(true); }
-                if (Creature* c = instance->GetCreature(NPC_CyanigosaGUID)) { c->DespawnOrUnsummon(); }
+                return true;
             }
 
-            // reinitialize variables and events
-            DoUpdateWorldState(WORLD_STATE_VH_SHOW, 0);
-            EncounterStatus = NOT_STARTED;
-            GateHealth = 100;
-            WaveCount = 0;
-            bDefensesUsed = false;
-            if (m_auiEncounter[MAX_ENCOUNTER - 1] == DONE)
-                EncounterStatus = DONE;
-            events.Reset();
-            events.RescheduleEvent(EVENT_CHECK_PLAYERS, 5s);
-        }
-
-        bool CheckAchievementCriteriaMeet(uint32 criteria_id, Player const*  /*source*/, Unit const*  /*target*/, uint32  /*miscvalue1*/) override
-        {
-            switch (criteria_id)
+            void SetData(uint32 type, uint32 data) override
             {
-                case CRITERIA_DEFENSELESS:
-                    return GateHealth == 100 && !bDefensesUsed;
-                case CRITERIA_A_VOID_DANCE:
-                case CRITERIA_DEHYDRATION:
-                    return bAchiev;
+                switch (type)
+                {
+                    case DATA_WAVE_COUNT:
+                        WaveCount = data;
+                        if (WaveCount)
+                        {
+                            Scheduler.Schedule(Seconds(IsBossWave(WaveCount - 1) ? 45 : 5), [this](TaskContext /*task*/)
+                            {
+                                AddWave();
+                            });
+                        }
+                        break;
+                    case DATA_DOOR_INTEGRITY:
+                        DoorIntegrity = data;
+                        Defenseless = false;
+                        DoUpdateWorldState(WORLD_STATE_VH_PRISON_STATE, DoorIntegrity);
+                        break;
+                    case DATA_START_BOSS_ENCOUNTER:
+                        switch (WaveCount)
+                        {
+                            case 6:
+                                StartBossEncounter(FirstBossId);
+                                break;
+                            case 12:
+                                StartBossEncounter(SecondBossId);
+                                break;
+                        }
+                        break;
+                    case DATA_MAIN_EVENT_STATE:
+                        EventState = data;
+                        if (data == IN_PROGRESS) // Start event
+                        {
+                            DoUpdateWorldState(WORLD_STATE_VH_WAVE_COUNT, WaveCount);
+                            DoUpdateWorldState(WORLD_STATE_VH_PRISON_STATE, DoorIntegrity);
+                            DoUpdateWorldState(WORLD_STATE_VH_SHOW, 1);
+
+                            WaveCount = 1;
+                            Scheduler.Async([this]
+                            {
+                                AddWave();
+                            });
+
+                            for (uint8 i = 0; i < ActivationCrystalCount; ++i)
+                                if (GameObject* crystal = instance->GetGameObject(ActivationCrystalGUIDs[i]))
+                                    crystal->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
+
+                            Scheduler.Schedule(Seconds(3), [this](TaskContext task)
+                            {
+                                CheckEventState();
+                                task.Repeat(Seconds(3));
+                            });
+                        }
+                        else if (data == NOT_STARTED)
+                        {
+                            if (GameObject* mainDoor = GetGameObject(DATA_MAIN_DOOR))
+                            {
+                                mainDoor->SetGoState(GO_STATE_ACTIVE);
+                                mainDoor->RemoveFlag(GO_FLAG_LOCKED);
+                            }
+
+                            DoUpdateWorldState(WORLD_STATE_VH_SHOW, 0);
+                            DoUpdateWorldState(WORLD_STATE_VH_WAVE_COUNT, WaveCount);
+                            DoUpdateWorldState(WORLD_STATE_VH_PRISON_STATE, DoorIntegrity);
+
+                            for (uint8 i = 0; i < ActivationCrystalCount; ++i)
+                                if (GameObject* crystal = instance->GetGameObject(ActivationCrystalGUIDs[i]))
+                                    crystal->SetFlag(GO_FLAG_NOT_SELECTABLE);
+                        }
+                        else if (data == DONE)
+                        {
+                            if (GameObject* mainDoor = GetGameObject(DATA_MAIN_DOOR))
+                            {
+                                mainDoor->SetGoState(GO_STATE_ACTIVE);
+                                mainDoor->RemoveFlag(GO_FLAG_LOCKED);
+                            }
+
+                            DoUpdateWorldState(WORLD_STATE_VH_SHOW, 0);
+
+                            for (uint8 i = 0; i < ActivationCrystalCount; ++i)
+                                if (GameObject* crystal = instance->GetGameObject(ActivationCrystalGUIDs[i]))
+                                    crystal->SetFlag(GO_FLAG_NOT_SELECTABLE);
+
+                            if (Creature* sinclari = GetCreature(DATA_SINCLARI))
+                                sinclari->AI()->DoAction(ACTION_SINCLARI_OUTRO);
+                        }
+                        break;
+                    case DATA_HANDLE_CELLS:
+                        HandleCells(data, false);
+                        break;
+                }
             }
-            return false;
-        }
 
-        void ReadSaveDataMore(std::istringstream& data) override
+            uint32 GetData(uint32 type) const override
+            {
+                switch (type)
+                {
+                    case DATA_1ST_BOSS:
+                        return FirstBossId;
+                    case DATA_2ND_BOSS:
+                        return SecondBossId;
+                    case DATA_MAIN_EVENT_STATE:
+                        return EventState;
+                    case DATA_WAVE_COUNT:
+                        return WaveCount;
+                    case DATA_DOOR_INTEGRITY:
+                        return DoorIntegrity;
+                    case DATA_DEFENSELESS:
+                        return Defenseless ? 1 : 0;
+                    default:
+                        break;
+                }
+
+                return 0;
+            }
+
+            ObjectGuid GetGuidData(uint32 type) const override
+            {
+                switch (type)
+                {
+                    case DATA_EREKEM_GUARD_1:
+                    case DATA_EREKEM_GUARD_2:
+                        return ErekemGuardGUIDs[type - DATA_EREKEM_GUARD_1];
+                    default:
+                        break;
+                }
+
+                return InstanceScript::GetGuidData(type);
+            }
+
+            void SpawnPortal()
+            {
+                LastPortalLocation = (LastPortalLocation + urand(1, EncouterPortalsCount - 1)) % (EncouterPortalsCount);
+                if (Creature* sinclari = GetCreature(DATA_SINCLARI))
+                {
+                    if (LastPortalLocation < PortalPositionsSize)
+                    {
+                        if (Creature* portal = sinclari->SummonCreature(NPC_TELEPORTATION_PORTAL, PortalPositions[LastPortalLocation], TEMPSUMMON_CORPSE_DESPAWN))
+                            portal->AI()->SetData(DATA_PORTAL_LOCATION, LastPortalLocation);
+                    }
+                    else
+                    {
+                        if (Creature* portal = sinclari->SummonCreature(NPC_TELEPORTATION_PORTAL_ELITE, PortalElitePositions[LastPortalLocation - PortalPositionsSize], TEMPSUMMON_CORPSE_DESPAWN))
+                            portal->AI()->SetData(DATA_PORTAL_LOCATION, LastPortalLocation);
+                    }
+                }
+            }
+
+            void HandleCells(uint8 bossId, bool open = true)
+            {
+                switch (bossId)
+                {
+                    case DATA_MORAGG:
+                        HandleGameObject(GetObjectGuid(DATA_MORAGG_CELL), open);
+                        break;
+                    case DATA_EREKEM:
+                        HandleGameObject(GetObjectGuid(DATA_EREKEM_CELL), open);
+                        HandleGameObject(GetObjectGuid(DATA_EREKEM_LEFT_GUARD_CELL), open);
+                        HandleGameObject(GetObjectGuid(DATA_EREKEM_RIGHT_GUARD_CELL), open);
+                        break;
+                    case DATA_ICHORON:
+                        HandleGameObject(GetObjectGuid(DATA_ICHORON_CELL), open);
+                        break;
+                    case DATA_LAVANTHOR:
+                        HandleGameObject(GetObjectGuid(DATA_LAVANTHOR_CELL), open);
+                        break;
+                    case DATA_XEVOZZ:
+                        HandleGameObject(GetObjectGuid(DATA_XEVOZZ_CELL), open);
+                        break;
+                    case DATA_ZURAMAT:
+                        HandleGameObject(GetObjectGuid(DATA_ZURAMAT_CELL), open);
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            void StartBossEncounter(uint8 bossId)
+            {
+                switch (bossId)
+                {
+                    case DATA_MORAGG:
+                        Scheduler.Schedule(Seconds(2), [this](TaskContext task)
+                        {
+                            if (Creature* moragg = GetCreature(DATA_MORAGG))
+                            {
+                                moragg->PlayDirectSound(SOUND_MORAGG_SPAWN);
+                                moragg->CastSpell(moragg, SPELL_MORAGG_EMOTE_ROAR);
+                            }
+
+                            task.Schedule(Seconds(3), [this](TaskContext task)
+                            {
+                                if (Creature* moragg = GetCreature(DATA_MORAGG))
+                                    moragg->GetMotionMaster()->MoveSmoothPath(POINT_INTRO, MoraggPath, MoraggPathSize, true);
+
+                                task.Schedule(Seconds(8), [this](TaskContext /*task*/)
+                                {
+                                    if (Creature* moragg = GetCreature(DATA_MORAGG))
+                                    {
+                                        moragg->SetImmuneToAll(false);
+                                        moragg->AI()->DoZoneInCombat(moragg);
+                                    }
+                                });
+                            });
+                        });
+                        break;
+                    case DATA_EREKEM:
+                        Scheduler.Schedule(Seconds(3), [this](TaskContext task)
+                        {
+                            if (Creature* erekem = GetCreature(DATA_EREKEM))
+                                erekem->AI()->Talk(SAY_EREKEM_SPAWN);
+
+                            task.Schedule(Seconds(5), [this](TaskContext task)
+                            {
+                                if (Creature* erekem = GetCreature(DATA_EREKEM))
+                                    erekem->GetMotionMaster()->MoveSmoothPath(POINT_INTRO, ErekemPath, ErekemPathSize, true);
+
+                                if (Creature* guard = instance->GetCreature(GetGuidData(DATA_EREKEM_GUARD_1)))
+                                    guard->GetMotionMaster()->MoveSmoothPath(POINT_INTRO, ErekemGuardLeftPath, ErekemGuardLeftPathSize, true);
+                                if (Creature* guard = instance->GetCreature(GetGuidData(DATA_EREKEM_GUARD_2)))
+                                    guard->GetMotionMaster()->MoveSmoothPath(POINT_INTRO, ErekemGuardRightPath, ErekemGuardRightPathSize, true);
+
+                                task.Schedule(Seconds(6), [this](TaskContext task)
+                                {
+                                    if (Creature* erekem = GetCreature(DATA_EREKEM))
+                                        erekem->HandleEmoteCommand(EMOTE_ONESHOT_ROAR);
+
+                                    task.Schedule(Seconds(1), [this](TaskContext /*task*/)
+                                    {
+                                        for (uint32 i = DATA_EREKEM_GUARD_1; i <= DATA_EREKEM_GUARD_2; ++i)
+                                        {
+                                            if (Creature* guard = instance->GetCreature(GetGuidData(i)))
+                                                guard->SetImmuneToAll(false);
+                                        }
+
+                                        if (Creature* erekem = GetCreature(DATA_EREKEM))
+                                        {
+                                            erekem->SetImmuneToAll(false);
+                                            erekem->AI()->DoZoneInCombat(erekem);
+                                        }
+                                    });
+                                });
+                            });
+                        });
+                        break;
+                    case DATA_ICHORON:
+                        Scheduler.Schedule(Seconds(2), [this](TaskContext task)
+                        {
+                            if (Creature* ichoron = GetCreature(DATA_ICHORON))
+                                ichoron->AI()->Talk(SAY_ICHORON_SPAWN);
+
+                            task.Schedule(Seconds(3), [this](TaskContext task)
+                            {
+                                if (Creature* ichoron = GetCreature(DATA_ICHORON))
+                                    ichoron->GetMotionMaster()->MoveSmoothPath(POINT_INTRO, IchoronPath, IchoronPathSize, true);
+
+                                task.Schedule(Seconds(14), [this](TaskContext /*task*/)
+                                {
+                                    if (Creature* ichoron = GetCreature(DATA_ICHORON))
+                                    {
+                                        ichoron->SetImmuneToAll(false);
+                                        ichoron->AI()->DoZoneInCombat(ichoron);
+                                    }
+                                });
+                            });
+                        });
+                        break;
+                    case DATA_LAVANTHOR:
+                        Scheduler.Schedule(Seconds(1), [this](TaskContext task)
+                        {
+                            if (Creature* lavanthor = GetCreature(DATA_LAVANTHOR))
+                                lavanthor->CastSpell(lavanthor, SPELL_LAVANTHOR_SPECIAL_UNARMED);
+
+                            task.Schedule(Seconds(3), [this](TaskContext task)
+                            {
+                                if (Creature* lavanthor = GetCreature(DATA_LAVANTHOR))
+                                    lavanthor->GetMotionMaster()->MoveSmoothPath(POINT_INTRO, LavanthorPath, LavanthorPathSize, true);
+
+                                task.Schedule(Seconds(8), [this](TaskContext /*task*/)
+                                {
+                                    if (Creature* lavanthor = GetCreature(DATA_LAVANTHOR))
+                                    {
+                                        lavanthor->SetImmuneToAll(false);
+                                        lavanthor->AI()->DoZoneInCombat(lavanthor);
+                                    }
+                                });
+                            });
+                        });
+                        break;
+                    case DATA_XEVOZZ:
+                        Scheduler.Schedule(Seconds(2), [this](TaskContext task)
+                        {
+                            if (Creature* xevozz = GetCreature(DATA_XEVOZZ))
+                                xevozz->AI()->Talk(SAY_XEVOZZ_SPAWN);
+
+                            task.Schedule(Seconds(3), [this](TaskContext task)
+                            {
+                                if (Creature* xevozz = GetCreature(DATA_XEVOZZ))
+                                    xevozz->HandleEmoteCommand(EMOTE_ONESHOT_TALK_NO_SHEATHE);
+
+                                task.Schedule(Seconds(4), [this](TaskContext task)
+                                {
+                                    if (Creature* xevozz = GetCreature(DATA_XEVOZZ))
+                                        xevozz->GetMotionMaster()->MoveSmoothPath(POINT_INTRO, XevozzPath, XevozzPathSize, true);
+
+                                    task.Schedule(Seconds(4), [this](TaskContext /*task*/)
+                                    {
+                                        if (Creature* xevozz = GetCreature(DATA_XEVOZZ))
+                                        {
+                                            xevozz->SetImmuneToAll(false);
+                                            xevozz->AI()->DoZoneInCombat(xevozz);
+                                        }
+                                    });
+                                });
+                            });
+                        });
+                        break;
+                    case DATA_ZURAMAT:
+                        Scheduler.Schedule(Seconds(2), [this](TaskContext task)
+                        {
+                            if (Creature* zuramat = GetCreature(DATA_ZURAMAT))
+                            {
+                                zuramat->CastSpell(zuramat, SPELL_ZURAMAT_COSMETIC_CHANNEL_OMNI);
+                                zuramat->AI()->Talk(SAY_ZURAMAT_SPAWN);
+                            }
+
+                            task.Schedule(Seconds(6), [this](TaskContext task)
+                            {
+                                if (Creature* zuramat = GetCreature(DATA_ZURAMAT))
+                                    zuramat->GetMotionMaster()->MoveSmoothPath(POINT_INTRO, ZuramatPath, ZuramatPathSize, true);
+
+                                task.Schedule(Seconds(4), [this](TaskContext /*task*/)
+                                {
+                                    if (Creature* zuramat = GetCreature(DATA_ZURAMAT))
+                                    {
+                                        zuramat->SetImmuneToAll(false);
+                                        zuramat->AI()->DoZoneInCombat(zuramat);
+                                    }
+                                });
+                            });
+                        });
+                        break;
+                    default:
+                        return;
+                }
+
+                HandleCells(bossId);
+            }
+
+            void ResetBossEncounter(uint8 bossId)
+            {
+                if (bossId < DATA_CYANIGOSA || bossId > DATA_ZURAMAT)
+                    return;
+
+                Creature* boss = GetCreature(bossId);
+                if (!boss)
+                    return;
+
+                switch (bossId)
+                {
+                    case DATA_CYANIGOSA:
+                        boss->DespawnOrUnsummon();
+                        break;
+                    case DATA_EREKEM:
+                        for (uint32 i = DATA_EREKEM_GUARD_1; i <= DATA_EREKEM_GUARD_2; ++i)
+                        {
+                            if (Creature* guard = instance->GetCreature(GetGuidData(i)))
+                            {
+                                if (guard->isDead())
+                                    guard->Respawn();
+
+                                if (GetBossState(bossId) == DONE)
+                                    UpdateKilledBoss(guard);
+
+                                guard->GetMotionMaster()->MoveTargetedHome();
+                                guard->SetImmuneToAll(true);
+                            }
+                        }
+                        [[fallthrough]];
+                    default:
+                        if (boss->isDead())
+                        {
+                            // respawn and update to a placeholder npc to avoid be looted again
+                            boss->Respawn();
+                            UpdateKilledBoss(boss);
+                        }
+
+                        boss->GetMotionMaster()->MoveTargetedHome();
+                        boss->SetImmuneToAll(true);
+                        break;
+                }
+            }
+
+            void AddWave()
+            {
+                DoUpdateWorldState(WORLD_STATE_VH_WAVE_COUNT, WaveCount);
+
+                switch (WaveCount)
+                {
+                    case 6:
+                        if (FirstBossId == 0)
+                            FirstBossId = urand(DATA_MORAGG, DATA_ZURAMAT);
+                        if (Creature* sinclari = GetCreature(DATA_SINCLARI))
+                        {
+                            sinclari->SummonCreature(NPC_TELEPORTATION_PORTAL_INTRO, PortalIntroPositions[3], TEMPSUMMON_TIMED_DESPAWN, 3s);
+                            sinclari->SummonCreature(NPC_SABOTEOUR, SaboteurSpawnLocation, TEMPSUMMON_DEAD_DESPAWN);
+                        }
+                        break;
+                    case 12:
+                        if (SecondBossId == 0)
+                            do
+                            {
+                                SecondBossId = urand(DATA_MORAGG, DATA_ZURAMAT);
+                            } while (SecondBossId == FirstBossId);
+                        if (Creature* sinclari = GetCreature(DATA_SINCLARI))
+                        {
+                            sinclari->SummonCreature(NPC_TELEPORTATION_PORTAL_INTRO, PortalIntroPositions[3], TEMPSUMMON_TIMED_DESPAWN, 3s);
+                            sinclari->SummonCreature(NPC_SABOTEOUR, SaboteurSpawnLocation, TEMPSUMMON_DEAD_DESPAWN);
+                        }
+                        break;
+                    case 18:
+                        if (Creature* sinclari = GetCreature(DATA_SINCLARI))
+                        {
+                            sinclari->SummonCreature(NPC_TELEPORTATION_PORTAL_INTRO, PortalIntroPositions[4], TEMPSUMMON_TIMED_DESPAWN, 6s);
+                            if (Creature* cyanigosa = sinclari->SummonCreature(NPC_CYANIGOSA, CyanigosaSpawnLocation, TEMPSUMMON_DEAD_DESPAWN))
+                                cyanigosa->CastSpell(cyanigosa, SPELL_CYANIGOSA_ARCANE_POWER_STATE, true);
+                            ScheduleCyanigosaIntro();
+                        }
+                        break;
+                    default:
+                        SpawnPortal();
+                        break;
+                }
+            }
+
+            bool CheckWipe() const
+            {
+                Map::PlayerList const& players = instance->GetPlayers();
+                for (Map::PlayerList::const_iterator itr = players.begin(); itr != players.end(); ++itr)
+                {
+                    Player* player = itr->GetSource();
+                    if (player->IsGameMaster())
+                        continue;
+
+                    if (player->IsAlive())
+                        return false;
+                }
+
+                return true;
+            }
+
+            void UpdateKilledBoss(Creature* boss)
+            {
+                switch (boss->GetEntry())
+                {
+                    case NPC_XEVOZZ:
+                        boss->UpdateEntry(NPC_DUMMY_XEVOZZ);
+                        break;
+                    case NPC_LAVANTHOR:
+                        boss->UpdateEntry(NPC_DUMMY_LAVANTHOR);
+                        break;
+                    case NPC_ICHORON:
+                        boss->UpdateEntry(NPC_DUMMY_ICHORON);
+                        break;
+                    case NPC_ZURAMAT:
+                        boss->UpdateEntry(NPC_DUMMY_ZURAMAT);
+                        break;
+                    case NPC_EREKEM:
+                        boss->UpdateEntry(NPC_DUMMY_EREKEM);
+                        break;
+                    case NPC_MORAGG:
+                        boss->UpdateEntry(NPC_DUMMY_MORAGG);
+                        break;
+                    case NPC_EREKEM_GUARD:
+                        boss->UpdateEntry(NPC_DUMMY_EREKEM_GUARD);
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            void Update(uint32 diff) override
+            {
+                // if we don't have any player in the instance
+                if (!instance->HavePlayers())
+                {
+                    if (EventState == IN_PROGRESS) // if event is in progress, mark as fail
+                    {
+                        EventState = FAIL;
+                        CheckEventState();
+                    }
+                    return;
+                }
+
+                Scheduler.Update(diff);
+
+                if (EventState == IN_PROGRESS)
+                {
+                    // if door is destroyed, event is failed
+                    if (!GetData(DATA_DOOR_INTEGRITY))
+                        EventState = FAIL;
+                }
+            }
+
+            void CheckEventState()
+            {
+                // if main event is in progress and players have wiped then reset instance
+                if ((EventState == IN_PROGRESS && CheckWipe()) || EventState == FAIL)
+                {
+                    ResetBossEncounter(FirstBossId);
+                    ResetBossEncounter(SecondBossId);
+                    ResetBossEncounter(DATA_CYANIGOSA);
+
+                    WaveCount = 0;
+                    DoorIntegrity = 100;
+                    Defenseless = true;
+                    SetData(DATA_MAIN_EVENT_STATE, NOT_STARTED);
+
+                    Scheduler.CancelAll();
+
+                    if (Creature* sinclari = GetCreature(DATA_SINCLARI))
+                        sinclari->AI()->EnterEvadeMode();
+                }
+            }
+
+            void ScheduleCyanigosaIntro()
+            {
+                Scheduler.Schedule(Seconds(2), [this](TaskContext task)
+                {
+                    if (Creature* cyanigosa = GetCreature(DATA_CYANIGOSA))
+                        cyanigosa->AI()->Talk(SAY_CYANIGOSA_SPAWN);
+
+                    task.Schedule(Seconds(6), [this](TaskContext task)
+                    {
+                        if (Creature* cyanigosa = GetCreature(DATA_CYANIGOSA))
+                            cyanigosa->GetMotionMaster()->MoveJump(CyanigosaJumpLocation, 10.0f, 27.44744f);
+
+                        task.Schedule(Seconds(7), [this](TaskContext /*task*/)
+                        {
+                            if (Creature* cyanigosa = GetCreature(DATA_CYANIGOSA))
+                            {
+                                cyanigosa->RemoveAurasDueToSpell(SPELL_CYANIGOSA_ARCANE_POWER_STATE);
+                                cyanigosa->CastSpell(cyanigosa, SPELL_CYANIGOSA_TRANSFORM, true);
+                                cyanigosa->SetImmuneToAll(false);
+                            }
+                        });
+                    });
+                });
+            }
+
+            void ProcessEvent(WorldObject* /*go*/, uint32 eventId, WorldObject* /*invoker*/) override
+            {
+                if (eventId == EVENT_ACTIVATE_CRYSTAL)
+                {
+                    instance->SummonCreature(NPC_DEFENSE_SYSTEM, DefenseSystemLocation);
+                    Defenseless = false;
+                }
+            }
+
+            static bool IsBossWave(uint8 wave)
+            {
+                return wave && ((wave % 6) == 0);
+            }
+
+        protected:
+            TaskScheduler Scheduler;
+
+            static uint8 const ErekemGuardCount = 2;
+            ObjectGuid ErekemGuardGUIDs[ErekemGuardCount];
+
+            static uint8 const ActivationCrystalCount = 5;
+            ObjectGuid ActivationCrystalGUIDs[ActivationCrystalCount];
+
+            PersistentInstanceScriptValue<uint32> FirstBossId;
+            PersistentInstanceScriptValue<uint32> SecondBossId;
+
+            uint8 DoorIntegrity;
+            uint8 WaveCount;
+            uint8 EventState;
+            uint8 LastPortalLocation;
+
+            bool Defenseless;
+        };
+
+        InstanceScript* GetInstanceScript(InstanceMap* map) const override
         {
-            EncounterStatus = NOT_STARTED;
-            CLEANED = false;
-            events.Reset();
-            events.RescheduleEvent(EVENT_CHECK_PLAYERS, 0);
-
-            data >> m_auiEncounter[0];
-            data >> m_auiEncounter[1];
-            data >> m_auiEncounter[2];
-            data >> uiFirstBoss;
+            return new instance_violet_hold_InstanceMapScript(map);
         }
-
-        void WriteSaveDataMore(std::ostringstream& data) override
-        {
-            data << m_auiEncounter[0] << ' '
-                << m_auiEncounter[1] << ' '
-                << m_auiEncounter[2] << ' '
-                << uiFirstBoss << ' '
-                << uiSecondBoss << ' ';
-        }
-    };
 };
 
 void AddSC_instance_violet_hold()

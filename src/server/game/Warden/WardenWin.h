@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -18,15 +18,13 @@
 #ifndef _WARDEN_WIN_H
 #define _WARDEN_WIN_H
 
-#include "ByteBuffer.h"
+#include "Cryptography/ARC4.h"
+#include "Cryptography/BigNumber.h"
 #include "Warden.h"
-#include <list>
+#include <array>
+#include <utility>
 
-#if defined(__GNUC__)
-#pragma pack(1)
-#else
-#pragma pack(push,1)
-#endif
+#pragma pack(push, 1)
 
 struct WardenInitModuleRequest
 {
@@ -57,38 +55,32 @@ struct WardenInitModuleRequest
     uint32 Function3;
     uint8 Function3_set;
 };
+static_assert(sizeof(WardenInitModuleRequest) == (1 + 2 + 4 + 1 + 1 + 1 + 1 + (4 * 4) + 1 + 2 + 4 + 1 + 1 + 1 + 4 + 1 + 1 + 2 + 4 + 1 + 1 + 1 + 4 + 1));
 
-#if defined(__GNUC__)
-#pragma pack()
-#else
 #pragma pack(pop)
-#endif
 
 class WorldSession;
 class Warden;
 
-class WardenWin : public Warden
+class TC_GAME_API WardenWin : public Warden
 {
-public:
-    WardenWin();
-    ~WardenWin() override;
+    public:
+        WardenWin();
 
-    void Init(WorldSession* session, SessionKey const& K) override;
-    ClientWardenModule* GetModuleForClient() override;
-    void InitializeModule() override;
-    void RequestHash() override;
-    void HandleHashResult(ByteBuffer& buff) override;
-    void RequestChecks() override;
-    bool IsCheckInProgress() override;
-    void ForceChecks() override;
-    void HandleData(ByteBuffer& buff) override;
+        void Init(WorldSession* session, SessionKey const& K) override;
+        void InitializeModuleForClient(ClientWardenModule& module) override;
+        void InitializeModule() override;
+        void RequestHash() override;
+        void HandleHashResult(ByteBuffer &buff) override;
+        void RequestChecks() override;
+        void HandleCheckResult(ByteBuffer &buff) override;
 
-private:
-    uint32 _serverTicks;
-    std::list<uint16> _ChecksTodo[MAX_WARDEN_CHECK_TYPES];
+        size_t DEBUG_ForceSpecificChecks(std::vector<uint16> const& checks) override;
 
-    std::list<uint16> _CurrentChecks;
-    std::list<uint16> _PendingChecks;
+    private:
+        uint32 _serverTicks;
+        std::array<std::pair<std::vector<uint16>, std::vector<uint16>::const_iterator>, NUM_CHECK_CATEGORIES> _checks;
+        std::vector<uint16> _currentChecks;
 };
 
-#endif // _WARDEN_WIN_H
+#endif

@@ -1,14 +1,14 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -22,26 +22,26 @@
 #include <array>
 #include <openssl/evp.h>
 
-namespace Acore::Crypto
+namespace Trinity::Crypto
 {
-    class AC_COMMON_API ARC4
+    class TC_COMMON_API ARC4
     {
-    public:
-        ARC4();
-        ~ARC4();
+        public:
+            ARC4();
+            ~ARC4();
 
-        void Init(uint8 const* seed, std::size_t len);
+            void Init(uint8 const* seed, size_t len);
+            template <typename Container>
+            void Init(Container const& c) { Init(std::data(c), std::size(c)); }
 
-        template <typename Container>
-        void Init(Container const& c) { Init(std::data(c), std::size(c)); }
-
-        void UpdateData(uint8* data, std::size_t len);
-
-        template <typename Container>
-        void UpdateData(Container& c) { UpdateData(std::data(c), std::size(c)); }
-    private:
-        EVP_CIPHER* _cipher;
-        EVP_CIPHER_CTX* _ctx;
+            void UpdateData(uint8* data, size_t len);
+            template <typename Container>
+            void UpdateData(Container& c) { UpdateData(std::data(c), std::size(c)); }
+        private:
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+            EVP_CIPHER* _cipher;
+#endif
+            EVP_CIPHER_CTX* _ctx;
     };
 }
 
