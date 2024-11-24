@@ -31,6 +31,7 @@ class Player;
 
 #define MIN_AUCTION_TIME (12*HOUR)
 #define MAX_AUCTION_ITEMS 160
+#define MAX_GETALL_RETURN 55000
 
 enum AuctionError
 {
@@ -162,7 +163,7 @@ public:
     bool BuildListAuctionItems(WorldPacket& data, Player* player,
                                std::wstring const& searchedname, uint32 listfrom, uint8 levelmin, uint8 levelmax, uint8 usable,
                                uint32 inventoryType, uint32 itemClass, uint32 itemSubClass, uint32 quality,
-                               uint32& count, uint32& totalcount, uint8 getAll, AuctionSortOrderVector const& sortOrder, Milliseconds searchTimeout);
+                               uint32& count, uint32& totalcount, bool getAll, AuctionSortOrderVector const& sortOrder, Milliseconds searchTimeout);
 
 private:
     AuctionEntryMap _auctionsMap;
