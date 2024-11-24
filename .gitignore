@@ -1,38 +1,5 @@
-#
-# AzerothCore
-#
 
-/conf/*
-!/conf/dist
-/modules/*
-!/modules/*.md
-!/modules/*.sh
-!/modules/CMakeLists.txt
-!/modules/*.h
-!/modules/*.cmake
-/build*/
-/var/*
-!/var/build/.gitkeep
-!/var/ccache/.gitkeep
-/env/dist/*
-!/env/dist/.gitkeep
-/env/user/*
-/.env*
-/apps/joiner
-/deps/deno
-/data/sql/custom/*
-/src/server/scripts/Custom/*
-!/src/server/scripts/Custom/README.md
-
-/*.override.yml
-/*.override.yaml
-
-!.gitkeep
-
-#
-#Generic
-#
-
+build*/
 .directory
 .mailmap
 *.orig
@@ -49,46 +16,10 @@ CMakeLists.txt.user
 *.BACKUP.*
 *.BASE.*
 *.LOCAL.*
-
-#
-# IDE & other software
-#
-/.settings/
-/.externalToolBuilders/*
-# exclude in all levels
-nbproject/
-.sync.ffs_db
-*.kate-swp
+nbproject/*
+.idea/*
 .browse.VC*
-.idea
+.vscode
 cmake-build-*/*
-coverage-report/
-
-#
-# Eclipse
-#
-*.pydevproject
-.metadata
-.gradle
-tmp/
-*.tmp
-*.swp
-*~.nib
-local.properties
-.settings/
-.loadpath
-.project
-.cproject
-
-
-# ==================
-#
-#  CUSTOM
-#
-#  put below your custom ignore rules
-#  for example , if you want to include a
-#  module directly in repositoryyou can do:
-#
-#  !modules/yourmodule
-#
-# ==================
+.vs
+*.user

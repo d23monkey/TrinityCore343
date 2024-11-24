@@ -1,58 +1,31 @@
-<!-- First of all, THANK YOU for your contribution. -->
+<!--- (**********************************)
+      (** Fill in the following fields **)
+      (**********************************) --->
 
-## Changes Proposed:
-<!-- If your pull request promotes complex changes that require a detailed explanation, please describe them in detail specifying what your solution is and what is it meant to address. -->
-This PR proposes changes to:
--  [ ] Core (units, players, creatures, game systems).
--  [ ] Scripts (bosses, spell scripts, creature scripts).
--  [ ] Database (SAI, creatures, etc).
+**Changes proposed:**
 
-## Issues Addressed:
-<!-- If your fix has a relating issue, link it below -->
-- Closes 
+-  
+-  
+-  
 
-## SOURCE:
-<!-- If you can, include a source that can strengthen your claim -->
-The changes have been validated through:
-- [ ] Live research (checked on live servers, e.g Classic WotLK, Retail, etc.)
-- [ ] Sniffs (remember to share them with the open source community!)
-- [ ] Video evidence, knowledge databases or other public sources (e.g forums, Wowhead, etc.)
-- [ ] The changes promoted by this pull request come partially or entirely from another project (cherry-pick). **Cherry-picks must be committed using the proper --author tag in order to be accepted, thus crediting the original authors, unless otherwise unable to be found**
+**Issues addressed:**
 
-## Tests Performed:
-<!-- Does it build without errors? Did you test in-game? What did you test? On which OS did you test? Describe any other tests performed -->
-This PR has been:
-- [ ] Tested in-game by the author.
-- [ ] Tested in-game by other community members/someone else other than the author/has been live on production servers.
-- [ ] This pull request requires further testing and may have edge cases to be tested.
+Closes #  (insert issue tracker number)
 
 
-## How to Test the Changes:
-<!-- Describe in a detailed step-by-step order how to test the changes -->
+**Tests performed:**
 
-- [ ] This pull request can be tested by following the reproduction steps provided in the linked issue
-- [ ] This pull request requires further testing. Provide steps to test your changes. If it requires any specific setup e.g multiple players please specify it as well.
+(Does it build, tested in-game, etc.)
 
-1.
-2.
-3.
 
-## Known Issues and TODO List:
-<!-- Is there anything else left to do after this PR? -->
+**Known issues and TODO list:** (add/remove lines as needed)
 
-- [ ]
-- [ ]
+- [ ] 
+- [ ] 
 
-<!-- If you intend to contribute repeatedly to our project, it is a good idea to join our discord channel. We set ranks for our contributors and give them access to special resources or knowledge: https://discord.com/invite/GyFvXpk7)
-     Do not remove the instructions below about testing, they will help users to test your PR -->
-## How to Test AzerothCore PRs
- 
-When a PR is ready to be tested, it will be marked as **[WAITING TO BE TESTED]**.
 
-You can help by testing PRs and writing your feedback here on the PR's page on GitHub. Follow the instructions here:
-
-http://www.azerothcore.org/wiki/How-to-test-a-PR
-
-**REMEMBER**: when testing a PR that changes something **generic** (i.e. a part of code that handles more than one specific thing), the tester should not only check that the PR does its job (e.g. fixing spell XXX) but **especially** check that the PR does not cause any regression (i.e. introducing new bugs).
-
-**For example**: if a PR fixes spell X by changing a part of code that handles spells X, Y, and Z, we should not only test X, but **we should test Y and Z as well**.
+<!--- Notes
+- Enable the setting "[√] Allow edits from maintainers." when creating your pull request.
+- If this PR only contains SQL files, open a new issue instead and post or link the SQL in the issue.
+- When adding new SQL files, name them 9999_99_99_99_db_name.sql to reduce the chance of possible merge conflicts.
+--->
