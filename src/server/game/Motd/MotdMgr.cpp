@@ -27,8 +27,22 @@
 
 namespace
 {
-    WorldPacket MotdPacket;
-    std::string FormattedMotd;
+    // Stores translated worldpackets
+    std::unordered_map<LocaleConstant, WorldPacket> MotdPackets;
+    // Stores the localized motd to prevent database queries
+    std::unordered_map<LocaleConstant, std::string> MotdMap;
+    // Dict to store all valid locales
+    std::unordered_map<std::string, LocaleConstant> localeMap = {
+        {"enUS", LOCALE_enUS},
+        {"deDE", LOCALE_deDE},
+        {"frFR", LOCALE_frFR},
+        {"koKR", LOCALE_koKR},
+        {"zhCN", LOCALE_zhCN},
+        {"zhTW", LOCALE_zhTW},
+        {"esES", LOCALE_esES},
+        {"esMX", LOCALE_esMX},
+        {"ruRU", LOCALE_ruRU}
+    };
 }
 
 MotdMgr* MotdMgr::instance()
@@ -37,69 +51,138 @@ MotdMgr* MotdMgr::instance()
     return &instance;
 }
 
-void MotdMgr::SetMotd(std::string motd)
+void MotdMgr::SetMotd(std::string motd, std::string locale)
 {
+    // Convert string locale to locale constant
+    LocaleConstant localeConstant = ConvertStringToLocaleConstant(locale);
+
     // scripts may change motd
-    sScriptMgr->OnMotdChange(motd);
+    sScriptMgr->OnMotdChange(motd, localeConstant);
 
-    WorldPacket data(SMSG_MOTD);                     // new in 2.0.1
-
-    std::vector<std::string_view> motdTokens = Acore::Tokenize(motd, '@', true);
-    data << uint32(motdTokens.size()); // line count
-
-    for (std::string_view token : motdTokens)
-        data << token;
-
-    MotdPacket = data;
-
-    if (!motdTokens.size())
-        return;
-
-    std::ostringstream oss;
-    std::copy(motdTokens.begin(), motdTokens.end() - 1, std::ostream_iterator<std::string_view>(oss, "\n"));
-    oss << *(motdTokens.end() - 1); // copy back element
-    FormattedMotd = oss.str();
+    MotdMap[localeConstant] = motd;
+    MotdPackets[localeConstant] = CreateWorldPacket(motd);
 }
 
+void MotdMgr::CreateWorldPackages()
+{
+    for (auto const& [locale, motd] : MotdMap)
+        // Store the constructed packet in MotdPackets with the locale as the key
+        MotdPackets[locale] = CreateWorldPacket(motd);
+}
 void MotdMgr::LoadMotd()
 {
-    uint32 oldMSTime = getMSTime();
-
     uint32 realmId = sConfigMgr->GetOption<int32>("RealmID", 0);
+
+    // Load the main motd for the realm and assign it to enUS if available
+    std::string motd = LoadDefaultMotd(realmId);
+
+    // Check if motd was loaded; if not, set default only for enUS
+    if (motd.empty())
+        SetDefaultMotd(motd);  // Only sets enUS default if motd is empty
+    else
+        MotdMap[LOCALE_enUS] = motd;  // Assign the loaded motd to enUS
+
+    // Load localized texts if available
+    LoadLocalizedMotds(realmId);
+
+    // Create all world packages after loading motd and localized texts
+    CreateWorldPackages();
+}
+
+char const* MotdMgr::GetMotd(LocaleConstant locale)
+{
+    // Return localized motd if available, otherwise fallback to enUS
+    auto it = MotdMap.find(locale);
+    if (it != MotdMap.end())
+        return it->second.c_str();
+
+    return MotdMap[LOCALE_enUS].c_str();  // Fallback to enUS if locale is not found
+}
+
+WorldPacket const* MotdMgr::GetMotdPacket(LocaleConstant locale)
+{
+    // Return localized packet if available, otherwise fallback to enUS
+    auto it = MotdPackets.find(locale);
+    if (it != MotdPackets.end())
+        return &it->second;
+
+    return &MotdPackets[LOCALE_enUS];  // Fallback to enUS if locale is not found
+}
+
+LocaleConstant MotdMgr::ConvertStringToLocaleConstant(const std::string& locale)
+{
+    auto it = localeMap.find(locale);
+    return (it != localeMap.end()) ? it->second : LOCALE_enUS; // Default fallback
+}
+
+bool MotdMgr::IsValidLocale(const std::string& locale)
+{
+    // Check if the locale exists in the keys of localeMap
+    return localeMap.find(locale) != localeMap.end();
+}
+
+std::string MotdMgr::LoadDefaultMotd(uint32 realmId)
+{
     LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_MOTD);
     stmt->SetData(0, realmId);
     PreparedQueryResult result = LoginDatabase.Query(stmt);
-    std::string motd;
 
     if (result)
     {
         Field* fields = result->Fetch();
-        motd = fields[0].Get<std::string>();
-    }
-    else
-    {
-        LOG_WARN("server.loading", ">> Loaded 0 motd definitions. DB table `motd` is empty for this realm!");
-        LOG_INFO("server.loading", " ");
+        return fields[0].Get<std::string>();  // Return the main motd if found
     }
 
-    motd = /* fctlsup << //0x338// "63"+"cx""d2"+"1e""dd"+"cx""ds"+"ce""dd"+"ce""7D"+ << */ motd
-        /*"d3"+"ce"*/ + "@|" + "cf" +/*"as"+"k4"*/"fF" + "F4" +/*"d5"+"f3"*/"A2" + "DT"/*"F4"+"Az"*/ + "hi" + "s "
-        /*"fd"+"hy"*/ + "se" + "rv" +/*"nh"+"k3"*/"er" + " r" +/*"x1"+"A2"*/"un" + "s "/*"F2"+"Ay"*/ + "on" + " Az"
-        /*"xs"+"5n"*/ + "er" + "ot" +/*"xs"+"A2"*/"hC" + "or" +/*"a4"+"f3"*/"e|" + "r "/*"f2"+"A2"*/ + "|c" + "ff"
-        /*"5g"+"A2"*/ + "3C" + "E7" +/*"k5"+"AX"*/"FF" + "ww" +/*"sx"+"Gj"*/"w." + "az"/*"a1"+"vf"*/ + "er" + "ot"
-        /*"ds"+"sx"*/ + "hc" + "or" +/*"F4"+"k5"*/"e." + "or" +/*"po"+"xs"*/"g|r"/*"F4"+"p2"+"o4"+"A2"+"i2"*/;;
-    MotdMgr::SetMotd(motd);
+    return ""; // Return empty string if no motd found
+}
 
-    LOG_INFO("server.loading", ">> Loaded Motd Definitions in {} ms", GetMSTimeDiffToNow(oldMSTime));
+void MotdMgr::SetDefaultMotd(std::string& motd)
+{
+    // Set a default motd text only for enUS if no motd is found
+    motd = "@|cffF4A2DThi server runs on Azeroth Core|cff3CE7FFwww.azerothcore.org|r";
+    MotdMap[LOCALE_enUS] = motd;
+
+    // Log that no motd was found and a default is being used for enUS
+    LOG_WARN("server.loading", ">> Loaded 0 motd definitions. DB table `motd` is empty for this realm!");
     LOG_INFO("server.loading", " ");
 }
 
-char const* MotdMgr::GetMotd()
-{
-    return FormattedMotd.c_str();
+void MotdMgr::LoadLocalizedMotds(uint32 realmId) {
+    LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_MOTD_LOCALE);
+    stmt->SetData(0, realmId);
+    PreparedQueryResult result = LoginDatabase.Query(stmt);
+
+    if (result)
+    {
+        do {
+            Field* fields = result->Fetch();
+
+            // fields[0] is the locale string and fields[1] is the localized motd text
+            std::string locale = fields[0].Get<std::string>();
+            std::string localizedText = fields[1].Get<std::string>();
+
+            // Convert locale string to LocaleConstant
+            LocaleConstant localeId = ConvertStringToLocaleConstant(locale);
+
+            // Insert the localeId and localizedText into MotdMap only for specific locales
+            MotdMap[localeId] = localizedText;
+
+        } while (result->NextRow()); // Move to the next row if available
+    }
 }
 
-WorldPacket const* MotdMgr::GetMotdPacket()
+WorldPacket MotdMgr::CreateWorldPacket(const std::string& motd)
 {
-    return &MotdPacket;
+    // Create a new WorldPacket for this locale
+    WorldPacket data(SMSG_MOTD); // new in 2.0.1
+
+    // Tokenize the motd string by '@'
+    std::vector<std::string_view> motdTokens = Acore::Tokenize(motd, '@', true);
+    data << uint32(motdTokens.size()); // line count
+
+    // Add each token to the packet
+    for (std::string_view token : motdTokens)
+        data << token;
+
+    return data;
 }
